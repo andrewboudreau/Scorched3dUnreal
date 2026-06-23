@@ -1,0 +1,51 @@
+# --- Legacy source checkout (research reference only, not part of this repo) ---
+.tmp/
+
+# --- Unreal Engine project ---
+# Build / intermediate / generated
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+*.VC.db
+*.opensdf
+*.sdf
+*.suo
+*.sln
+*.xcodeproj/
+*.xcworkspace/
+
+# Generated code & headers
+*.generated.h
+
+# Unreal autosaves / backups
+*.autosave
+Autosaves/
+
+# Plugin build artifacts
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Compiled binaries / libraries
+*.dll
+*.dylib
+*.so
+*.exe
+*.lib
+*.a
+*.app
+*.pdb
+*.obj
+*.o
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Crash / log files
+*.log
+Crashes/
