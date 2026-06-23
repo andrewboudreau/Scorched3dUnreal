@@ -138,34 +138,53 @@ ground mid-match) is the non-negotiable requirement — any candidate must suppo
 
 | Option | Digging style | Runtime crater? | Pros | Cons |
 |--------|---------------|-----------------|------|------|
-| **UE 5.8 Mesh Terrain** | True 3D mesh (caves, overhangs, tunnels) | ⚠️ **Undocumented** | First-party; richest authored maps; PCG + World Partition native | Experimental; editor-authoring-focused; runtime deformation API not documented; has a "compile" step |
+| **UE 5.8 Mesh Terrain** | True 3D mesh (caves, overhangs, tunnels) | ❌ **No** (source-confirmed) | First-party; richest authored maps; PCG + World Partition native | Editor-authoring-only; bakes to cooked sections; no runtime carve API |
+| **GeometryScript + DynamicMesh** | 3D mesh booleans (overhangs possible) | ✅ Yes | First-party, no paid dep; runtime `ApplyMeshBoolean`; MeshPartition depends on it | Per-actor meshes; large-scale streaming is DIY |
 | **Voxel Plugin 2** | True volumetric (caves, overhangs, tunnels) | ✅ Yes | Proven runtime digging — closest to "scorched earth" tunnelers | Paid plugin; heavier; integration work |
 | **Runtime Landscape edit layers** (UE 5.7+) / Errant Landscape | Heightfield craters | ✅ Yes | Native-ish, simple, good perf, matches the legacy 2.5D model exactly | No overhangs/caves — a digger can't tunnel under a tank |
 | **Custom runtime procedural mesh** | Heightfield (or limited voxel) | ✅ Yes | Full control; port the legacy crater math 1:1 | Most engineering; reinventing terrain tooling |
 
-### Tech-spike findings — UE 5.8 Mesh Terrain (desk research, 2026-06-21)
+### Tech-spike findings — UE 5.8 Mesh Terrain (2026-06-22)
 
 UE 5.8 is released and ships **Mesh Terrain** (Experimental): a genuine **3D-mesh** terrain (not a
 heightfield, not voxel/SDF) supporting overhangs, caves, tunnels, floating islands; variable resolution;
-**non-destructive stackable modifiers**; World Partition + PCG native. It is a far better *authoring*
-system than classic Landscape.
+**non-destructive stackable modifiers**; World Partition + PCG native. A far better *authoring* system
+than classic Landscape.
 
-**The catch for us:** every source — Epic's official docs and community deep-dives — describes
-**editor-time authoring only**. There is **no documented runtime deformation API**, no gameplay
-crater-carving, no dynamic-modifier-at-runtime story. Epic's docs note *"Compiled sections are for
-runtime only and are decoupled from the editor preview sections,"* implying a **compile step** that is a
-red flag for per-shot runtime modification. We must not stake the signature mechanic on an undocumented
-capability.
+**CONCLUSION: Mesh Terrain does NOT support runtime deformation — confirmed at the engine source level**
+(inspected `D:/Games/EpicGames/UE_5.8/Engine` plugin headers, not just docs):
 
-**Spike charter (hands-on half — requires the UE project to exist):** before committing, build a Mesh
-Terrain and answer one question — **can it be modified at runtime from C++?**
-- **Yes** → potentially ideal: authored caves/overhangs *and* destructible. Front-runner.
-- **No** → use Mesh Terrain for authored static complexity, paired with a runtime-deformable **surface
-  layer** (custom procedural mesh porting the legacy crater math, or Voxel Plugin 2) for destruction.
+- The terrain UX is the **`MeshTerrainMode`** plugin — a single module of `"Type": "Editor"`. Pure
+  authoring; it has no runtime module at all.
+- The underlying tech is the **`MeshPartition`** plugin ("MegaMesh"). It has runtime modules, but the
+  pipeline is **author modifiers → compile → bake**: output is **`ACompiledSection`** actors with
+  **cooked** collision, streamed at runtime via World Partition.
+- Every compile/build entry point (`GetCompiledSectionBuildVariantNamesForPlatforms`,
+  `GatherDependencies`, rebuild-on-property-change) is gated `#if WITH_EDITOR`. The runtime
+  `UMeshPartitionComponent` exposes only lifecycle hooks (`PostRegisterMegaMeshComponents`,
+  `OnDefinitionChanged`) — **no `ApplyModifier` / `Carve` / `Deform` / geometry-`Rebuild` at runtime.**
+  The only runtime `Rebuild*` calls live in the collision component and rebuild physics from
+  already-built mesh (also editor-only-data gated).
 
-> **Decision deferred to the hands-on spike (Phase 1).** Until proven, the safe baseline for the
-> destructible surface is a custom runtime procedural mesh (ports the legacy crater math 1:1) or
-> Voxel Plugin 2; Mesh Terrain is evaluated as the upgrade/authoring layer.
+So Mesh Terrain is an **editor/cook-time authoring system**, not runtime-destructible. Excellent for
+rich *static* maps (cliffs, caves, overhangs); **cannot carve craters during gameplay**. **Ruled out as
+the destructible-surface tech** — still attractive as an authored static backdrop.
+
+### Resolved direction for the destructible surface
+
+The runtime crater must come from a genuinely runtime-mutable representation. Native-first options:
+
+1. **GeometryScript + `UDynamicMeshComponent`** (first-party; `GeometryScripting` plugin — which
+   MeshPartition itself depends on). `UDynamicMesh` supports **runtime mesh boolean** ops
+   (`ApplyMeshBoolean` subtract) → carve a volume = crater, with overhang/cave potential.
+   BlueprintCallable, runs at runtime. **Recommended primary path for the spike.**
+2. **Voxel Plugin 2** (paid) — proven runtime volumetric digging/tunneling; richest destruction.
+3. **Runtime Landscape edit layers** (UE 5.7+) — heightfield craters only (no overhangs), simplest and
+   closest to the legacy 2.5D model; port the legacy sine crater profile directly onto it.
+
+**Phase-1 spike (now hands-on):** prototype runtime craters with **GeometryScript/DynamicMesh** first
+(native, no paid dep, supports overhangs). Fall back to runtime Landscape layers if perf/scale demands a
+heightfield. Use Mesh Terrain only for non-destructible authored scenery, if at all.
 
 ---
 
@@ -178,10 +197,11 @@ A staged plan that front-loads the riskiest, most distinctive mechanic.
   - Wire up an MCP server (`chongdashu/unreal-mcp` or Remote Control path) for AI-assisted scaffolding.
   - Commit the `.gitignore` already prepared here.
 - **Phase 1 — Terrain spike (de-risk first)** — *the highest-risk unknown; do it first*
-  - **Spike A:** Can UE 5.8 **Mesh Terrain** be deformed at runtime from C++? (See §4 spike charter.)
-  - **Spike B (fallback):** A runtime-deformable surface that craters on demand via custom procedural
-    mesh (or Voxel Plugin 2), porting the **sine crater profile + bedrock floor** from
-    `DeformLandscape.cpp`. Add optional settling.
+  - Mesh Terrain is **ruled out** for destruction (§4, source-confirmed editor-only). Primary spike:
+    runtime craters via **GeometryScript + `UDynamicMeshComponent`** (`ApplyMeshBoolean` subtract),
+    porting the **sine crater profile + bedrock floor** from `DeformLandscape.cpp`. Add optional settling.
+  - Fallback if perf/scale demands: **runtime Landscape edit layers** (heightfield) or **Voxel Plugin 2**.
+  - Validate: crater on impact, collision updates, tank re-settles on new surface, perf at target map size.
   - Pick the terrain tech based on spike results before building gameplay on top.
 - **Phase 2 — Core gameplay loop**
   - One tank, aim (turret XY + elevation YZ + power), wind, fire a single projectile using Unreal

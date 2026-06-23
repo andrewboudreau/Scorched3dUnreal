@@ -31,7 +31,9 @@ docs/        Research & design documents
 
 The legacy source is cloned to `.tmp/scorched3d-legacy/` for reference and is **not** tracked by git.
 
-## Next decision
+## Next step
 
-Pick the terrain technology (Voxel Plugin 2 vs. runtime Landscape edit layers vs. custom procedural
-mesh) — see §4 of the research doc. This gates the first prototype.
+Terrain tech is resolved: UE 5.8 **Mesh Terrain is editor-authoring only** (no runtime carve — confirmed
+at engine source level), so the destructible surface will use **GeometryScript + DynamicMesh** runtime
+booleans (native, no paid dep). See §4 of the research doc. Phase 1 is a hands-on terrain spike to prove
+runtime craters before building gameplay on top.
