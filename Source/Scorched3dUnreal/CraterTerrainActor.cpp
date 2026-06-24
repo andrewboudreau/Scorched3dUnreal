@@ -5,6 +5,9 @@
 #include "CraterMath.h"
 #include "GeometryScript/MeshBooleanFunctions.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "Kismet/GameplayStatics.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 
 using namespace UE::Geometry;
 
@@ -156,4 +159,44 @@ void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
 
     // Rebuild collision against the new surface.
     GetDynamicMeshComponent()->UpdateCollision(/*bOnlyIfPending*/ false);
+}
+
+void ACraterTerrainActor::NotifyActorOnClicked(FKey ButtonPressed)
+{
+    Super::NotifyActorOnClicked(ButtonPressed);
+    CarveAtCursor();
+}
+
+void ACraterTerrainActor::CarveAtCursor()
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC) return;
+
+    FHitResult Hit;
+    if (PC->GetHitResultUnderCursor(ECC_Visibility, /*bTraceComplex*/ true, Hit) &&
+        Hit.GetActor() == this)
+    {
+        CarveCrater(Hit.ImpactPoint, CarveRadius);
+        SpawnProbeCube(Hit.ImpactPoint);
+    }
+}
+
+void ACraterTerrainActor::SpawnProbeCube(FVector WorldPoint)
+{
+    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+    if (!Cube) return;
+
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AStaticMeshActor* Probe = GetWorld()->SpawnActor<AStaticMeshActor>(
+        AStaticMeshActor::StaticClass(),
+        FTransform(WorldPoint + FVector(0, 0, 600.0f)), Params);
+    if (!Probe) return;
+
+    Probe->SetMobility(EComponentMobility::Movable);
+    UStaticMeshComponent* SM = Probe->GetStaticMeshComponent();
+    SM->SetStaticMesh(Cube);
+    SM->SetWorldScale3D(FVector(1.5f));
+    SM->SetSimulatePhysics(true);
+    SM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }

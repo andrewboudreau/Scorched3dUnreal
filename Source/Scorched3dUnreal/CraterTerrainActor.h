@@ -28,8 +28,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Crater")
     void CarveCrater(FVector WorldCenter, float Radius);
 
+    UPROPERTY(EditAnywhere, Category = "Crater") float CarveRadius = 300.0f;
+
 protected:
     virtual void BeginPlay() override;
+
+    virtual void NotifyActorOnClicked(FKey ButtonPressed = EKeys::LeftMouseButton) override;
+
+    /** Trace from the camera through the cursor and carve where it hits this ground. */
+    void CarveAtCursor();
+
+    /** Drop a physics cube above WorldPoint to visually confirm collision. */
+    void SpawnProbeCube(FVector WorldPoint);
 
     /** (Re)builds the flat ground mesh and refreshes collision. */
     void RegenerateGround();
