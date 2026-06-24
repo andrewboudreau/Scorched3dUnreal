@@ -35,6 +35,15 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Crater") float CarveRadius = 300.0f;
 
+    /** If true, BeginPlay carves DemoCraterCount demo craters and drops probe cubes — a deterministic verification harness for the spike. */
+    UPROPERTY(EditAnywhere, Category = "Crater|Demo") bool bDemoCarveOnBeginPlay = false;
+
+    /** Number of demo craters carved along X when bDemoCarveOnBeginPlay is true. */
+    UPROPERTY(EditAnywhere, Category = "Crater|Demo") int32 DemoCraterCount = 3;
+
+    /** Carves DemoCraterCount craters along X (spaced) and drops a probe cube into each. */
+    void RunDemoCarve();
+
     /** Trace from the camera through the cursor and carve where it hits this ground. */
     void CarveAtCursor();
 

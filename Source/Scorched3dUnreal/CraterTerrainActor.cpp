@@ -20,6 +20,23 @@ void ACraterTerrainActor::BeginPlay()
 {
     Super::BeginPlay();
     RegenerateGround();
+    if (bDemoCarveOnBeginPlay)
+    {
+        RunDemoCarve();
+    }
+}
+
+void ACraterTerrainActor::RunDemoCarve()
+{
+    const FVector Base = GetActorLocation();
+    const float Spacing = CarveRadius * 2.5f;
+    const float StartX = -0.5f * Spacing * (DemoCraterCount - 1);
+    for (int32 i = 0; i < DemoCraterCount; ++i)
+    {
+        const FVector Center = Base + FVector(StartX + i * Spacing, 0.0f, 0.0f);
+        CarveCrater(Center, CarveRadius);
+        SpawnProbeCube(Center);
+    }
 }
 
 void ACraterTerrainActor::RegenerateGround()
