@@ -50,15 +50,21 @@ void ACraterTerrainActor::RegenerateGround()
     Mesh->Reset();
 
     FGeometryScriptPrimitiveOptions Options;
-    const FTransform Local = FTransform::Identity;
 
-    // Flat rectangle in the XY plane, centered on the actor, subdivided into a grid.
-    // NOTE: In UE 5.8 the function is AppendRectangleXY (renamed from AppendRectangle).
-    // StepsWidth/StepsHeight are the last two int args before the optional Debug param.
-    UGeometryScriptLibrary_MeshPrimitiveFunctions::AppendRectangleXY(
-        Mesh, Options, Local,
-        GridExtent, GridExtent,
-        GridResolution, GridResolution);
+    // Closed box slab instead of a single-sided plane: subtracting the crater bowl
+    // leaves a real concave crater the probe cube can rest in (a plane just gets a
+    // hole punched clean through). AppendBox (UE 5.8) signature, MeshPrimitiveFunctions.h:168-179:
+    //   AppendBox(Mesh, Options, Transform, DimX, DimY, DimZ, StepsX, StepsY, StepsZ, Origin=Base)
+    // Origin=Base builds the box spanning [0, DimZ] up from the transform origin, so we
+    // translate the transform to Z = -SlabThickness, putting the TOP face at local Z = 0
+    // (where the crater tool's rim sits). StepsZ=1; top/bottom faces get GridResolution
+    // subdivisions so craters carve smoothly.
+    const FTransform SlabXf(FQuat::Identity, FVector(0.0f, 0.0f, -SlabThickness));
+    UGeometryScriptLibrary_MeshPrimitiveFunctions::AppendBox(
+        Mesh, Options, SlabXf,
+        GridExtent, GridExtent, SlabThickness,
+        GridResolution, GridResolution, /*StepsZ*/ 1,
+        EGeometryScriptPrimitiveOriginMode::Base);
 
     // Complex-as-simple so the carved surface is collidable at runtime.
     // bImmediateUpdate=false defers the rebuild so we do a single explicit UpdateCollision below,
