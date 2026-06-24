@@ -159,19 +159,24 @@ void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
     UDynamicMesh* Ground = GetDynamicMeshComponent()->GetDynamicMesh();
     if (!Ground || Radius <= 0.0f) return;
 
+    // Lift the cutter so its rim/walls sit ABOVE the slab top, avoiding a degenerate
+    // coplanar boolean (rim exactly on the surface imprints a seam but removes no
+    // volume). The bowl then plunges THROUGH the surface and actually carves.
+    const float RimLift = 100.0f; // cm above surface; > slab cell size, < crater depth
+
     // Bedrock clamp: limit depth so the crater bottom never goes below BedrockZ.
     const float MaxByProfile = Radius * DepthScale;
-    const float MaxByBedrock = WorldCenter.Z - BedrockZ;
+    const float MaxByBedrock = (WorldCenter.Z + RimLift) - BedrockZ; // keep bowl bottom above bedrock
     const float MaxDepth = FMath::Min(MaxByProfile, MaxByBedrock);
-    if (MaxDepth <= 0.0f) return; // already at/below bedrock here
+    if (MaxDepth <= RimLift) return; // not enough depth to reach below the surface
 
     // Build the tool around its local origin (top cap above z=0, bowl below).
     UDynamicMesh* Tool = NewObject<UDynamicMesh>(this);
     BuildCraterToolMesh(Tool, Radius, MaxDepth);
 
-    // Place the tool so its z=0 rim sits at WorldCenter; subtract from ground.
+    // Place the tool lifted by RimLift so its rim crosses the surface transversally; subtract from ground.
     const FTransform GroundXf = GetActorTransform();
-    const FTransform ToolXf(FQuat::Identity, WorldCenter);
+    const FTransform ToolXf(FQuat::Identity, WorldCenter + FVector(0.0f, 0.0f, RimLift));
 
     FGeometryScriptMeshBooleanOptions BoolOptions;
     UGeometryScriptLibrary_MeshBooleanFunctions::ApplyMeshBoolean(
