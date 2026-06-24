@@ -103,8 +103,8 @@ void ACraterTerrainActor::BuildCraterToolMesh(UDynamicMesh* ToolMesh, float Radi
             const int32 B = BowlIdx(Ring, Seg + 1);
             const int32 C = BowlIdx(Ring + 1, Seg + 1);
             const int32 D = BowlIdx(Ring + 1, Seg);
-            Mesh.AppendTriangle(A, C, B);
-            Mesh.AppendTriangle(A, D, C);
+            Mesh.AppendTriangle(A, B, C);
+            Mesh.AppendTriangle(A, C, D);
         }
     }
 
@@ -115,8 +115,8 @@ void ACraterTerrainActor::BuildCraterToolMesh(UDynamicMesh* ToolMesh, float Radi
         const int32 BR = BowlIdx(NumRings, Seg + 1);
         const int32 TL = TopIdx(Seg);
         const int32 TR = TopIdx(Seg + 1);
-        Mesh.AppendTriangle(BL, TR, BR);
-        Mesh.AppendTriangle(BL, TL, TR);
+        Mesh.AppendTriangle(BL, BR, TR);
+        Mesh.AppendTriangle(BL, TR, TL);
     }
 
     // Top cap fan (normals up).
