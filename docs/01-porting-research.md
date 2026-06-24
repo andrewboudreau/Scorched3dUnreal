@@ -204,6 +204,11 @@ Conclusion: **GeometryScript + DynamicMesh runtime booleans are the confirmed de
 tech.** Deferred for later: perf-at-scale (many craters on a large map), dirt settling, projectile
 integration (Phase 2).
 
+**Known limitation (Phase 2):** the validated carve triggers are the `bDemoCarveOnBeginPlay` harness and
+the `CarveCrater` BlueprintCallable API. The `NotifyActorOnClicked` click-to-carve path is present but
+not wired for shipping play — it needs a PlayerController with `bShowMouseCursor` + `bEnableClickEvents`
+and a non-`CapturePermanently` viewport mouse-capture mode. That belongs to the Phase 2 input layer.
+
 ---
 
 ## 5. Recommended roadmap (single-player first)
