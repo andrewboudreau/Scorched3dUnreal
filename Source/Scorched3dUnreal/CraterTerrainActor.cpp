@@ -36,8 +36,9 @@ void ACraterTerrainActor::RegenerateGround()
         GridResolution, GridResolution);
 
     // Complex-as-simple so the carved surface is collidable at runtime.
-    Comp->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate*/ true);
+    // bImmediateUpdate=false defers the rebuild so we do a single explicit UpdateCollision below,
+    // avoiding a double full rebuild (SetComplexAsSimpleCollisionEnabled(true,true) calls UpdateCollision internally).
+    Comp->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate*/ false);
     Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    // bOnlyIfPending=false forces a full rebuild (brief used bRebuildOverlaps which doesn't exist in 5.8)
     Comp->UpdateCollision(/*bOnlyIfPending*/ false);
 }
