@@ -24,9 +24,21 @@ public:
     /** Craters cannot carve below this world Z (cm) — the bedrock floor. */
     UPROPERTY(EditAnywhere, Category = "Crater") float BedrockZ = -2000.0f;
 
+    /** Carve a sine-profile crater of the given Radius (cm) centered at WorldCenter. */
+    UFUNCTION(BlueprintCallable, Category = "Crater")
+    void CarveCrater(FVector WorldCenter, float Radius);
+
 protected:
     virtual void BeginPlay() override;
 
     /** (Re)builds the flat ground mesh and refreshes collision. */
     void RegenerateGround();
+
+    /**
+     * Builds a watertight "bowl plug" solid around the local origin: a flat top
+     * cap at +Radius, a vertical side wall, and a bowl underside following the
+     * legacy sine profile down to -MaxDepth at center. Subtracting it from the
+     * ground yields the crater. Caller owns nothing — fills the passed UDynamicMesh.
+     */
+    void BuildCraterToolMesh(UDynamicMesh* ToolMesh, float Radius, float MaxDepth);
 };
