@@ -186,6 +186,24 @@ The runtime crater must come from a genuinely runtime-mutable representation. Na
 (native, no paid dep, supports overhangs). Fall back to runtime Landscape layers if perf/scale demands a
 heightfield. Use Mesh Terrain only for non-destructible authored scenery, if at all.
 
+### Phase-1 spike result — PROVEN (2026-06-24)
+
+The spike (`ACraterTerrainActor`, a C++ `ADynamicMeshActor`) confirmed the GeometryScript/DynamicMesh
+path works end-to-end, verified live in PIE via the Unreal MCP gateway:
+
+- The legacy **sine crater profile** (`DeformLandscape.cpp:67-68`,
+  `sin((radius-dist)/radius·π/2)·radius·depthScale`) was ported as `CraterMath::DepthAt` and **unit-tested**.
+- A watertight **bowl tool mesh** built from that profile (reviewed: positive signed volume, 0 edge
+  conflicts) is **boolean-subtracted** (`ApplyMeshBoolean` Subtract) from the ground, clamped to a
+  bedrock floor. Collision is rebuilt after each carve; dropped physics cubes **settle into** the craters.
+- **Key finding:** the ground must be a thick closed **slab** (`AppendBox`, thickness > max crater
+  depth), not a single-sided plane — subtracting a bowl from a plane punches a hole rather than carving
+  a concave crater. This is the one non-obvious lesson the spike surfaced.
+
+Conclusion: **GeometryScript + DynamicMesh runtime booleans are the confirmed destructible-surface
+tech.** Deferred for later: perf-at-scale (many craters on a large map), dirt settling, projectile
+integration (Phase 2).
+
 ---
 
 ## 5. Recommended roadmap (single-player first)
