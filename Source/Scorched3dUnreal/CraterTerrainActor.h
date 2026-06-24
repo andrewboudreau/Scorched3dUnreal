@@ -28,12 +28,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Crater")
     void CarveCrater(FVector WorldCenter, float Radius);
 
-    UPROPERTY(EditAnywhere, Category = "Crater") float CarveRadius = 300.0f;
-
 protected:
     virtual void BeginPlay() override;
 
     virtual void NotifyActorOnClicked(FKey ButtonPressed = EKeys::LeftMouseButton) override;
+
+    UPROPERTY(EditAnywhere, Category = "Crater") float CarveRadius = 300.0f;
 
     /** Trace from the camera through the cursor and carve where it hits this ground. */
     void CarveAtCursor();
