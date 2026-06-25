@@ -1,0 +1,9 @@
+[
+  { "slug": "home", "title": "Home", "group": "Overview" },
+  { "slug": "how-it-works", "title": "How this wiki works", "group": "Overview" },
+  { "slug": "terrain", "title": "Terrain", "group": "Subsystems" },
+  { "slug": "weapons", "title": "Weapons", "group": "Subsystems" },
+  { "slug": "ai-aiming", "title": "AI aiming", "group": "Subsystems" },
+  { "slug": "ballistics-wind", "title": "Ballistics & wind", "group": "Subsystems" },
+  { "slug": "netcode-state", "title": "Netcode & state", "group": "Subsystems" }
+]

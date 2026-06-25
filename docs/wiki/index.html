@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scorched3D → Unreal — Working-Notes Wiki</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-title">
+      <span class="logo">⛰</span>
+      <span>Scorched3D <span class="arrow">→</span> Unreal <span class="subtitle">working-notes wiki</span></span>
+    </div>
+    <nav class="site-links">
+      <a href="../../README.md">repo README</a>
+    </nav>
+  </header>
+
+  <div class="layout">
+    <aside class="nav-col" id="nav">
+      <div class="nav-loading">Loading nav…</div>
+    </aside>
+
+    <main class="content-col">
+      <article id="content" class="markdown-body">
+        <p class="loading">Loading…</p>
+      </article>
+    </main>
+
+    <aside class="notes-col">
+      <div class="notes-header">
+        <h2>Notes &amp; questions</h2>
+        <span class="notes-topic" id="notes-topic"></span>
+      </div>
+      <div class="notes-status" id="notes-status"></div>
+      <div class="notes-thread" id="notes-thread"></div>
+
+      <form class="note-form" id="note-form">
+        <div class="note-form-reply" id="note-reply-banner" hidden>
+          Replying to question
+          <button type="button" id="note-reply-cancel" title="Cancel reply">✕</button>
+        </div>
+        <div class="note-form-row">
+          <label for="note-type">Type</label>
+          <select id="note-type">
+            <option value="note">Note</option>
+            <option value="question">Question</option>
+          </select>
+          <span class="note-form-author">as <strong>you</strong></span>
+        </div>
+        <textarea id="note-text" rows="3" placeholder="Add a note or ask a question… (markdown supported)"></textarea>
+        <div class="note-form-actions">
+          <button type="submit" id="note-submit">Add</button>
+        </div>
+        <div class="note-form-error" id="note-error" hidden></div>
+      </form>
+    </aside>
+  </div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

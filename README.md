@@ -39,8 +39,8 @@ Enabled engine plugins: `ModelContextProtocol`, `EditorToolset`, `ModelingToolsE
 Scorched3dUnreal.uproject   UE 5.8 project (MCP + editor toolset plugins enabled)
 Config/                     Project & engine config
 Content/                    Game assets
-docs/                       Research & design documents
-tools/                      Dev tooling (MCP browser)
+docs/                       Research & design documents (+ docs/wiki/ working-notes wiki)
+tools/                      Dev tooling (MCP browser, working-notes wiki server)
 .tmp/                       Legacy source checkout (git-ignored, reference only)
 ```
 
@@ -71,6 +71,25 @@ python tools/mcp-browser-serve.py     # then open http://localhost:8765
 
 The proxy is required because the MCP server speaks SSE only and sends no CORS headers — the browser
 page talks to the proxy, which talks to the MCP server.
+
+## Project wiki — working notes & architecture comparison
+
+A small, local, **no-build** wiki for working notes and side-by-side comparisons of our
+Unreal-native architecture vs. the legacy Scorched3D design (terrain, weapons, AI aiming,
+ballistics & wind, netcode). It's **for us to communicate**: pages are Markdown in the repo, and
+the notes/questions thread is a git-tracked JSON, so both the user (in the browser) and Claude
+(via file tools) read and write the same store. Questions stay flagged **unanswered** until replied
+to — a shared queue.
+
+```bash
+python tools/wiki-serve.py     # then open http://localhost:8777
+```
+
+- Stdlib-only Python server (`tools/wiki-serve.py`); vanilla front-end, no framework, no npm.
+- Content: `docs/wiki/content/*.md` · nav: `docs/wiki/nav.json` · notes: `docs/wiki/notes.json`.
+- Claude posts answers with `python tools/wiki-serve.py --as claude` (or by editing `notes.json`).
+- How it works: open the wiki and read **How this wiki works**, or
+  [`docs/wiki/content/how-it-works.md`](docs/wiki/content/how-it-works.md).
 
 ## Phase 1 spike result (proven)
 
