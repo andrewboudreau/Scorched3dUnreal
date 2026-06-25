@@ -81,13 +81,23 @@ research doc. The Phase 1 spike (`ACraterTerrainActor`) proved runtime craters e
 - A thick `AppendBox` ground slab is carved by boolean-subtracting a **sine-profile bowl** tool mesh
   (the legacy `DeformLandscape.cpp` falloff, unit-tested in `CraterMath`), clamped to a bedrock floor.
 - Collision is rebuilt after each carve, so dropped physics cubes **settle into** the craters.
-- Verified live in PIE via the Unreal MCP gateway:
+- **Verified by a deterministic headless test** — `Scorched.CraterCarve.RealDepression` runs the real
+  GeometryScript boolean and measures the resulting mesh:
 
-![Three runtime craters with cubes settled in](docs/images/phase1-crater-spike-top.png)
+  | Measurement | Value | Meaning |
+  |---|---|---|
+  | center surface Z | **−189.8** | carved ~190 cm below the original slab top (Z=0) |
+  | terrain Z outside crater | **0.0** | untouched — flat ground remains flat |
+  | slab bottom Z | **−600.0** | floor survives → a concave **bowl**, not a punched hole |
 
-**Key finding:** the ground must be a thick closed **slab**, not a flat plane — subtracting a bowl
-from a single-sided plane punches a hole instead of carving a concave crater. (Design/build details:
-[`docs/superpowers/specs`](docs/superpowers/specs/) + [`docs/superpowers/plans`](docs/superpowers/plans/).)
+  Run it editor-closed: `Automation RunTests Scorched.CraterCarve` → `Result={Success}`.
+
+**Two findings that mattered:** (1) the ground must be a thick closed **slab**, not a flat plane —
+subtracting a bowl from a single-sided plane punches a hole instead of a crater; (2) the cutter rim
+must sit **above** the surface (a small lift), or the coplanar boolean only imprints a seam and
+removes no volume — the original carve looked like "shaky circles on flat ground" until this was
+fixed. (Design/build details: [`docs/superpowers/specs`](docs/superpowers/specs/) +
+[`docs/superpowers/plans`](docs/superpowers/plans/).)
 
 ## Next step
 

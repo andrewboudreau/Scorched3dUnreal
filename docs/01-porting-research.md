@@ -189,16 +189,25 @@ heightfield. Use Mesh Terrain only for non-destructible authored scenery, if at 
 ### Phase-1 spike result — PROVEN (2026-06-24)
 
 The spike (`ACraterTerrainActor`, a C++ `ADynamicMeshActor`) confirmed the GeometryScript/DynamicMesh
-path works end-to-end, verified live in PIE via the Unreal MCP gateway:
+path works end-to-end, verified by a **deterministic headless automation test**
+(`Scorched.CraterCarve.RealDepression`) that runs the real boolean and measures the carved mesh —
+center surface at **Z=−189.8** (carved ~190 cm into the slab), terrain outside the crater still at
+**Z=0**, slab bottom intact at **Z=−600** (a concave bowl, not a punched hole):
 
 - The legacy **sine crater profile** (`DeformLandscape.cpp:67-68`,
   `sin((radius-dist)/radius·π/2)·radius·depthScale`) was ported as `CraterMath::DepthAt` and **unit-tested**.
 - A watertight **bowl tool mesh** built from that profile (reviewed: positive signed volume, 0 edge
   conflicts) is **boolean-subtracted** (`ApplyMeshBoolean` Subtract) from the ground, clamped to a
   bedrock floor. Collision is rebuilt after each carve; dropped physics cubes **settle into** the craters.
-- **Key finding:** the ground must be a thick closed **slab** (`AppendBox`, thickness > max crater
-  depth), not a single-sided plane — subtracting a bowl from a plane punches a hole rather than carving
-  a concave crater. This is the one non-obvious lesson the spike surfaced.
+- **Two findings that mattered:**
+  1. The ground must be a thick closed **slab** (`AppendBox`, thickness > max crater depth), not a
+     single-sided plane — subtracting a bowl from a plane punches a hole rather than carving a crater.
+  2. The cutter rim must sit **above** the surface (a small `RimLift`), not coplanar with it — a
+     coplanar boolean only imprints the intersection seam and removes no volume. The first carve
+     attempt produced exactly that failure mode (a "shaky circle" on still-flat ground); lifting the
+     cutter so the bowl plunges transversally through the surface fixed it. An early top-down
+     screenshot made the flat seam *look* like craters — the lesson: verify depth with a side-on or
+     numeric check, never a top-down view.
 
 Conclusion: **GeometryScript + DynamicMesh runtime booleans are the confirmed destructible-surface
 tech.** Deferred for later: perf-at-scale (many craters on a large map), dirt settling, projectile
