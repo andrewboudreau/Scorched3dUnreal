@@ -2,8 +2,8 @@
 #include "Components/DynamicMeshComponent.h"
 #include "UDynamicMesh.h"
 #include "GeometryScript/MeshPrimitiveFunctions.h"
+#include "GeometryScript/MeshNormalsFunctions.h"
 #include "CraterMath.h"
-#include "GeometryScript/MeshBooleanFunctions.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
@@ -51,22 +51,19 @@ void ACraterTerrainActor::RegenerateGround()
 
     FGeometryScriptPrimitiveOptions Options;
 
-    // Closed box slab instead of a single-sided plane: subtracting the crater bowl
-    // leaves a real concave crater the probe cube can rest in (a plane just gets a
-    // hole punched clean through). AppendBox (UE 5.8) signature, MeshPrimitiveFunctions.h:168-179:
-    //   AppendBox(Mesh, Options, Transform, DimX, DimY, DimZ, StepsX, StepsY, StepsZ, Origin=Base)
-    // Origin=Base builds the box spanning [0, DimZ] up from the transform origin, so we
-    // translate the transform to Z = -SlabThickness, putting the TOP face at local Z = 0
-    // (where the crater tool's rim sits). StepsZ=1; top/bottom faces get GridResolution
-    // subdivisions so craters carve smoothly.
-    const FTransform SlabXf(FQuat::Identity, FVector(0.0f, 0.0f, -SlabThickness));
-    UGeometryScriptLibrary_MeshPrimitiveFunctions::AppendBox(
-        Mesh, Options, SlabXf,
-        GridExtent, GridExtent, SlabThickness,
-        GridResolution, GridResolution, /*StepsZ*/ 1,
-        EGeometryScriptPrimitiveOriginMode::Base);
+    // A flat heightfield grid at local Z=0, centered on the actor. Craters are carved
+    // by displacing this surface's vertices downward (the legacy DeformLandscape model),
+    // not by boolean-subtracting a solid — so a single-sided surface is all we need, and
+    // the surface is single-valued (one height per cell), which makes a "lid" impossible.
+    UGeometryScriptLibrary_MeshPrimitiveFunctions::AppendRectangleXY(
+        Mesh, Options, FTransform::Identity,
+        GridExtent, GridExtent,
+        GridResolution, GridResolution);
 
-    // Complex-as-simple so the carved surface is collidable at runtime.
+    FGeometryScriptCalculateNormalsOptions NormalOptions;
+    UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Mesh, NormalOptions);
+
+    // Complex-as-simple so the deformed surface is collidable at runtime.
     // bImmediateUpdate=false defers the rebuild so we do a single explicit UpdateCollision below,
     // avoiding a double full rebuild (SetComplexAsSimpleCollisionEnabled(true,true) calls UpdateCollision internally).
     Comp->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate*/ false);
@@ -74,118 +71,39 @@ void ACraterTerrainActor::RegenerateGround()
     Comp->UpdateCollision(/*bOnlyIfPending*/ false);
 }
 
-void ACraterTerrainActor::BuildCraterToolMesh(UDynamicMesh* ToolMesh, float Radius, float MaxDepth)
-{
-    constexpr int32 NumRings = 24;     // radial subdivisions of the bowl
-    constexpr int32 NumSeg = 32;       // angular subdivisions
-    const double TopZ = Radius;        // top cap well above the ground surface
-
-    FDynamicMesh3 Mesh;
-
-    // --- Vertices -----------------------------------------------------------
-    // Ring r=0 collapses to a single bottom-center vertex; rings 1..NumRings are
-    // full circles. Index helper for a (ring, seg) bowl vertex:
-    auto BowlIdx = [&](int32 Ring, int32 Seg) -> int32
-    {
-        return 1 + (Ring - 1) * NumSeg + (Seg % NumSeg); // +1 for the center vertex at index 0
-    };
-
-    // 0: bottom center
-    Mesh.AppendVertex(FVector3d(0.0, 0.0, -MaxDepth));
-
-    for (int32 Ring = 1; Ring <= NumRings; ++Ring)
-    {
-        const double Rad = (double(Ring) / NumRings) * Radius;
-        const double Depth = FMath::Min(CraterMath::DepthAt(Rad, Radius, DepthScale), (double)MaxDepth);
-        for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-        {
-            const double Ang = (2.0 * UE_DOUBLE_PI * Seg) / NumSeg;
-            Mesh.AppendVertex(FVector3d(Rad * FMath::Cos(Ang), Rad * FMath::Sin(Ang), -Depth));
-        }
-    }
-
-    // Top rim ring (radius, z=TopZ) and top center.
-    const int32 TopRingStart = 1 + NumRings * NumSeg;
-    for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-    {
-        const double Ang = (2.0 * UE_DOUBLE_PI * Seg) / NumSeg;
-        Mesh.AppendVertex(FVector3d(Radius * FMath::Cos(Ang), Radius * FMath::Sin(Ang), TopZ));
-    }
-    const int32 TopCenter = Mesh.AppendVertex(FVector3d(0.0, 0.0, TopZ));
-    auto TopIdx = [&](int32 Seg) -> int32 { return TopRingStart + (Seg % NumSeg); };
-
-    // --- Triangles ----------------------------------------------------------
-    // Bowl underside. Winding chosen so normals point DOWN/out (away from solid).
-    for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-    {
-        // innermost fan around bottom center
-        Mesh.AppendTriangle(0, BowlIdx(1, Seg + 1), BowlIdx(1, Seg));
-    }
-    for (int32 Ring = 1; Ring < NumRings; ++Ring)
-    {
-        for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-        {
-            const int32 A = BowlIdx(Ring, Seg);
-            const int32 B = BowlIdx(Ring, Seg + 1);
-            const int32 C = BowlIdx(Ring + 1, Seg + 1);
-            const int32 D = BowlIdx(Ring + 1, Seg);
-            Mesh.AppendTriangle(A, B, C);
-            Mesh.AppendTriangle(A, C, D);
-        }
-    }
-
-    // Side wall: bowl outer rim (Ring=NumRings, z=-0..) up to top rim (z=TopZ).
-    for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-    {
-        const int32 BL = BowlIdx(NumRings, Seg);
-        const int32 BR = BowlIdx(NumRings, Seg + 1);
-        const int32 TL = TopIdx(Seg);
-        const int32 TR = TopIdx(Seg + 1);
-        Mesh.AppendTriangle(BL, BR, TR);
-        Mesh.AppendTriangle(BL, TR, TL);
-    }
-
-    // Top cap fan (normals up).
-    for (int32 Seg = 0; Seg < NumSeg; ++Seg)
-    {
-        Mesh.AppendTriangle(TopCenter, TopIdx(Seg), TopIdx(Seg + 1));
-    }
-
-    ToolMesh->SetMesh(MoveTemp(Mesh));
-}
-
 void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
 {
     UDynamicMesh* Ground = GetDynamicMeshComponent()->GetDynamicMesh();
     if (!Ground || Radius <= 0.0f) return;
 
-    // Lift the cutter so its rim/walls sit ABOVE the slab top, avoiding a degenerate
-    // coplanar boolean (rim exactly on the surface imprints a seam but removes no
-    // volume). The bowl then plunges THROUGH the surface and actually carves.
-    const float RimLift = 100.0f; // cm above surface; > slab cell size, < crater depth
+    // Heightfield deformation — a direct port of the legacy DeformLandscape model
+    // (DeformLandscape.cpp:186-233): lower each surface vertex within Radius by the
+    // sine falloff (CraterMath::DepthAt), clamped to the bedrock floor. The surface
+    // stays single-valued, so there is no lid and no coplanar-boolean degeneracy.
+    const FTransform Xf = GetActorTransform();
+    const FVector LocalCenter = Xf.InverseTransformPosition(WorldCenter);
+    const double LocalBedrockZ =
+        Xf.InverseTransformPosition(FVector(WorldCenter.X, WorldCenter.Y, BedrockZ)).Z;
+    const double R = Radius;
+    const double Scale = DepthScale;
 
-    // Bedrock clamp: limit depth so the crater bottom never goes below BedrockZ.
-    const float MaxByProfile = Radius * DepthScale;
-    const float MaxByBedrock = (WorldCenter.Z + RimLift) - BedrockZ; // keep bowl bottom above bedrock
-    const float MaxDepth = FMath::Min(MaxByProfile, MaxByBedrock);
-    if (MaxDepth <= RimLift) return; // not enough depth to reach below the surface
+    Ground->EditMesh([&](UE::Geometry::FDynamicMesh3& EditMesh)
+    {
+        for (const int32 Vid : EditMesh.VertexIndicesItr())
+        {
+            FVector3d V = EditMesh.GetVertex(Vid);
+            const double Dist = FMath::Sqrt(
+                FMath::Square(V.X - LocalCenter.X) + FMath::Square(V.Y - LocalCenter.Y));
+            const double Drop = CraterMath::DepthAt(Dist, R, Scale); // 0 outside Radius
+            if (Drop <= 0.0) continue;
+            V.Z = FMath::Max(V.Z - Drop, LocalBedrockZ);
+            EditMesh.SetVertex(Vid, V);
+        }
+    });
 
-    // Build the tool around its local origin (top cap above z=0, bowl below).
-    UDynamicMesh* Tool = NewObject<UDynamicMesh>(this);
-    BuildCraterToolMesh(Tool, Radius, MaxDepth);
-
-    // Place the tool lifted by RimLift so its rim crosses the surface transversally; subtract from ground.
-    const FTransform GroundXf = GetActorTransform();
-    const FTransform ToolXf(FQuat::Identity, WorldCenter + FVector(0.0f, 0.0f, RimLift));
-
-    FGeometryScriptMeshBooleanOptions BoolOptions;
-    UGeometryScriptLibrary_MeshBooleanFunctions::ApplyMeshBoolean(
-        Ground, GroundXf,
-        Tool, ToolXf,
-        EGeometryScriptBooleanOperation::Subtract,
-        BoolOptions);
-
-    // Rebuild collision against the new surface.
+    // Recompute normals so shading follows the new surface, then rebuild collision.
+    FGeometryScriptCalculateNormalsOptions NormalOptions;
+    UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Ground, NormalOptions);
     GetDynamicMeshComponent()->UpdateCollision(/*bOnlyIfPending*/ false);
 }
 

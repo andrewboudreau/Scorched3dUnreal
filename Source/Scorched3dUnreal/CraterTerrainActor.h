@@ -18,9 +18,6 @@ public:
     /** Number of quads per side. Higher = smoother craters, more cost. */
     UPROPERTY(EditAnywhere, Category = "Terrain") int32 GridResolution = 64;
 
-    /** Thickness (cm) of the ground slab. MUST exceed the max crater depth (Radius*DepthScale) so craters don't punch through. */
-    UPROPERTY(EditAnywhere, Category = "Terrain") float SlabThickness = 600.0f;
-
     /** Scales crater depth (legacy depthScale). Max depth = Radius * DepthScale. */
     UPROPERTY(EditAnywhere, Category = "Crater") float DepthScale = 1.0f;
 
@@ -55,12 +52,4 @@ protected:
 
     /** Drop a physics cube above WorldPoint to visually confirm collision. */
     void SpawnProbeCube(FVector WorldPoint);
-
-    /**
-     * Builds a watertight "bowl plug" solid around the local origin: a flat top
-     * cap at +Radius, a vertical side wall, and a bowl underside following the
-     * legacy sine profile down to -MaxDepth at center. Subtracting it from the
-     * ground yields the crater. Caller owns nothing — fills the passed UDynamicMesh.
-     */
-    void BuildCraterToolMesh(UDynamicMesh* ToolMesh, float Radius, float MaxDepth);
 };
