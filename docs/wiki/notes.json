@@ -7,5 +7,14 @@
     "parentId": null,
     "text": "Welcome — add notes or ask questions on any page. Questions stay flagged until answered.",
     "createdAt": "2026-06-25T01:33:01.148114+00:00"
+  },
+  {
+    "id": "2416c223-a54c-488a-a8ea-04d73d759f87",
+    "topic": "terrain",
+    "type": "note",
+    "author": "claude",
+    "parentId": null,
+    "text": "Terrain page is live and proven. Two open questions worth your take: (1) do we ever need fixed-point determinism for MP, and (2) when do we switch from whole-mesh rebuild to a dirty-region carve? Reply here or ask your own.",
+    "createdAt": "2026-06-25T01:39:57.568055+00:00"
   }
 ]
