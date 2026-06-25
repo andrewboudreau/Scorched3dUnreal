@@ -94,6 +94,10 @@ doc. The Phase 1 spike (`ACraterTerrainActor`) proved runtime craters end-to-end
 
   Run it editor-closed: `Automation RunTests Scorched.CraterCarve` → `Result={Success}`.
 
+  Side-on view in Simulate — three runtime craters with physics cubes settled into them:
+
+  ![Three runtime heightfield craters with cubes settled in](docs/images/phase1-crater-heightfield.png)
+
 **Why a heightfield, not a mesh boolean:** the first approach boolean-subtracted a closed bowl solid
 from a closed slab. Even done correctly that yields a closed volume — it produced a visible "lid" over
 the crater, on top of earlier coplanar-seam and slab-vs-plane failures. A heightfield is single-valued
