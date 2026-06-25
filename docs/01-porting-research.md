@@ -190,28 +190,29 @@ heightfield. Use Mesh Terrain only for non-destructible authored scenery, if at 
 
 The spike (`ACraterTerrainActor`, a C++ `ADynamicMeshActor`) confirmed the GeometryScript/DynamicMesh
 path works end-to-end, verified by a **deterministic headless automation test**
-(`Scorched.CraterCarve.RealDepression`) that runs the real boolean and measures the carved mesh —
-center surface at **Z=−189.8** (carved ~190 cm into the slab), terrain outside the crater still at
-**Z=0**, slab bottom intact at **Z=−600** (a concave bowl, not a punched hole):
+(`Scorched.CraterCarve.RealDepression`) that runs the real carve and measures the deformed mesh —
+center surface at **Z=−287.1** (carved ~287 cm down), terrain outside the crater still at **Z=0**, and
+the highest vertex anywhere at **Z=0** (nothing raised → a "lid" is geometrically impossible):
 
 - The legacy **sine crater profile** (`DeformLandscape.cpp:67-68`,
   `sin((radius-dist)/radius·π/2)·radius·depthScale`) was ported as `CraterMath::DepthAt` and **unit-tested**.
-- A watertight **bowl tool mesh** built from that profile (reviewed: positive signed volume, 0 edge
-  conflicts) is **boolean-subtracted** (`ApplyMeshBoolean` Subtract) from the ground, clamped to a
-  bedrock floor. Collision is rebuilt after each carve; dropped physics cubes **settle into** the craters.
-- **Two findings that mattered:**
-  1. The ground must be a thick closed **slab** (`AppendBox`, thickness > max crater depth), not a
-     single-sided plane — subtracting a bowl from a plane punches a hole rather than carving a crater.
-  2. The cutter rim must sit **above** the surface (a small `RimLift`), not coplanar with it — a
-     coplanar boolean only imprints the intersection seam and removes no volume. The first carve
-     attempt produced exactly that failure mode (a "shaky circle" on still-flat ground); lifting the
-     cutter so the bowl plunges transversally through the surface fixed it. An early top-down
-     screenshot made the flat seam *look* like craters — the lesson: verify depth with a side-on or
-     numeric check, never a top-down view.
+- The ground is a flat subdivided grid (`AppendRectangleXY`). `CarveCrater` carves by **lowering each
+  surface vertex** within the radius by `DepthAt(dist)·DepthScale`, clamped to a bedrock floor — a
+  direct port of the legacy heightfield deform (`DeformLandscape.cpp:186-233`). Normals and collision
+  are rebuilt after each carve; dropped physics cubes **settle into** the craters.
+- **The approach pivot that mattered:** the first implementation used a 3D **mesh boolean** —
+  subtracting a closed bowl solid from a closed slab. That fought a cascade of constructive-solid-
+  geometry failures (coplanar-seam degeneracy, slab-vs-plane "hole," inverted winding) and ultimately
+  left a visible **lid** over the crater, because subtracting a closed solid from a closed solid yields
+  a closed solid. Switching to a **heightfield** (single-valued: one height per cell) makes a lid
+  impossible and erases the whole CSG bug class. This is also what Scorched3D actually does. (An early
+  top-down screenshot made the flat boolean seam *look* like craters — the lesson: verify depth with a
+  side-on or numeric check, never a top-down view.)
 
-Conclusion: **GeometryScript + DynamicMesh runtime booleans are the confirmed destructible-surface
-tech.** Deferred for later: perf-at-scale (many craters on a large map), dirt settling, projectile
-integration (Phase 2).
+Conclusion: **A GeometryScript `UDynamicMeshComponent` heightfield (vertex-displacement carve) is the
+confirmed destructible-surface tech.** Tradeoff: no overhangs/caves (which Scorched3D never had); if
+those are ever wanted, DynamicMesh booleans or voxels return. Deferred for later: perf-at-scale (many
+craters on a large map), dirt settling, projectile integration (Phase 2).
 
 **Known limitation (Phase 2):** the validated carve triggers are the `bDemoCarveOnBeginPlay` harness and
 the `CarveCrater` BlueprintCallable API. The `NotifyActorOnClicked` click-to-carve path is present but
@@ -230,8 +231,8 @@ A staged plan that front-loads the riskiest, most distinctive mechanic.
   - Commit the `.gitignore` already prepared here.
 - **Phase 1 — Terrain spike (de-risk first)** — *the highest-risk unknown; do it first*
   - Mesh Terrain is **ruled out** for destruction (§4, source-confirmed editor-only). Primary spike:
-    runtime craters via **GeometryScript + `UDynamicMeshComponent`** (`ApplyMeshBoolean` subtract),
-    porting the **sine crater profile + bedrock floor** from `DeformLandscape.cpp`. Add optional settling.
+    runtime craters via a **GeometryScript `UDynamicMeshComponent` heightfield** (vertex-displacement
+    carve), porting the **sine crater profile + bedrock floor** from `DeformLandscape.cpp`. Add optional settling.
   - Fallback if perf/scale demands: **runtime Landscape edit layers** (heightfield) or **Voxel Plugin 2**.
   - Validate: crater on impact, collision updates, tank re-settles on new surface, perf at target map size.
   - Pick the terrain tech based on spike results before building gameplay on top.

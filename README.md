@@ -7,9 +7,10 @@ tooling (Unreal MCP).
 ## Status
 
 ✅ **Phase 1 terrain spike PROVEN.** Runtime destructible craters work: a C++ `ADynamicMeshActor`
-generates a thick ground slab and carves sine-profile bowl craters at runtime via GeometryScript
-boolean subtract, with collision rebuilt so dropped physics objects settle into the crater. The
-project is now a C++ module (was Blueprint-only). Next up is Phase 2 (core gameplay loop).
+generates a heightfield ground grid and carves sine-profile craters at runtime by lowering the
+surface vertices (a direct port of the legacy `DeformLandscape` model), with collision rebuilt so
+dropped physics objects settle into the crater. The project is now a C++ module (was Blueprint-only).
+Next up is Phase 2 (core gameplay loop).
 
 - **Strategy:** Hybrid port (extract the hard, valuable algorithms; rebuild glue/state/networking the
   Unreal way) · Modern reimagining · Single-player / hotseat first.
@@ -74,29 +75,32 @@ page talks to the proxy, which talks to the MCP server.
 ## Phase 1 spike result (proven)
 
 Terrain tech is resolved and **validated in-engine**: UE 5.8 Mesh Terrain is editor-authoring only
-(no runtime carve — confirmed at engine source level), so the destructible surface uses
-**GeometryScript + `UDynamicMeshComponent`** runtime booleans (native, no paid dep). See §4 of the
-research doc. The Phase 1 spike (`ACraterTerrainActor`) proved runtime craters end-to-end:
+(no runtime carve — confirmed at engine source level), so the destructible surface uses a
+**GeometryScript `UDynamicMeshComponent` heightfield** (native, no paid dep). See §4 of the research
+doc. The Phase 1 spike (`ACraterTerrainActor`) proved runtime craters end-to-end:
 
-- A thick `AppendBox` ground slab is carved by boolean-subtracting a **sine-profile bowl** tool mesh
-  (the legacy `DeformLandscape.cpp` falloff, unit-tested in `CraterMath`), clamped to a bedrock floor.
+- The ground is a flat subdivided grid (`AppendRectangleXY`). `CarveCrater` carves by **lowering each
+  surface vertex** within the radius by the legacy sine falloff (`CraterMath::DepthAt`, unit-tested),
+  clamped to a bedrock floor — a direct port of `DeformLandscape.cpp:186-233`.
 - Collision is rebuilt after each carve, so dropped physics cubes **settle into** the craters.
 - **Verified by a deterministic headless test** — `Scorched.CraterCarve.RealDepression` runs the real
-  GeometryScript boolean and measures the resulting mesh:
+  deformation and measures the resulting mesh:
 
   | Measurement | Value | Meaning |
   |---|---|---|
-  | center surface Z | **−189.8** | carved ~190 cm below the original slab top (Z=0) |
+  | center surface Z | **−287.1** | carved ~287 cm below the original surface (Z=0) |
   | terrain Z outside crater | **0.0** | untouched — flat ground remains flat |
-  | slab bottom Z | **−600.0** | floor survives → a concave **bowl**, not a punched hole |
+  | highest vertex anywhere | **0.0** | nothing raised above the surface → **no lid possible** |
 
   Run it editor-closed: `Automation RunTests Scorched.CraterCarve` → `Result={Success}`.
 
-**Two findings that mattered:** (1) the ground must be a thick closed **slab**, not a flat plane —
-subtracting a bowl from a single-sided plane punches a hole instead of a crater; (2) the cutter rim
-must sit **above** the surface (a small lift), or the coplanar boolean only imprints a seam and
-removes no volume — the original carve looked like "shaky circles on flat ground" until this was
-fixed. (Design/build details: [`docs/superpowers/specs`](docs/superpowers/specs/) +
+**Why a heightfield, not a mesh boolean:** the first approach boolean-subtracted a closed bowl solid
+from a closed slab. Even done correctly that yields a closed volume — it produced a visible "lid" over
+the crater, on top of earlier coplanar-seam and slab-vs-plane failures. A heightfield is single-valued
+(one height per cell), so a lid is geometrically impossible and the whole class of CSG bugs disappears.
+This matches what Scorched3D actually does — it's a heightfield game. **Tradeoff:** no overhangs/caves
+(which Scorched3D never had); if those are ever wanted, that's when DynamicMesh booleans or voxels
+return. (Design/build details: [`docs/superpowers/specs`](docs/superpowers/specs/) +
 [`docs/superpowers/plans`](docs/superpowers/plans/).)
 
 ## Next step
