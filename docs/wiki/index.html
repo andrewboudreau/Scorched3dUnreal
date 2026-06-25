@@ -3,18 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scorched3D → Unreal — Working-Notes Wiki</title>
+  <title>Scorched3D → Unreal — Field Manual</title>
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <header class="site-header">
-    <div class="site-title">
-      <span class="logo">⛰</span>
-      <span>Scorched3D <span class="arrow">→</span> Unreal <span class="subtitle">working-notes wiki</span></span>
+    <div class="masthead">
+      <div class="site-title">
+        <span class="logo" aria-hidden="true">◎</span>
+        <span class="title-text">
+          <span class="title-main">Scorched3D <span class="arrow">→</span> Unreal</span>
+          <span class="subtitle">field manual · working-notes wiki</span>
+        </span>
+      </div>
+      <div class="masthead-right">
+        <span class="status-stamp">Phase&nbsp;1 · Proven</span>
+        <nav class="site-links">
+          <a href="../../README.md">repo README ↗</a>
+        </nav>
+      </div>
     </div>
-    <nav class="site-links">
-      <a href="../../README.md">repo README</a>
-    </nav>
+    <div class="masthead-rule" aria-hidden="true"></div>
   </header>
 
   <div class="layout">
@@ -30,7 +39,7 @@
 
     <aside class="notes-col">
       <div class="notes-header">
-        <h2>Notes &amp; questions</h2>
+        <h2>Field log</h2>
         <span class="notes-topic" id="notes-topic"></span>
       </div>
       <div class="notes-status" id="notes-status"></div>
@@ -49,9 +58,9 @@
           </select>
           <span class="note-form-author">as <strong>you</strong></span>
         </div>
-        <textarea id="note-text" rows="3" placeholder="Add a note or ask a question… (markdown supported)"></textarea>
+        <textarea id="note-text" rows="3" placeholder="Log a note or ask a question… (markdown supported)"></textarea>
         <div class="note-form-actions">
-          <button type="submit" id="note-submit">Add</button>
+          <button type="submit" id="note-submit">Log it</button>
         </div>
         <div class="note-form-error" id="note-error" hidden></div>
       </form>

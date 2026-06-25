@@ -102,7 +102,13 @@ function renderTable(headerLine, rows) {
   html += "</tr></thead><tbody>";
   rows.forEach((r) => {
     const cells = splitRow(r);
-    html += "<tr>";
+    // Color-code alignment rows by a status symbol in any cell (✅ / ⚠ / ❌).
+    const joined = cells.join(" ");
+    let cls = "";
+    if (joined.indexOf("✅") !== -1) cls = ' class="row-ok"';
+    else if (joined.indexOf("⚠") !== -1) cls = ' class="row-warn"';
+    else if (joined.indexOf("❌") !== -1) cls = ' class="row-bad"';
+    html += "<tr" + cls + ">";
     for (let i = 0; i < headers.length; i++) {
       html += "<td>" + renderInline(cells[i] || "") + "</td>";
     }
@@ -319,6 +325,10 @@ async function loadContent(slug) {
       "<h1>Page not found</h1><p>Could not load <code>content/" +
       esc(slug) + ".md</code>.</p>";
   }
+  // Replay the entrance animation on each route change.
+  el.content.classList.remove("enter");
+  void el.content.offsetWidth;
+  el.content.classList.add("enter");
 }
 
 async function route() {
