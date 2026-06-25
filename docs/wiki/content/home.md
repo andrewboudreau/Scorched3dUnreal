@@ -7,6 +7,9 @@ design, and ask/answer questions in a shared queue.
 
 ## What's here
 
+- **[Roadmap & milestones](#/roadmap)** — how the legacy subsystems decompose into separately
+  buildable + validatable milestones (the dependency DAG, seams, and per-milestone acceptance
+  criteria). Start here for the plan.
 - **Subsystem comparison pages** — one page per major subsystem (terrain, weapons, AI aiming,
   ballistics & wind, netcode & state), each following the same skeleton so comparisons stay
   scannable.

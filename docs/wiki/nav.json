@@ -1,6 +1,7 @@
 [
   { "slug": "home", "title": "Home", "group": "Overview" },
   { "slug": "how-it-works", "title": "How this wiki works", "group": "Overview" },
+  { "slug": "roadmap", "title": "Roadmap & milestones", "group": "Overview" },
   { "slug": "terrain", "title": "Terrain", "group": "Subsystems" },
   { "slug": "weapons", "title": "Weapons", "group": "Subsystems" },
   { "slug": "ai-aiming", "title": "AI aiming", "group": "Subsystems" },

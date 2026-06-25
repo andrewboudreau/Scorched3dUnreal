@@ -16,5 +16,50 @@
     "parentId": null,
     "text": "Terrain page is live and proven. Two open questions worth your take: (1) do we ever need fixed-point determinism for MP, and (2) when do we switch from whole-mesh rebuild to a dirty-region carve? Reply here or ask your own.",
     "createdAt": "2026-06-25T01:39:57.568055+00:00"
+  },
+  {
+    "id": "bee8d218-8347-403e-b82c-f01014d8a68f",
+    "topic": "roadmap",
+    "type": "note",
+    "author": "claude",
+    "parentId": null,
+    "text": "Sequencing proposal: M0 ? ? **M1 (projectile+wind)** next as the linchpin, with **M2 (unit settle)** in parallel, then M3/M4 off M1, then M5 ties it into a hotseat round. Push back here if you want a different order.",
+    "createdAt": "2026-06-25T03:09:36.233066+00:00"
+  },
+  {
+    "id": "7cbde368-85bf-4760-9866-c48fc7a8fd04",
+    "topic": "ballistics-wind",
+    "type": "note",
+    "author": "claude",
+    "parentId": null,
+    "text": "**M1 - critical-path next.** Lock the seam first: a pure `SimulateShot(params, wind, groundQuery) -> Impact` so M4 (AI) reuses it verbatim. Headless accept: apex/range track angle*power, lateral drift increases with wind, impact point matches a heightfield query. In-engine: fired arc lands and triggers CarveCrater.",
+    "createdAt": "2026-06-25T03:10:35.218642+00:00"
+  },
+  {
+    "id": "4c0d35b8-c092-454d-b669-a000194c3349",
+    "topic": "weapons",
+    "type": "question",
+    "author": "claude",
+    "parentId": null,
+    "text": "**M3 - depends on M1.** Seam: `FireWeapon(def, origin, target)` over an `IWeaponEffect` part tree. Headless accept: a data-defined weapon instantiates the expected part tree and emits the expected ordered effect calls against a mock sink. Open question for you: weapon defs as `UPrimaryDataAsset`, or a DataTable/JSON?",
+    "createdAt": "2026-06-25T03:10:37.287615+00:00"
+  },
+  {
+    "id": "e188d139-df18-483c-99a9-85d42450ca0e",
+    "topic": "ai-aiming",
+    "type": "note",
+    "author": "claude",
+    "parentId": null,
+    "text": "**M4 - mostly headless-provable.** Reuses M1 `SimulateShot` verbatim (player and AI share one simulator, as in legacy `TankAIAimGuesser`). Accept: a battery of (target, terrain, wind) scenarios converge within tolerance inside an iteration budget; difficulty = iteration/error knobs.",
+    "createdAt": "2026-06-25T03:10:39.344654+00:00"
+  },
+  {
+    "id": "172c753d-dfb1-4574-bba7-39acafaf2bfb",
+    "topic": "netcode-state",
+    "type": "note",
+    "author": "claude",
+    "parentId": null,
+    "text": "**Deferred milestone - replace, not port.** Single-player/hotseat first; revisit fixed-point determinism only if multiplayer later demands cross-client terrain agreement.",
+    "createdAt": "2026-06-25T03:10:41.409503+00:00"
   }
 ]
