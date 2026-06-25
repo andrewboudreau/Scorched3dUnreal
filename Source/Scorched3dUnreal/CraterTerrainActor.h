@@ -31,6 +31,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Crater")
     void CarveCrater(FVector WorldCenter, float Radius);
 
+    /** (Re)builds the ground slab mesh and refreshes collision. Public so tests/tools can rebuild on demand. */
+    void RegenerateGround();
+
 protected:
     virtual void BeginPlay() override;
 
@@ -52,9 +55,6 @@ protected:
 
     /** Drop a physics cube above WorldPoint to visually confirm collision. */
     void SpawnProbeCube(FVector WorldPoint);
-
-    /** (Re)builds the flat ground mesh and refreshes collision. */
-    void RegenerateGround();
 
     /**
      * Builds a watertight "bowl plug" solid around the local origin: a flat top
