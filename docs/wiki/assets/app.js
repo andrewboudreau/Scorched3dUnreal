@@ -240,6 +240,7 @@ const state = {
   nav: [],
   slug: DEFAULT_SLUG,
   replyTo: null, // {id} when replying to a question
+  readOnly: false, // true on a static host (e.g. GitHub Pages) with no notes API
 };
 
 const el = {
@@ -392,7 +393,7 @@ function renderNotes(notes) {
 
     html += '<div class="note-body">' + md(n.text || "") + "</div>";
 
-    if (n.type === "question") {
+    if (n.type === "question" && !state.readOnly) {
       html += '<button class="note-reply-btn" data-reply="' + esc(n.id) + '">Reply</button>';
     }
     html += "</div>";
@@ -404,6 +405,11 @@ function renderNotes(notes) {
   });
 }
 
+function setReadOnly(ro) {
+  state.readOnly = ro;
+  if (el.form) el.form.hidden = ro;
+}
+
 async function loadNotes(slug) {
   el.notesTopic.textContent = slug;
   el.notesStatus.textContent = "";
@@ -412,12 +418,29 @@ async function loadNotes(slug) {
     const res = await fetch("api/notes?topic=" + encodeURIComponent(slug), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const notes = await res.json();
+    setReadOnly(false);
     renderNotes(notes);
   } catch (e) {
-    el.notesThread.innerHTML = "";
-    el.notesStatus.textContent =
-      "Notes API unreachable — start the server with `python tools/wiki-serve.py` to read/add notes.";
-    el.notesStatus.classList.add("error");
+    // No notes API (e.g. static GitHub Pages): fall back to a read-only view that
+    // loads notes.json directly and hides the post form.
+    try {
+      const res = await fetch("notes.json", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const all = await res.json();
+      const notes = all
+        .filter((n) => n.topic === slug || n.topic === "general")
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      setReadOnly(true);
+      renderNotes(notes);
+      el.notesStatus.textContent =
+        "Read-only published view — run the local server to add notes or replies.";
+    } catch (e2) {
+      setReadOnly(false);
+      el.notesThread.innerHTML = "";
+      el.notesStatus.textContent =
+        "Notes API unreachable — start the server with `python tools/wiki-serve.py` to read/add notes.";
+      el.notesStatus.classList.add("error");
+    }
   }
 }
 

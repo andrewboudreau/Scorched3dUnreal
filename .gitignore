@@ -1,5 +1,14 @@
-# --- Legacy source checkout (research reference only, not part of this repo) ---
-.tmp/
+# --- Ignore ALL hidden / dot-prefixed folders (.vs, .vscode, .idea, .tmp, etc.) ---
+# Covers the legacy Scorched3D source checkout in .tmp/ (reference only).
+# Exception: .github must stay tracked — GitHub Actions / Pages config lives there.
+.*/
+!.github/
+
+# --- Large UE binary assets — kept OUT of the repo for now (add later if wanted) ---
+/Content/
+
+# --- Python bytecode cache (wiki tools) ---
+__pycache__/
 
 # --- Unreal Engine project ---
 # Build / intermediate / generated
@@ -49,3 +58,6 @@ desktop.ini
 # Crash / log files
 *.log
 Crashes/
+
+# MCP browser tool — generated graph cache
+tools/.mcp-graph-cache.json

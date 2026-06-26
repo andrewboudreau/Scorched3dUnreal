@@ -1,0 +1,45 @@
+name: Deploy wiki to GitHub Pages
+
+# Publishes the static working-notes wiki (docs/wiki) to GitHub Pages.
+# The notes write-API is local-only; on Pages the page degrades to a
+# read-only view that loads notes.json directly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer pushes supersede in-progress runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload wiki as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/wiki
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
