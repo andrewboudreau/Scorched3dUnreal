@@ -74,6 +74,10 @@ page talks to the proxy, which talks to the MCP server.
 
 ## Project wiki — working notes & architecture comparison
 
+**Live (read-only):** https://andrewboudreau.github.io/Scorched3dUnreal/ — auto-published from
+`docs/wiki/` on every push to `main`. The published site is read-only; run it locally (below) to
+add notes or answer questions.
+
 A small, local, **no-build** wiki for working notes and side-by-side comparisons of our
 Unreal-native architecture vs. the legacy Scorched3D design (terrain, weapons, AI aiming,
 ballistics & wind, netcode). It's **for us to communicate**: pages are Markdown in the repo, and
