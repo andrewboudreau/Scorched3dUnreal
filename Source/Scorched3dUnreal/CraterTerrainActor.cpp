@@ -4,6 +4,7 @@
 #include "GeometryScript/MeshPrimitiveFunctions.h"
 #include "GeometryScript/MeshNormalsFunctions.h"
 #include "CraterMath.h"
+#include "TerrainHeight.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
@@ -59,6 +60,27 @@ void ACraterTerrainActor::RegenerateGround()
         Mesh, Options, FTransform::Identity,
         GridExtent, GridExtent,
         GridResolution, GridResolution);
+
+    // Displace the flat grid into procedural hills (layered Perlin). Skipped entirely
+    // when HillAmplitude<=0, so the surface stays flat at Z=0 (preserves M0 tests).
+    if (HillAmplitude > 0.0f)
+    {
+        TerrainHeight::FParams HP;
+        HP.Amplitude = HillAmplitude;
+        HP.Frequency = HillFrequency;
+        HP.Octaves   = HillOctaves;
+        HP.Seed      = HillSeed;
+
+        Mesh->EditMesh([&](UE::Geometry::FDynamicMesh3& EditMesh)
+        {
+            for (const int32 Vid : EditMesh.VertexIndicesItr())
+            {
+                FVector3d V = EditMesh.GetVertex(Vid);
+                V.Z += TerrainHeight::HeightAt(V.X, V.Y, HP);
+                EditMesh.SetVertex(Vid, V);
+            }
+        });
+    }
 
     FGeometryScriptCalculateNormalsOptions NormalOptions;
     UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Mesh, NormalOptions);

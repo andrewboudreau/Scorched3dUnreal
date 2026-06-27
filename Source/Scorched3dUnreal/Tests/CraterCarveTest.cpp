@@ -92,3 +92,81 @@ bool FCraterCarveTest::RunTest(const FString& Parameters)
     World->DestroyWorld(/*bBroadcastWorldDestroyedEvent*/ false);
     return true;
 }
+
+// Carving into a HILLY heightfield still produces a real local depression and never
+// raises any vertex above its pre-carve height (no lid), and leaves far terrain untouched.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCraterCarveIntoHillsTest, "Scorched.CraterCarve.IntoHills",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCraterCarveIntoHillsTest::RunTest(const FString& Parameters)
+{
+    using namespace UE::Geometry;
+
+    UWorld* World = UWorld::CreateWorld(EWorldType::Editor, /*bInformEngineOfWorld*/ false);
+    if (!TestNotNull(TEXT("created world"), World)) return false;
+    FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Editor);
+    WorldContext.SetCurrentWorld(World);
+
+    ACraterTerrainActor* Actor = World->SpawnActor<ACraterTerrainActor>();
+    if (TestNotNull(TEXT("spawned ACraterTerrainActor"), Actor))
+    {
+        Actor->HillAmplitude = 500.0f;
+        Actor->HillFrequency = 0.001f;
+        Actor->HillOctaves   = 4;
+        Actor->HillSeed      = 1;
+        Actor->RegenerateGround();
+
+        UDynamicMesh* DM = Actor->GetDynamicMeshComponent()->GetDynamicMesh();
+        TestNotNull(TEXT("ground dynamic mesh"), DM);
+        if (DM)
+        {
+            // Snapshot pre-carve heights per vertex id.
+            TMap<int32, double> PreZ;
+            double PreMaxAll = -1.0e9, PreCenterMin = 1.0e9;
+            {
+                const FDynamicMesh3& Mesh = DM->GetMeshRef();
+                for (int32 Vid : Mesh.VertexIndicesItr())
+                {
+                    const FVector3d V = Mesh.GetVertex(Vid);
+                    PreZ.Add(Vid, V.Z);
+                    PreMaxAll = FMath::Max(PreMaxAll, V.Z);
+                    if (V.X * V.X + V.Y * V.Y < 120.0 * 120.0)
+                        PreCenterMin = FMath::Min(PreCenterMin, V.Z);
+                }
+            }
+
+            // Terrain actually has relief (hills were applied).
+            TestTrue(TEXT("hills produced relief"), PreMaxAll > 50.0);
+
+            const float Radius = 300.0f;
+            Actor->CarveCrater(Actor->GetActorLocation(), Radius);
+
+            const FDynamicMesh3& Mesh = DM->GetMeshRef();
+            double PostCenterMin = 1.0e9;
+            bool   bAnythingRaised = false;
+            bool   bFarChanged = false;
+            for (int32 Vid : Mesh.VertexIndicesItr())
+            {
+                const FVector3d V = Mesh.GetVertex(Vid);
+                const double Before = PreZ.FindRef(Vid);
+                if (V.Z > Before + 1e-3) bAnythingRaised = true;          // carve must only LOWER
+                if (V.X * V.X + V.Y * V.Y < 120.0 * 120.0)
+                    PostCenterMin = FMath::Min(PostCenterMin, V.Z);
+                if (V.X * V.X + V.Y * V.Y > 600.0 * 600.0 &&
+                    FMath::Abs(V.Z - Before) > 1e-3) bFarChanged = true;  // far terrain untouched
+            }
+
+            TestFalse(TEXT("no vertex raised above its pre-carve height (no lid)"), bAnythingRaised);
+            TestFalse(TEXT("far terrain untouched"), bFarChanged);
+            TestTrue(FString::Printf(TEXT("center dropped (pre min=%.1f, post min=%.1f, expect >200 drop)"),
+                PreCenterMin, PostCenterMin), (PreCenterMin - PostCenterMin) > 200.0);
+
+            AddInfo(FString::Printf(TEXT("PreMaxAll=%.1f PreCenterMin=%.1f PostCenterMin=%.1f"),
+                PreMaxAll, PreCenterMin, PostCenterMin));
+        }
+    }
+
+    GEngine->DestroyWorldContext(World);
+    World->DestroyWorld(/*bBroadcastWorldDestroyedEvent*/ false);
+    return true;
+}
