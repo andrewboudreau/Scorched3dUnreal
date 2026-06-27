@@ -9,7 +9,8 @@ public class Scorched3dUnreal : ModuleRules
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core", "CoreUObject", "Engine", "InputCore",
-            "GeometryCore", "DynamicMesh", "GeometryFramework", "GeometryScriptingCore"
+            "GeometryCore", "DynamicMesh", "GeometryFramework", "GeometryScriptingCore",
+            "EnhancedInput"
         });
     }
 }
