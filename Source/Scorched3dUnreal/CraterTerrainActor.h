@@ -18,6 +18,18 @@ public:
     /** Number of quads per side. Higher = smoother craters, more cost. */
     UPROPERTY(EditAnywhere, Category = "Terrain") int32 GridResolution = 64;
 
+    /** Peak procedural hill height in cm. 0 = flat (default; keeps M0 tests valid). */
+    UPROPERTY(EditAnywhere, Category = "Terrain|Hills") float HillAmplitude = 0.0f;
+
+    /** Base noise frequency (1/cm). Smaller = broader hills. */
+    UPROPERTY(EditAnywhere, Category = "Terrain|Hills") float HillFrequency = 0.0005f;
+
+    /** Number of noise octaves layered into the terrain. */
+    UPROPERTY(EditAnywhere, Category = "Terrain|Hills") int32 HillOctaves = 4;
+
+    /** Seed offset for the hill noise field. */
+    UPROPERTY(EditAnywhere, Category = "Terrain|Hills") int32 HillSeed = 0;
+
     /** Scales crater depth (legacy depthScale). Max depth = Radius * DepthScale. */
     UPROPERTY(EditAnywhere, Category = "Crater") float DepthScale = 1.0f;
 
