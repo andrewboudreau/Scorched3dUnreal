@@ -86,6 +86,10 @@ void AFlyCameraPawn::BuildInput()
 void AFlyCameraPawn::BeginPlay()
 {
     Super::BeginPlay();
+    if (Movement)
+    {
+        Movement->MaxSpeed = MoveSpeed; // honor an editor-tuned MoveSpeed at runtime
+    }
     BuildInput();
 
     if (APlayerController* PC = Cast<APlayerController>(GetController()))

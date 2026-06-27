@@ -32,11 +32,11 @@ protected:
     UPROPERTY(VisibleAnywhere, Category = "Fly") UCameraComponent* Camera;
     UPROPERTY(VisibleAnywhere, Category = "Fly") UFloatingPawnMovement* Movement;
 
-    UPROPERTY() UInputMappingContext* MappingContext;
-    UPROPERTY() UInputAction* MoveAction;
-    UPROPERTY() UInputAction* LookAction;
-    UPROPERTY() UInputAction* VerticalAction;
-    UPROPERTY() UInputAction* FireAction;
+    UPROPERTY(Transient) UInputMappingContext* MappingContext;
+    UPROPERTY(Transient) UInputAction* MoveAction;
+    UPROPERTY(Transient) UInputAction* LookAction;
+    UPROPERTY(Transient) UInputAction* VerticalAction;
+    UPROPERTY(Transient) UInputAction* FireAction;
 
     void BuildInput();                          // create actions + mapping context (idempotent)
     void OnMove(const FInputActionValue& Value);
