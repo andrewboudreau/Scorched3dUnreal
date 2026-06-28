@@ -6,6 +6,7 @@
 #include "CraterMath.h"
 #include "TerrainHeight.h"
 #include "DynamicMesh/DynamicMesh3.h"
+#include "DynamicMesh/MeshNormals.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
@@ -86,8 +87,10 @@ void ACraterTerrainActor::RegenerateGround()
     UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Mesh, NormalOptions);
 
     // Complex-as-simple so the deformed surface is collidable at runtime.
-    // bImmediateUpdate=false defers the rebuild so we do a single explicit UpdateCollision below,
-    // avoiding a double full rebuild (SetComplexAsSimpleCollisionEnabled(true,true) calls UpdateCollision internally).
+    // bUseAsyncCooking=true cooks the physics mesh off the game thread, so carves and the
+    // initial big-terrain build don't hitch. bImmediateUpdate=false defers the rebuild so we
+    // do a single explicit UpdateCollision below (avoids a double rebuild).
+    Comp->bUseAsyncCooking = true;
     Comp->SetComplexAsSimpleCollisionEnabled(true, /*bImmediateUpdate*/ false);
     Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     Comp->UpdateCollision(/*bOnlyIfPending*/ false);
@@ -98,10 +101,9 @@ void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
     UDynamicMesh* Ground = GetDynamicMeshComponent()->GetDynamicMesh();
     if (!Ground || Radius <= 0.0f) return;
 
-    // Heightfield deformation — a direct port of the legacy DeformLandscape model
-    // (DeformLandscape.cpp:186-233): lower each surface vertex within Radius by the
-    // sine falloff (CraterMath::DepthAt), clamped to the bedrock floor. The surface
-    // stays single-valued, so there is no lid and no coplanar-boolean degeneracy.
+    // Heightfield deformation — a direct port of the legacy DeformLandscape model:
+    // lower each surface vertex within Radius by the sine falloff (CraterMath::DepthAt),
+    // clamped to the bedrock floor. The surface stays single-valued, so there is no lid.
     const FTransform Xf = GetActorTransform();
     const FVector LocalCenter = Xf.InverseTransformPosition(WorldCenter);
     const double LocalBedrockZ =
@@ -111,6 +113,8 @@ void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
 
     Ground->EditMesh([&](UE::Geometry::FDynamicMesh3& EditMesh)
     {
+        // 1) Lower only the vertices inside the crater; remember which actually moved.
+        TSet<int32> MovedVerts;
         for (const int32 Vid : EditMesh.VertexIndicesItr())
         {
             FVector3d V = EditMesh.GetVertex(Vid);
@@ -118,14 +122,34 @@ void ACraterTerrainActor::CarveCrater(FVector WorldCenter, float Radius)
                 FMath::Square(V.X - LocalCenter.X) + FMath::Square(V.Y - LocalCenter.Y));
             const double Drop = CraterMath::DepthAt(Dist, R, Scale); // 0 outside Radius
             if (Drop <= 0.0) continue;
-            V.Z = FMath::Max(V.Z - Drop, LocalBedrockZ);
-            EditMesh.SetVertex(Vid, V);
+            const double NewZ = FMath::Max(V.Z - Drop, LocalBedrockZ);
+            if (NewZ < V.Z) // skip verts already at/under bedrock (no actual move)
+            {
+                V.Z = NewZ;
+                EditMesh.SetVertex(Vid, V);
+                MovedVerts.Add(Vid);
+            }
+        }
+
+        // 2) Recompute normals ONLY for the triangles touching moved vertices (dirty region),
+        //    instead of the whole mesh — so carve cost tracks the crater, not the terrain size.
+        TSet<int32> AffectedTris;
+        for (const int32 Vid : MovedVerts)
+        {
+            for (const int32 Tid : EditMesh.VtxTrianglesItr(Vid))
+            {
+                AffectedTris.Add(Tid);
+            }
+        }
+        if (AffectedTris.Num() > 0)
+        {
+            UE::Geometry::FMeshNormals::RecomputeOverlayTriNormals(EditMesh, AffectedTris.Array());
         }
     });
 
-    // Recompute normals so shading follows the new surface, then rebuild collision.
-    FGeometryScriptCalculateNormalsOptions NormalOptions;
-    UGeometryScriptLibrary_MeshNormalsFunctions::RecomputeNormals(Ground, NormalOptions);
+    // 3) Rebuild collision. The component has bUseAsyncCooking=true (set in RegenerateGround),
+    //    so this cooks off the game thread and does not hitch; collision is briefly stale until
+    //    the cook lands, which is fine for turn-paced artillery.
     GetDynamicMeshComponent()->UpdateCollision(/*bOnlyIfPending*/ false);
 }
 
