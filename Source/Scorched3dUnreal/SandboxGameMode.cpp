@@ -1,5 +1,4 @@
 #include "SandboxGameMode.h"
-#include "FlyCameraPawn.h"
 #include "TankPawn.h"
 #include "SandboxHUD.h"
 #include "TerrainHeight.h"
@@ -49,6 +48,7 @@ void ASandboxGameMode::EnsureTerrain()
     Terrain->HillAmplitude = HillAmplitude;
     Terrain->HillFrequency = HillFrequency;
     Terrain->HillSeed = HillSeed;
+    Terrain->HillOctaves = HillOctaves;
 
     UGameplayStatics::FinishSpawningActor(Terrain, Xf); // BeginPlay -> RegenerateGround with hills
 }
@@ -123,7 +123,7 @@ void ASandboxGameMode::PlaceTankOnTerrain()
     TerrainHeight::FParams HP;
     HP.Amplitude = HillAmplitude;
     HP.Frequency = HillFrequency;
-    HP.Octaves   = 4;
+    HP.Octaves   = HillOctaves;
     HP.Seed      = HillSeed;
 
     const double SurfaceZ = TerrainHeight::HeightAt(0.0, 0.0, HP);

@@ -17,6 +17,7 @@ public:
     UPROPERTY(EditAnywhere, Category = "Sandbox") float HillAmplitude = 5000.0f;       // cm (50 m)
     UPROPERTY(EditAnywhere, Category = "Sandbox") float HillFrequency = 0.00006f;
     UPROPERTY(EditAnywhere, Category = "Sandbox") int32 HillSeed = 7;
+    UPROPERTY(EditAnywhere, Category = "Sandbox") int32 HillOctaves = 4;
 
 protected:
     virtual void BeginPlay() override;
