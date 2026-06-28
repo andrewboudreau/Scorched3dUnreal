@@ -12,10 +12,10 @@ class SCORCHED3DUNREAL_API ASandboxGameMode : public AGameModeBase
 public:
     ASandboxGameMode();
 
-    UPROPERTY(EditAnywhere, Category = "Sandbox") float TerrainExtent = 60000.0f;     // cm (600 m)
-    UPROPERTY(EditAnywhere, Category = "Sandbox") int32 TerrainResolution = 256;
-    UPROPERTY(EditAnywhere, Category = "Sandbox") float HillAmplitude = 3000.0f;       // cm (30 m)
-    UPROPERTY(EditAnywhere, Category = "Sandbox") float HillFrequency = 0.0001f;
+    UPROPERTY(EditAnywhere, Category = "Sandbox") float TerrainExtent = 100000.0f;    // cm (1 km)
+    UPROPERTY(EditAnywhere, Category = "Sandbox") int32 TerrainResolution = 334;       // ~3 m cells
+    UPROPERTY(EditAnywhere, Category = "Sandbox") float HillAmplitude = 5000.0f;       // cm (50 m)
+    UPROPERTY(EditAnywhere, Category = "Sandbox") float HillFrequency = 0.00006f;
     UPROPERTY(EditAnywhere, Category = "Sandbox") int32 HillSeed = 7;
 
 protected:
@@ -23,5 +23,5 @@ protected:
 
     void EnsureTerrain();
     void EnsureLighting();
-    void PlacePlayerAboveTerrain();
+    void PlaceTankOnTerrain();
 };

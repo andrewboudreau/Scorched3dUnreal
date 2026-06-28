@@ -1,5 +1,8 @@
 #include "SandboxGameMode.h"
 #include "FlyCameraPawn.h"
+#include "TankPawn.h"
+#include "SandboxHUD.h"
+#include "TerrainHeight.h"
 #include "CraterTerrainActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
@@ -14,7 +17,8 @@
 
 ASandboxGameMode::ASandboxGameMode()
 {
-    DefaultPawnClass = AFlyCameraPawn::StaticClass();
+    DefaultPawnClass = ATankPawn::StaticClass();
+    HUDClass = ASandboxHUD::StaticClass();
 }
 
 void ASandboxGameMode::BeginPlay()
@@ -22,7 +26,7 @@ void ASandboxGameMode::BeginPlay()
     Super::BeginPlay();
     EnsureLighting();
     EnsureTerrain();
-    PlacePlayerAboveTerrain();
+    PlaceTankOnTerrain();
 }
 
 void ASandboxGameMode::EnsureTerrain()
@@ -103,7 +107,7 @@ void ASandboxGameMode::EnsureLighting()
     }
 }
 
-void ASandboxGameMode::PlacePlayerAboveTerrain()
+void ASandboxGameMode::PlaceTankOnTerrain()
 {
     UWorld* World = GetWorld();
     if (!World) return;
@@ -113,9 +117,16 @@ void ASandboxGameMode::PlacePlayerAboveTerrain()
     APawn* P = PC->GetPawn();
     if (!P) return;
 
-    // Lift above the hills and look toward the center.
-    const FVector Loc(-0.5f * TerrainExtent, 0.0f, HillAmplitude + 6000.0f);
+    // Rest the tank on the terrain by sampling the SAME procedural height the terrain used
+    // (analytic — no reliance on collision, which cooks asynchronously). Octaves matches the
+    // terrain actor's default (4).
+    TerrainHeight::FParams HP;
+    HP.Amplitude = HillAmplitude;
+    HP.Frequency = HillFrequency;
+    HP.Octaves   = 4;
+    HP.Seed      = HillSeed;
+
+    const double SurfaceZ = TerrainHeight::HeightAt(0.0, 0.0, HP);
+    const FVector Loc(0.0f, 0.0f, static_cast<float>(SurfaceZ) + 60.0f); // hull half-height clearance
     P->SetActorLocation(Loc);
-    const FRotator LookAtCenter = (FVector::ZeroVector - Loc).Rotation();
-    PC->SetControlRotation(LookAtCenter);
 }
