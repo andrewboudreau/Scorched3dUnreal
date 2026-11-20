@@ -75,6 +75,11 @@ const ghosts = new Map();
 const GHOST_FADE = [0.6, 0.3, 0.15];   // newest shot first
 const ringShape = new THREE.RingGeometry(1.7, 2.3, 28).rotateX(-Math.PI / 2);
 let handoffOpen = false;        // volley planning: waiting for the next human to sit down
+// A volley with one human in it: the camera rides that human's shell and every
+// other tank's landing gets a pip (see addPip). Null when several humans share
+// the screen; then the camera stands back to frame every shell instead.
+let heroId = null;
+const pips = [];
 let followShell = true;
 let overview = false;
 let pinned = false;
@@ -157,6 +162,8 @@ function disposeMatch() {
   closeHandoff();
   effects.clear();
   tanks = []; wrecks = []; labels = [];
+  pips.length = 0;
+  heroId = null;
   $('labels').innerHTML = '';
 }
 
@@ -239,10 +246,14 @@ function handleEvents() {
         sound.click();
         banner('Locked in', '', 700);
         break;
-      case 'volley':
+      case 'volley': {
         closeHandoff();
+        const alive = game.humans.filter((h) => h.alive && e.players.includes(h.id));
+        heroId = alive.length === 1 ? alive[0].id : null;
+        if (heroId != null && followShell && !overview) aimCameraAt(game.players[heroId]);
         banner('Fire!', `${e.players.length} tanks, all together`, 1300);
         break;
+      }
       case 'aimReset':
         if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
         break;
@@ -275,10 +286,13 @@ function handleEvents() {
         retireShell(e.id);
         break;
       case 'impact':
-      case 'lost':
+      case 'lost': {
+        const owner = shells.get(e.id)?.owner;
+        if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
-        if (e.type === 'lost' && game.phase !== 'aim') banner('Out of the arena', '', 900);
+        if (e.type === 'lost' && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner('Out of the arena', '', 900);
         break;
+      }
       case 'explosion':
         effects.explosion(e.pos, e.radius);
         sound.explode(e.radius, camDist(e.pos));
@@ -298,9 +312,13 @@ function handleEvents() {
         if (e.kind === 'house') { effects.dust(e.pos, 7); sound.thud(camDist(e.pos)); }
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
-      case 'damage':
+      case 'damage': {
         popDamage(e.player, e.amount);
+        // Name the victim on the shooter's pip.
+        const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
+        if (pip) pip.el.querySelector('span').textContent = `${game.players[e.by].name} hit ${e.player === heroId ? 'you' : game.players[e.player].name}`;
         break;
+      }
       case 'landed': {
         const q = game.players[e.player];
         effects.dust([q.x, q.y, q.z], 4);
@@ -372,6 +390,60 @@ function closeHandoff() {
 }
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 
+// ---------------------------------------------------------------- volley pips
+
+// A small dot in the shooter's colour where another tank's shell came down,
+// pinned to the screen edge (with an arrow) when that spot is off camera.
+// They last until a few seconds into the next planning phase.
+function addPip(owner, pos) {
+  const now = performance.now();
+  // A cluster's bomblets land together: one pip covers them.
+  if (pips.some((q) => q.owner === owner && now - q.born < 2500 && Math.hypot(q.pos[0] - pos[0], q.pos[2] - pos[2]) < 40)) return;
+  const p = game.players[owner];
+  const el = document.createElement('div');
+  el.className = 'pip';
+  el.style.setProperty('--c', p.color);
+  el.innerHTML = `<i></i><span>${escapeHtml(p.name)}</span>`;
+  $('labels').appendChild(el);
+  pips.push({ owner, pos: [...pos], el, born: now, until: 0 });
+}
+
+const _pipV = new THREE.Vector3();
+function updatePips() {
+  const now = performance.now();
+  const W = window.innerWidth, H = window.innerHeight;
+  const placed = [];            // edge pips so far this frame, so they don't stack
+  for (let i = pips.length - 1; i >= 0; i--) {
+    const q = pips[i];
+    if (!q.until && game.phase === 'aim') q.until = now + 4000;
+    const left = q.until ? (q.until - now) / 1000 : Infinity;
+    if (left <= 0) { q.el.remove(); pips.splice(i, 1); continue; }
+    q.el.style.opacity = Math.min(1, left / 1.2);
+    const v = _pipV.set(q.pos[0], q.pos[1] + 1, q.pos[2]).project(camera);
+    let x = v.x, y = v.y;
+    const behind = v.z > 1;
+    if (behind) { x = -x; y = -y; }
+    const off = behind || Math.abs(x) > 1 || Math.abs(y) > 1;
+    if (off) { const m = Math.max(Math.abs(x), Math.abs(y)) || 1; x /= m; y /= m; }
+    // On the edge, stay in far enough for the name to fit and clear of the
+    // weapon and help bars along the bottom.
+    const [l, r, t, b] = off ? [80, W - 80, 60, H - 125] : [10, W - 10, 10, H - 10];
+    let sx = Math.min(r, Math.max(l, (x * 0.5 + 0.5) * W));
+    let sy = Math.min(b, Math.max(t, (-y * 0.5 + 0.5) * H));
+    if (off) {
+      const alongY = sx === l || sx === r;   // on a side edge, slide up/down; else left/right
+      for (let tries = 0; tries < 6 && placed.some(([px, py]) => Math.hypot(px - sx, py - sy) < 34); tries++) {
+        if (alongY) sy = Math.min(b, Math.max(t, sy + 36)); else sx = Math.min(r, Math.max(l, sx + 90));
+      }
+      placed.push([sx, sy]);
+    }
+    q.el.classList.toggle('edge', off);
+    q.el.style.left = `${sx}px`;
+    q.el.style.top = `${sy}px`;
+    if (off) q.el.style.setProperty('--a', `${Math.atan2(-y, x)}rad`);
+  }
+}
+
 function popDamage(pid, amount) {
   const p = game.players[pid];
   const v = new THREE.Vector3(p.x, p.y + 6, p.z).project(camera);
@@ -404,8 +476,19 @@ function updateCamera(dt) {
       // Debug camera: hold still.
     } else if (overview) {
       camTarget.set(0, 10, 0);
+    } else if (heroId != null && game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
+      // Your volley: ride your own shell. Once it is down, hold on where it
+      // landed; the others' landings show as pips.
+      const hero = game.players[heroId];
+      const mine = game.projectiles.filter((pr) => pr.owner === heroId);
+      if (game.phase === 'volley') camTarget.set(hero.x, hero.y + 4, hero.z);
+      else if (mine.length) {
+        camTarget.set(0, 0, 0);
+        mine.forEach((pr) => camTarget.add(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])));
+        camTarget.divideScalar(mine.length);
+      }
     } else if (game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
-      // A volley: stand back far enough to see every shell (or, in the beat
+      // A shared-screen volley: stand back far enough to see every shell (or, in the beat
       // before, every tank about to fire).
       _box.makeEmpty();
       if (game.phase === 'volley') game.players.forEach((p) => { if (p.alive) _box.expandByPoint(_v.set(p.x, p.y, p.z)); });
@@ -939,6 +1022,7 @@ function tick(dt) {
     sceneryMesh.sync(elapsed);
     updateHud();
     updateLabels();
+    updatePips();
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;

@@ -735,7 +735,7 @@ export class Game {
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
     }
-    this.emit({ type: 'damage', player: p.id, amount, hp: p.hp });
+    this.emit({ type: 'damage', player: p.id, amount, hp: p.hp, by: attacker ? attacker.id : null });
     if (p.hp <= 0 && p.alive) {
       p.alive = false;
       if (attacker && attacker !== p) attacker.money += PAY.kill * payK;

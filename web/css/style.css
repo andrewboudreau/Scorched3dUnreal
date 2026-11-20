@@ -80,6 +80,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
   text-shadow: 0 2px 6px #000; animation: pop 1.3s ease-out forwards; }
 @keyframes pop { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
 
+/* Volley pips: where another tank's shell came down. The dot sits on the spot. */
+.pip { position: absolute; width: 10px; height: 10px; transform: translate(-50%, -50%); }
+.pip i { position: absolute; inset: 0; border-radius: 50%; background: var(--c);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .55), 0 0 10px var(--c); }
+.pip i::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--c); opacity: 0;
+  animation: pip-ping 1.3s ease-out 2; }
+@keyframes pip-ping { from { transform: scale(.4); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+.pip span { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 700;
+  color: var(--c); text-shadow: 0 1px 3px #000, 0 0 2px #000; white-space: nowrap; }
+.pip.edge i::after { content: ''; position: absolute; left: 50%; top: 50%; border: 5px solid transparent; border-left: 8px solid var(--c);
+  border-right-width: 0; transform: translate(-50%, -50%) rotate(var(--a)) translate(13px); }
+
 .screen { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(6, 9, 13, .55); backdrop-filter: blur(3px); }
 .card { background: rgba(18, 23, 30, .94); border: 1px solid var(--edge); border-radius: 14px; padding: 24px 28px; min-width: 340px;
   box-shadow: 0 20px 60px rgba(0,0,0,.5); max-height: 92vh; overflow: auto; }
