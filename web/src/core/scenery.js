@@ -1,8 +1,10 @@
 import { makeRng } from './rng.js';
 import { makePerlin } from './noise.js';
+import { planPaths, distToPaths } from './paths.js';
 
 // Everything that makes the field look lived in: water in the lowest basins,
-// trees, bushes, rocks, a few hamlets, a footbridge, villagers and sheep.
+// trees, bushes, rocks, a few hamlets, a footbridge, gravel roads and paths
+// (core/paths.js), villagers and sheep.
 //
 // Scenery is set dressing. It never blocks a shell and never hurts a tank. It
 // does react to the ground: `afterBlast` and `afterMound` remove, topple or
@@ -38,6 +40,7 @@ export class Scenery {
     this.walkers = [];    // villagers and sheep
     this.hamlets = [];    // { x, z }
     this.bridge = null;   // { a: [x, z], b: [x, z], y, alive }
+    this.paths = [];      // roads and footpaths: { kind, width, points: [[x, z], ...] }
     this.events = [];
     this.version = (this.version || 0) + 1;
     this.terrain.waterLevel = -Infinity;
@@ -112,6 +115,7 @@ export class Scenery {
     this.props.push(...houses);
 
     this.placeBridge(rng, nearTank, houses);
+    this.paths = planPaths({ terrain: t, hamlets: this.hamlets, houses, bridge: this.bridge, tanks, seed });
 
     // Flora and rocks, scattered by height, slope and a low-frequency "grove"
     // noise so trees gather into woods instead of an even sprinkle.
@@ -121,7 +125,8 @@ export class Scenery {
     const cap = { pine: 170 * area, oak: 150 * area, bush: 170 * area, rock: 110 * area };
     const blocked = (x, z) => nearTank(x, z, KEEP_TANK)
       || houses.some((h) => Math.hypot(h.x - x, h.z - z) < 7.5)
-      || (this.bridge && distToSegment(x, z, this.bridge.a, this.bridge.b) < 6);
+      || (this.bridge && distToSegment(x, z, this.bridge.a, this.bridge.b) < 6)
+      || distToPaths(this.paths, x, z) < 2.5;
     for (let i = 0; i < 3200 * area; i++) {
       const x = rng.range(-1, 1) * (t.half - 5);
       const z = rng.range(-1, 1) * (t.half - 5);
@@ -297,8 +302,36 @@ export class Scenery {
 
   scare(w, fromX, fromZ) {
     w.mode = 'flee';
+    w.route = null;
     w.heading = Math.atan2(w.z - fromZ, w.x - fromX) + this.rng.range(-0.5, 0.5);
     w.wait = this.rng.range(2.5, 4.5);
+  }
+
+  // Send a villager for a walk along the nearest road or path: over to it,
+  // then a way along it, never far from home. False if there is none handy.
+  stroll(w, open) {
+    let best = null;
+    for (const p of this.paths) {
+      if (p.kind === 'spur') continue;
+      p.points.forEach((q, i) => {
+        const d = Math.hypot(q[0] - w.x, q[1] - w.z);
+        if (d < 40 && (!best || d < best.d)) best = { p, i, d };
+      });
+    }
+    if (!best) return false;
+    const dir = this.rng.next() < 0.5 ? 1 : -1;
+    const want = this.rng.int(5, 16);
+    const route = [];
+    for (let i = best.i; i >= 0 && i < best.p.points.length && route.length < want; i += dir) {
+      const [x, z] = best.p.points[i];
+      if (!open(x, z) || Math.hypot(x - w.hx, z - w.hz) > 80) break;
+      route.push([x, z]);
+    }
+    if (route.length < 3) return false;
+    [w.tx, w.tz] = route.shift();
+    w.route = route;
+    w.mode = 'walk';
+    return true;
   }
 
   update(dt, tanks = []) {
@@ -318,7 +351,9 @@ export class Scenery {
         if (w.wait <= 0) { w.mode = 'idle'; w.wait = rng.range(1, 3); }
       } else if (w.mode === 'idle') {
         w.wait -= dt;
-        if (w.wait <= 0) {
+        if (w.wait <= 0 && w.kind === 'villager' && this.paths.length && rng.next() < 0.5 && this.stroll(w, open)) {
+          // off along the road
+        } else if (w.wait <= 0) {
           const a = rng.range(0, Math.PI * 2);
           const d = rng.range(2, w.roam);
           const x = w.hx + Math.cos(a) * d;
@@ -330,11 +365,12 @@ export class Scenery {
         const dz = w.tz - w.z;
         const d = Math.hypot(dx, dz);
         const step = pace.speed * dt;
-        if (d <= step) { w.mode = 'idle'; w.wait = rng.range(1.5, w.kind === 'sheep' ? 9 : 5); } else {
+        if (d <= step && w.route && w.route.length) [w.tx, w.tz] = w.route.shift();
+        else if (d <= step) { w.mode = 'idle'; w.wait = rng.range(1.5, w.kind === 'sheep' ? 9 : 5); } else {
           const x = w.x + (dx / d) * step;
           const z = w.z + (dz / d) * step;
           w.heading = Math.atan2(dz, dx);
-          if (open(x, z)) { w.x = x; w.z = z; } else { w.mode = 'idle'; w.wait = 1; }
+          if (open(x, z)) { w.x = x; w.z = z; } else { w.mode = 'idle'; w.wait = 1; w.route = null; }
         }
       }
       w.y = t.heightAt(w.x, w.z);

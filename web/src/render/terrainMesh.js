@@ -3,6 +3,10 @@ import { makePerlin } from '../core/noise.js';
 
 // Renders a core Heightfield as a lit, vertex-coloured slab with earthen sides.
 // Only the region a crater touched is rewritten after each blast.
+//
+// Roads and footpaths (core/paths.js) are drawn once into a mask texture laid
+// flat over the field and tinted in by the ground shader, so they follow every
+// dent in the ground. A crater or a mound wipes the mask where it lands.
 
 const C = {
   sand: new THREE.Color('#c8ae78'),
@@ -31,9 +35,15 @@ export const groundShade = {
 // so the ground reads as grass and dirt rather than smooth paint. The same
 // noise tilts the shading normal a little, which gives nearby ground a rough,
 // tufted surface; it fades out with distance so far hills stay calm.
-function addGroundDetail(material) {
+const PATH_TEXELS = 2048;
+const NO_PATHS = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+NO_PATHS.needsUpdate = true;
+
+function addGroundDetail(material, paths) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uCloud = groundShade.clouds;
+    shader.uniforms.uPath = paths.map;
+    shader.uniforms.uPathScale = paths.scale;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGroundP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -41,6 +51,8 @@ function addGroundDetail(material) {
       .replace('#include <common>', `#include <common>
 varying vec3 vGroundP;
 uniform vec3 uCloud[${MAX_CLOUD_SHADOWS}];
+uniform sampler2D uPath;
+uniform float uPathScale;
 float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float gNoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -62,6 +74,13 @@ float gRough(vec2 p) { return gNoise(p * 0.45) * 0.65 + gNoise(p * 1.9) * 0.35; 
   vec2 q = vGroundP.xz;
   float n = gNoise(q * 0.08) * 0.5 + gNoise(q * 0.31) * 0.3 + gNoise(q * 1.7) * 0.2;
   diffuseColor.rgb *= 0.84 + 0.32 * n;
+  // Gravel where the path mask says so, with a ragged edge and a little grit.
+  float pm = texture2D(uPath, q * uPathScale + 0.5).r;
+  if (pm > 0.02) {
+    float worn = smoothstep(0.28, 0.6, pm + (gNoise(q * 0.8) - 0.5) * 0.55);
+    vec3 gravel = vec3(0.47, 0.41, 0.31) * (0.8 + 0.32 * gHash(floor(q * 2.6))) * (0.9 + 0.2 * n);
+    diffuseColor.rgb = mix(diffuseColor.rgb, gravel, worn * 0.9);
+  }
   float shade = 0.0;
   for (int i = 0; i < ${MAX_CLOUD_SHADOWS}; i++) {
     vec3 c = uCloud[i];
@@ -112,7 +131,8 @@ export class TerrainMesh {
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
     this.geometry = geo;
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
-    addGroundDetail(this.material);
+    this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, canvas: null };
+    addGroundDetail(this.material, this.paths);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = true;
@@ -144,6 +164,63 @@ export class TerrainMesh {
     this.group.add(this.mesh, this.skirt);
     this.hMin = 0;
     this.hMax = 1;
+  }
+
+  // Paint these paths (core/paths.js) onto the ground, replacing any before.
+  setPaths(paths) {
+    const P = this.paths;
+    if (!P.canvas) {
+      P.canvas = document.createElement('canvas');
+      P.canvas.width = P.canvas.height = PATH_TEXELS;
+      const tex = new THREE.CanvasTexture(P.canvas);
+      tex.flipY = false;                 // canvas y runs with world z
+      tex.colorSpace = THREE.NoColorSpace;
+      tex.anisotropy = 4;
+      P.map.value = tex;
+    }
+    const g = P.canvas.getContext('2d');
+    const k = PATH_TEXELS / this.field.size;
+    const px = (v) => (v + this.field.half) * k;
+    g.globalCompositeOperation = 'source-over';
+    g.shadowBlur = 0;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, PATH_TEXELS, PATH_TEXELS);
+    g.strokeStyle = g.shadowColor = '#fff';
+    g.lineCap = g.lineJoin = 'round';
+    for (const p of paths) {
+      g.lineWidth = p.width * k;
+      g.shadowBlur = p.width * k * 0.6;  // a soft shoulder for the shader to fray
+      g.beginPath();
+      p.points.forEach(([x, z], i) => (i ? g.lineTo(px(x), px(z)) : g.moveTo(px(x), px(z))));
+      g.stroke();
+    }
+    P.map.value.needsUpdate = true;
+  }
+
+  // The ground in `region` was just blown out or buried: the path there is gone.
+  scuffPaths(region) {
+    const P = this.paths;
+    if (!P.canvas) return;
+    const f = this.field;
+    const k = PATH_TEXELS / f.size;
+    const x = ((region.i0 + region.i1) / 2) * f.cell * k;
+    const y = ((region.j0 + region.j1) / 2) * f.cell * k;
+    const r = Math.max(2, ((region.i1 - region.i0) / 2 - 1.5) * f.cell * 0.95) * k;
+    const g = P.canvas.getContext('2d');
+    const fade = g.createRadialGradient(x, y, r * 0.55, x, y, r);
+    fade.addColorStop(0, 'rgba(0,0,0,1)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    g.shadowBlur = 0;
+    g.fillStyle = fade;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    P.map.value.needsUpdate = true;
+  }
+
+  dispose() {
+    this.geometry.dispose();
+    this.skirtGeometry.dispose();
+    this.material.dispose();
+    if (this.paths.canvas) this.paths.map.value.dispose();
   }
 
   rebuild() {

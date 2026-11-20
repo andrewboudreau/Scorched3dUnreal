@@ -68,7 +68,13 @@ let smoke = [];                 // per tank: seconds until its next puff
 let labels = [];
 let wrecks = [];
 const shells = new Map();       // projectile id -> ShellVisual
-const ghosts = new Map();       // player id -> [Line] trails of their last shot
+// Onion skin. Player id -> [{ shot, line, ring }]: the trails of that tank's
+// last few shots and a ring where each came down. The core decides which shots
+// still count (Game.checkAimHistory); these only follow `player.shots`.
+const ghosts = new Map();
+const GHOST_FADE = [0.6, 0.3, 0.15];   // newest shot first
+const ringShape = new THREE.RingGeometry(1.7, 2.3, 28).rotateX(-Math.PI / 2);
+let handoffOpen = false;        // volley planning: waiting for the next human to sit down
 let followShell = true;
 let overview = false;
 let pinned = false;
@@ -77,6 +83,7 @@ const lastShake = new THREE.Vector3();
 // Desired camera offset from the orbit target, eased in spherical coordinates
 // so a turn change swings around instead of cutting overhead.
 let camGoal = null;
+let userCam = false;              // the player has dragged or zoomed this turn; leave the camera alone
 const _sCur = new THREE.Spherical();
 const _sGoal = new THREE.Spherical();
 const _off = new THREE.Vector3();
@@ -98,15 +105,56 @@ tracer.frustumCulled = false;
 tracer.visible = false;
 scene.add(tracer);
 
+function dropGhost(g) {
+  scene.remove(g.line);
+  g.line.geometry.dispose();
+  g.line.material.dispose();
+  if (g.ring) { scene.remove(g.ring); g.ring.material.dispose(); }
+}
+
+function clearGhosts() {
+  ghosts.forEach((arr) => arr.forEach(dropGhost));
+  ghosts.clear();
+}
+
+// Show the planning tank's own earlier shots, faded by age, and nobody else's.
+function updateGhosts() {
+  const me = game.phase === 'aim' && game.current && !game.current.ai && !handoffOpen ? game.current : null;
+  ghosts.forEach((arr, pid) => {
+    const shots = game.players[pid].shots;
+    const newest = shots.length ? shots[shots.length - 1].n : 0;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const g = arr[i];
+      if (!shots.some((s) => s.n === g.shot)) { dropGhost(g); arr.splice(i, 1); continue; }
+      const on = !!me && me.id === pid;
+      g.line.visible = on;
+      if (g.ring) g.ring.visible = on;
+      if (!on) continue;
+      const fade = GHOST_FADE[Math.min(GHOST_FADE.length - 1, newest - g.shot)];
+      g.line.material.opacity = fade;
+      if (g.ring) {
+        g.ring.material.opacity = fade;
+        g.ring.position.y = game.terrain.heightAt(g.ring.position.x, g.ring.position.z) + 0.35;
+        g.ring.scale.setScalar(Math.min(6, Math.max(1, camDist(g.ring.position.toArray()) / 70)));   // readable from across the field
+      }
+    }
+  });
+  game.players.forEach((p, i) => {
+    const last = p === me ? p.shots[p.shots.length - 1] : null;
+    const moved = last && (Math.abs(((p.yaw - last.yaw + 540) % 360) - 180) > 0.3 || Math.abs(p.elev - last.elev) > 0.3);
+    tanks[i].setGhost(moved ? last : null);
+  });
+}
+
 function disposeMatch() {
-  if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.geometry.dispose(); terrainMesh.skirtGeometry.dispose(); }
+  if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.dispose(); }
   if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   wrecks.forEach((w) => scene.remove(w));
   shells.forEach((s) => { scene.remove(s.mesh, s.line); });
-  ghosts.forEach((arr) => arr.forEach((l) => scene.remove(l)));
   shells.clear();
-  ghosts.clear();
+  clearGhosts();
+  closeHandoff();
   effects.clear();
   tanks = []; wrecks = []; labels = [];
   $('labels').innerHTML = '';
@@ -135,6 +183,7 @@ function startMatch(config) {
     return el;
   });
   buildScoreboard();
+  $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
   game.start();
   showHud(true);
 }
@@ -160,8 +209,7 @@ function handleEvents() {
       case 'roundStart':
         wrecks.forEach((w) => scene.remove(w));
         wrecks = [];
-        ghosts.forEach((arr) => arr.forEach((l) => scene.remove(l)));
-        ghosts.clear();
+        clearGhosts();
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
@@ -172,23 +220,43 @@ function handleEvents() {
         }
         break;
       case 'terrain':
-        if (e.full) { terrainMesh.rebuild(); sceneryMesh.rebuild(); } else terrainMesh.updateRegion(e.region);
+        if (e.full) { terrainMesh.rebuild(); sceneryMesh.rebuild(); terrainMesh.setPaths(game.scenery.paths); }
+        else { terrainMesh.updateRegion(e.region); terrainMesh.scuffPaths(e.region); }
         break;
       case 'turn': {
         const p = game.players[e.player];
+        userCam = false;   // a new planner gets the camera back
         if (!overview) aimCameraAt(p);
-        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire', 1100); },
+        // In a volley a "turn" is one tank's go at planning (or a CPU driving).
+        const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
+          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), 'Plan it, then Space to lock it in'];
+        if (e.plan && !p.ai && game.humans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
+        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
           Math.max(50, bannerHold - performance.now()));
         break;
       }
+      case 'locked':
+        sound.click();
+        banner('Locked in', '', 700);
+        break;
+      case 'volley':
+        closeHandoff();
+        banner('Fire!', `${e.players.length} tanks, all together`, 1300);
+        break;
+      case 'aimReset':
+        if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
+        break;
       case 'fire': {
-        sound.fire(camDist(e.pos));
+        // A volley's shots leave together; their flash and crack are spread a touch.
+        const go = () => {
+          if (!game || !tanks[e.player]) return;
+          effects.muzzleFlash(e.pos);
+          tanks[e.player].kick();
+          addShake(e.pos, 0.6);
+        };
+        sound.fire(camDist(e.pos), e.delay);
         birds.scare(e.pos, 70);
-        effects.muzzleFlash(e.pos);
-        tanks[e.player].kick();
-        (ghosts.get(e.player) || []).forEach((l) => scene.remove(l));
-        ghosts.set(e.player, []);
-        addShake(e.pos, 0.6);
+        if (e.delay) setTimeout(go, e.delay * 1000); else go();
         break;
       }
       case 'projectile': {
@@ -196,6 +264,7 @@ function handleEvents() {
         const owner = pr ? game.players[pr.owner] : null;
         const v = new ShellVisual(scene, owner ? owner.color : '#ffffff', rollPart(WEAPON_BY_ID[e.weapon]) ? ROLL.radius : undefined);
         v.owner = owner ? owner.id : null;
+        v.shot = e.shot;
         if (pr) v.push(pr.pos);
         shells.set(e.id, v);
         break;
@@ -266,13 +335,42 @@ function retireShell(id, at) {
   if (!v) return;
   if (at) v.push(at);
   const line = v.finish();
-  if (v.owner != null) {
-    const arr = ghosts.get(v.owner) || [];
-    arr.push(line);
-    ghosts.set(v.owner, arr);
-  } else scene.remove(line);
   shells.delete(id);
+  if (v.owner == null) { scene.remove(line); return; }
+  // Where it came down (not where a cluster shell split in the air).
+  let ring = null;
+  if (at) {
+    ring = new THREE.Mesh(ringShape, new THREE.MeshBasicMaterial({ color: game.players[v.owner].color, transparent: true, depthTest: false, depthWrite: false }));
+    ring.position.set(at[0], at[1], at[2]);
+    ring.renderOrder = 2;
+    ring.visible = false;
+    scene.add(ring);
+  }
+  line.visible = false;
+  if (!ghosts.has(v.owner)) ghosts.set(v.owner, []);
+  ghosts.get(v.owner).push({ shot: v.shot, line, ring });
 }
+
+// ---------------------------------------------------------------- volley hand-off
+
+// More than one human is planning: cover the field until the next one is ready.
+function openHandoff(p) {
+  handoffOpen = true;
+  held.clear();
+  $('handoff-card').style.borderTopColor = p.color;
+  $('handoff-swatch').style.background = p.color;
+  $('handoff-title').textContent = `${p.name}, plan your shot`;
+  $('handoff-step').textContent = hotseatStep(p, `volley ${game.turnsThisRound + 1}`);
+  $('handoff-text').textContent = 'Everyone else, look away. Drive and aim as you like, then press Space to lock it in. Nobody fires until every tank is ready.';
+  $('handoff').classList.remove('hidden');
+}
+
+function closeHandoff() {
+  if (!handoffOpen) return;
+  handoffOpen = false;
+  $('handoff').classList.add('hidden');
+}
+$('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 
 function popDamage(pid, amount) {
   const p = game.players[pid];
@@ -296,13 +394,25 @@ function aimCameraAt(p) {
   camGoal = back.multiplyScalar(70).add(new THREE.Vector3(0, 28, 0));
 }
 
+const _box = new THREE.Box3();
+
 function updateCamera(dt) {
   camera.position.sub(lastShake);
+  let frame = 0;                // a volley asks for this much distance
   if (game) {
     if (pinned) {
       // Debug camera: hold still.
     } else if (overview) {
       camTarget.set(0, 10, 0);
+    } else if (game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
+      // A volley: stand back far enough to see every shell (or, in the beat
+      // before, every tank about to fire).
+      _box.makeEmpty();
+      if (game.phase === 'volley') game.players.forEach((p) => { if (p.alive) _box.expandByPoint(_v.set(p.x, p.y, p.z)); });
+      else game.projectiles.forEach((pr) => _box.expandByPoint(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])));
+      _box.getCenter(camTarget);
+      frame = Math.min(1300, Math.max(130, (_box.getSize(_v).length() * 0.62) / Math.tan((camera.fov * DEG) / 2)));
+      camGoal = null;
     } else if (game.phase === 'flight' && followShell && game.projectiles.length) {
       const c = new THREE.Vector3();
       game.projectiles.forEach((pr) => c.add(new THREE.Vector3(...pr.pos)));
@@ -311,11 +421,21 @@ function updateCamera(dt) {
     } else if (game.phase === 'aim' && game.current) {
       const p = game.current;
       camTarget.set(p.x, p.y + 4, p.z);
+      // Left far out (e.g. by the volley framing) with nobody steering: come back in.
+      if (!camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
     }
   }
   const before = controls.target.clone();
   controls.target.lerp(camTarget, 1 - Math.exp(-dt * 3.2));
   camera.position.add(controls.target.clone().sub(before));
+  if (frame) {
+    // Back off (or close in) to the framing distance, looking down enough to see over the hills.
+    const k = 1 - Math.exp(-dt * 2.2);
+    _sCur.setFromVector3(_off.subVectors(camera.position, controls.target));
+    _sCur.radius += (frame - _sCur.radius) * k;
+    _sCur.phi += (Math.min(_sCur.phi, 1.0) - _sCur.phi) * k;
+    camera.position.copy(controls.target).add(_off.setFromSpherical(_sCur));
+  }
   if (camGoal) {
     const k = 1 - Math.exp(-dt * 2.6);
     _sCur.setFromVector3(_off.subVectors(camera.position, controls.target));
@@ -343,10 +463,10 @@ function updateCamera(dt) {
 let dragFrom = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; }
+  if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; userCam = true; }
 });
 window.addEventListener('pointerup', () => { dragFrom = null; });
-renderer.domElement.addEventListener('wheel', () => { camGoal = null; }, { passive: true });
+renderer.domElement.addEventListener('wheel', () => { camGoal = null; userCam = true; }, { passive: true });
 
 // ---------------------------------------------------------------- input
 
@@ -357,6 +477,11 @@ window.addEventListener('keydown', (e) => {
   if (k === 'tab' || k.startsWith('arrow')) e.preventDefault();
   held.add(k);
   if (e.repeat || !game) return;
+  if (handoffOpen) {
+    if (k === ' ' || k === 'enter') { e.preventDefault(); closeHandoff(); }
+    held.clear();
+    return;
+  }
   if (k === ' ') { e.preventDefault(); if (game.current && !game.current.ai && game.fire()) { /* fired */ } }
   else if (k === 'tab') { game.cycleWeapon(e.shiftKey ? -1 : 1); sound.click(); }
   else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
@@ -385,7 +510,7 @@ const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
 
 function selectWeaponSlot(i) {
   const p = game.current;
-  if (!p || p.ai || game.phase !== 'aim') return;
+  if (!p || p.ai || game.phase !== 'aim' || handoffOpen) return;
   const list = ownedWeapons(p);
   if (list[i]) { p.weapon = list[i].id; sound.click(); }
 }
@@ -408,7 +533,7 @@ $('weapon-bar').addEventListener('click', (e) => {
 });
 
 function applyHeldKeys(dt) {
-  if (!game || game.phase !== 'aim' || !game.current || game.current.ai) return;
+  if (!game || handoffOpen || game.phase !== 'aim' || !game.current || game.current.ai) return;
   const fine = held.has('shift') ? 0.2 : 1;
   const ax = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
   const ay = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
@@ -537,6 +662,20 @@ function updateHud() {
     $('ro-elev').textContent = `${p.elev.toFixed(1)}°`;
     $('ro-power').textContent = p.power.toFixed(1);
     $('pc-power').style.width = `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`;
+    // Under each: what the last shot used, and how far the aim is from it now.
+    const last = p.ai ? null : p.shots[p.shots.length - 1];
+    const was = (id, then, now, unit, wrap) => {
+      let text = p.ai ? '' : '—';
+      if (last) {
+        const d = wrap ? ((now - then + 540) % 360) - 180 : now - then;
+        const delta = Math.abs(d) < 0.05 ? 'same' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`;
+        text = `last ${then.toFixed(1)}${unit}<b>${delta}</b>`;
+      }
+      if ($(id).dataset.t !== text) { $(id).dataset.t = text; $(id).innerHTML = text; }
+    };
+    was('last-yaw', last?.yaw, p.yaw, '°', true);
+    was('last-elev', last?.elev, p.elev, '°', false);
+    was('last-power', last?.power, p.power, '', false);
     const w = WEAPON_BY_ID[p.weapon];
     $('ro-weapon').textContent = w.name;
     $('ro-ammo').textContent = ammoText(p.inventory[w.id]);
@@ -620,6 +759,7 @@ $('start').onclick = () => {
     maxWind: Number($('opt-wind').value),
     hills: Number($('opt-hills').value),
     twists: $('opt-twists').value === '1',
+    firing: $('opt-firing').value,
   });
 };
 
@@ -757,6 +897,7 @@ function openShopFor(pid) {
 
 $('mo-again').onclick = () => {
   $('matchover').classList.add('hidden');
+  closeHandoff();
   showHud(false);
   disposeMatch();
   game = null;
@@ -793,14 +934,13 @@ function tick(dt) {
       shells.get(pr.id)?.push(pr.pos);
       if (!pr.roller) birds.scare(pr.pos, 28);
     }
-    // Only the current player's last shot is shown as a ghost.
-    ghosts.forEach((arr, pid) => arr.forEach((l) => { l.visible = game.current?.id === pid && game.phase === 'aim'; }));
+    updateGhosts();
     updateTracer();
     sceneryMesh.sync(elapsed);
     updateHud();
     updateLabels();
     // The sun moves a little every turn and a lot over the match.
-    const within = Math.min(1, game.turnsThisRound / (game.players.length * 6));
+    const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;
   } else {
     // Idle orbit behind the menu.
@@ -828,6 +968,7 @@ const menuMesh = new TerrainMesh(menuField.terrain);
 menuMesh.rebuild();
 const menuScenery = new SceneryMesh(menuField.scenery);
 menuScenery.rebuild();
+menuMesh.setPaths(menuField.scenery.paths);
 scene.add(menuMesh.group, menuScenery.group);
 sky.fit(menuField.terrain.half);
 birds.reset(menuField.terrain, 5);

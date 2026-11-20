@@ -111,6 +111,22 @@ export class TankMesh {
     brake.rotation.z = -Math.PI / 2;
 
     this.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+    // Onion skin: a see-through barrel, mantlet and bustle left at the aim of
+    // the last shot, so the live turret's offset from it can be read at a glance.
+    const haze = new THREE.MeshBasicMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.65), transparent: true, opacity: 0.3, depthWrite: false });
+    this.materials.push(haze);
+    this.ghost = new THREE.Group();
+    this.ghost.position.y = TANK.turretHeight;
+    this.ghost.visible = false;
+    this.root.add(this.ghost);
+    add(this.ghost, box(1.1, 0.6, 1.3), haze, -1.75, 0.05, 0);
+    add(this.ghost, box(0.5, 0.7, 0.9), haze, 1.25, 0.05, 0);
+    this.ghostPivot = new THREE.Group();
+    this.ghost.add(this.ghostPivot);
+    add(this.ghostPivot, new THREE.CylinderGeometry(0.24, 0.3, TANK.barrelLength, 8), haze, TANK.barrelLength / 2, 0, 0).rotation.z = -Math.PI / 2;
+    add(this.ghostPivot, new THREE.CylinderGeometry(0.38, 0.38, 0.6, 8), haze, TANK.barrelLength - 0.3, 0, 0).rotation.z = -Math.PI / 2;
+
     this.recoil = 0;
     this.work = 0;                    // 0..1, how hard the engine is running
     this.sway = [0, 0];               // aerial lean, along and across the turret
@@ -178,6 +194,14 @@ export class TankMesh {
   }
 
   kick() { this.recoil = 1; }
+
+  // Show the ghost barrel at `shot` ({ yaw, elev }), or hide it with null.
+  setGhost(shot) {
+    this.ghost.visible = !!shot;
+    if (!shot) return;
+    this.ghost.rotation.y = -shot.yaw * DEG;
+    this.ghostPivot.rotation.z = shot.elev * DEG;
+  }
 
   // World position of the exhaust pipes, for smoke.
   exhaust(out, side = 1) {

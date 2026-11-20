@@ -1,7 +1,7 @@
 # Craterfall (WebGL / three.js)
 
-A browser edition of the Scorched3dUnreal artillery game: turn-based tanks on
-destructible 3D terrain, wind, a perk draft and a shop between rounds, a little
+A browser edition of the Scorched3dUnreal artillery game: tanks on
+destructible 3D terrain, firing all together or taking turns, wind, a perk draft and a shop between rounds, a little
 fuel for repositioning, and CPU opponents. No build step; three.js r187 is
 vendored under `vendor/three`.
 
@@ -28,7 +28,7 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 | ↑ / ↓ | drive forward / reverse along the hull (uses fuel) |
 | ← / → | turn the hull (free) |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
-| Space | fire |
+| Space | fire (in a volley: lock in your shot) |
 | C | follow-shell camera |
 | V | overview camera |
 | M | mute everything |
@@ -37,6 +37,33 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 
 ## How it plays
 
+- **Firing: together or in turns.** The setup screen has a Firing option.
+  - *Together (volley)*, the default: nobody shoots alone. Each living human
+    plans in turn (drive, aim, pick a weapon, Space to lock it in), then every
+    tank fires at once and all the shells fly together. With more than one
+    human, a hand-off card covers the field between planners, and a locked
+    aim is hidden: the turret goes back to where everyone last saw it and
+    only swings to the plan in the "Fire!" beat. CPU tanks do any driving
+    before the humans plan and aim at the last moment, at the tanks where
+    they stand. A tank destroyed mid-volley has already fired, so mutual
+    kills happen and a round can end in a draw. Wind drifts once per volley,
+    and the round limit (40) counts volleys. The camera pulls back to keep
+    every shell in view, and launch sounds are staggered and capped so a
+    six-tank volley does not turn into a wall of noise.
+  - *Take turns*: the classic game, one tank aims and fires at a time.
+- **Onion skin.** While you aim you see your own last three shots: their
+  trails, fading with age, a ring where each came down, and a see-through
+  barrel at the last shot's aim. Under Turret, Elevation and Power the card
+  shows the last value and how far you are from it ("last 52.1°" with "+2.3" beneath).
+  Only the tank that is aiming sees its own; they are cleared at the start of
+  a round and when the tank ends up more than 4 m from where it fired (the
+  old aim would no longer mean anything).
+- **Roads and paths.** Gravel roads join the hamlets, a track runs from each
+  hamlet down to the nearest water or the bridge, and a short path leads from
+  each door to the middle of its hamlet. They are routed over the heightfield
+  along gentle ground, around water, houses and the tanks' starting pads, and
+  painted onto the terrain, so a crater takes its piece of road with it.
+  Nothing grows on them, and villagers like to stroll along them.
 - **Roller** lands, then rolls downhill along the ground with the momentum it
   landed with. It goes off when it comes to rest, touches a tank, sinks into a
   lake or has rolled 160 m. A direct hit in flight goes off at once.
@@ -52,8 +79,8 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 - **Armory.** Between rounds each human shops in turn (the panel names whose
   turn it is and who is next); CPU tanks buy for themselves. Everyone gets a
   $150 stipend per round on top of damage, kill and win pay.
-- **Fuel.** Every tank has 30 m of driving per round, on its own turn, before
-  it fires. Climbing burns extra (a 45 degree slope costs three times level
+- **Fuel.** Every tank has 30 m of driving per round, on its own turn (or
+  its own planning, in a volley), before it fires. Climbing burns extra (a 45 degree slope costs three times level
   ground and is the steepest a tank can take); coasting downhill costs the
   same as level. Tanks will not drive into water, off the map, through each
   other or through a standing house, but one that has ended up in a flooded
@@ -77,7 +104,7 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
   | Long-Range Tanks | +15 m of driving every round |
   | Haggler | armory prices 20% lower |
   | Bounty Hunter | +50% money for damage dealt |
-  | Field Repairs | repair 6 hit points at the start of each of your turns |
+  | Field Repairs | repair 6 hit points at the start of each of your turns (each volley) |
   | Shock Mounts | no damage from falling into craters |
   | Heavy Rounds | wind pushes your shots 35% less |
   | Shrapnel | plain Shells throw two bomblets onward from where they land |
@@ -103,9 +130,10 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 - `src/core/` holds the pure game logic with no DOM or three.js: the heightfield and
   crater maths, the fixed-step ballistics simulator and roller, weapons, the AI
   aim solver and aim memory, driving (`driveStep` in `tank.js`), perks and round
-  modifiers as plain data (`perks.js`), scenery placement and its reaction to
+  modifiers as plain data (`perks.js`), road and path routing (`paths.js`), scenery placement and its reaction to
   terrain changes, and the `Game` state machine. It emits events and runs headless.
-- `src/render/` holds the terrain mesh (partial updates per crater), tank models,
+- `src/render/` holds the terrain mesh (partial updates per crater, roads painted
+  through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`) and the flocks (`birds.js`).
 - `src/audio.js` is the synthesised sound.
@@ -114,7 +142,8 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
-  draft, modifiers, driving and fuel (`twists.test.js`), and whole CPU-only matches.
+  draft, modifiers, driving and fuel (`twists.test.js`), road routing (`paths.test.js`),
+  aim history and both firing modes (`volley.test.js`), and whole CPU-only matches.
 
 The ballistics, crater falloff and AI solver follow the Unreal project's
 `CraterMath`, `TankAiming` and the legacy aim-guesser loop. The AI aims with

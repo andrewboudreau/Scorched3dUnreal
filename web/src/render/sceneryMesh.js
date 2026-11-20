@@ -145,8 +145,11 @@ function assets() {
   for (const k of Object.keys(tints)) tints[k] = tints[k].map((c) => new THREE.Color(c));
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0 });
 
-  // Water: a glossy translucent sheet with a slow ripple in its normals.
-  const water = new THREE.MeshStandardMaterial({ color: '#2d6f86', transparent: true, opacity: 0.8, roughness: 0.12, metalness: 0.15 });
+  // Water: a glossy translucent sheet with a slow ripple in its normals. The ripple
+  // is several waves in unrelated directions and lengths, bent by a little noise, so
+  // the sun's glints never line up into a grid. It fades out with distance, where a
+  // fine ripple would only alias.
+  const water = new THREE.MeshStandardMaterial({ color: '#2d6f86', transparent: true, opacity: 0.82, roughness: 0.22, metalness: 0.1 });
   const time = { value: 0 };
   water.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = time;
@@ -154,14 +157,28 @@ function assets() {
       .replace('#include <common>', '#include <common>\nvarying vec3 vWaterP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWaterP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWaterP;\nuniform float uTime;')
+      .replace('#include <common>', `#include <common>
+varying vec3 vWaterP;
+uniform float uTime;
+float wHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wNoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(wHash(i), wHash(i + vec2(1.0, 0.0)), f.x), mix(wHash(i + vec2(0.0, 1.0)), wHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// Slope of one travelling wave along unit direction d.
+vec2 wWave(vec2 p, vec2 d, float k, float speed, float amp) { return d * amp * cos(dot(d, p) * k + uTime * speed); }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 {
   vec2 w = vWaterP.xz;
-  vec3 rip = vec3(
-    sin(w.x * 0.9 + uTime * 1.3) + sin(w.y * 1.3 - uTime * 1.1 + w.x * 0.4),
-    0.0,
-    cos(w.y * 0.8 + uTime * 0.9) + sin(w.x * 1.7 + uTime * 1.6)) * 0.035;
+  vec2 q = w + 5.0 * vec2(wNoise(w * 0.045 + uTime * 0.04), wNoise(w * 0.045 + vec2(7.3, 1.9) - uTime * 0.03));
+  vec2 g = wWave(q, vec2(0.80, 0.60), 0.37, 0.9, 1.0)
+         + wWave(q, vec2(-0.36, 0.93), 0.61, 1.2, 0.8)
+         + wWave(q, vec2(0.97, -0.24), 0.89, 1.5, 0.6)
+         + wWave(q, vec2(-0.69, -0.72), 1.31, 1.9, 0.45)
+         + wWave(q, vec2(0.17, -0.99), 1.93, 2.3, 0.3);
+  g *= 0.6 + 0.8 * wNoise(w * 0.02 - uTime * 0.02);    // calmer and choppier patches
+  float fade = clamp(1.0 - length(vViewPosition) / 450.0, 0.1, 1.0);
+  vec3 rip = vec3(g.x, 0.0, g.y) * 0.03 * fade;
   normal = normalize(normal + (viewMatrix * vec4(rip, 0.0)).xyz);
 }`);
   };

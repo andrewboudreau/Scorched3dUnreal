@@ -21,9 +21,9 @@
       <div class="fuel"><label>Fuel</label><div class="bar"><div id="pc-fuel" class="fill fl"></div></div><span id="ro-fuel">0 m</span></div>
       <div id="pc-note"></div>
       <div class="readout">
-        <div><label>Turret</label><span id="ro-yaw">0°</span></div>
-        <div><label>Elevation</label><span id="ro-elev">0°</span></div>
-        <div><label>Power</label><span id="ro-power">0</span></div>
+        <div><label>Turret</label><span id="ro-yaw">0°</span><small id="last-yaw" class="last"></small></div>
+        <div><label>Elevation</label><span id="ro-elev">0°</span><small id="last-elev" class="last"></small></div>
+        <div><label>Power</label><span id="ro-power">0</span><small id="last-power" class="last"></small></div>
       </div>
       <div class="bar power"><div id="pc-power" class="fill pw"></div></div>
       <div class="weapon"><label>Weapon</label><span id="ro-weapon">Shell</span><span id="ro-ammo" class="ammo"></span></div>
@@ -43,7 +43,7 @@
 
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
-      &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> fire<br />
+      &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> <span id="help-fire">fire</span><br />
       <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>
@@ -54,7 +54,7 @@
   <div id="setup" class="screen">
     <div class="card wide">
       <h1>CRATERFALL</h1>
-      <p class="sub">Turn-based 3D artillery on ground you can blow apart.</p>
+      <p class="sub">3D artillery on ground you can blow apart.</p>
       <div id="setup-players"></div>
       <div class="row-buttons">
         <button id="add-player">+ Add tank</button>
@@ -64,10 +64,21 @@
         <label>Rounds <select id="opt-rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select></label>
         <label>Wind <select id="opt-wind"><option value="0">Calm</option><option value="0.8">Breezy</option><option value="1.5" selected>Gusty</option><option value="2.5">Gale</option></select></label>
         <label>Terrain <select id="opt-hills"><option value="20">Rolling</option><option value="45" selected>Hilly</option><option value="80">Mountains</option></select></label>
+        <label>Firing <select id="opt-firing"><option value="volley" selected>Together (volley)</option><option value="turns">Take turns</option></select></label>
         <label>Twists <select id="opt-twists"><option value="1" selected>Perks and modifiers</option><option value="0">Off</option></select></label>
         <label>Volume <input id="opt-volume" type="range" min="0" max="100" step="10" value="60" /></label>
       </div>
       <button id="start" class="primary">Start match</button>
+    </div>
+  </div>
+
+  <!-- Volley planning: pass the keyboard to the next human -->
+  <div id="handoff" class="screen hidden">
+    <div id="handoff-card" class="card handoff">
+      <div id="handoff-step" class="shop-step"></div>
+      <h2><span id="handoff-swatch" class="swatch"></span><span id="handoff-title"></span></h2>
+      <p id="handoff-text" class="sub"></p>
+      <button id="handoff-go" class="primary">Ready</button>
     </div>
   </div>
 

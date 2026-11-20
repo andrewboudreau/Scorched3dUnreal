@@ -5,6 +5,7 @@
 
 const VOLUME_KEY = 'craterfall.volume';
 const SOUND_SPEED = 340;   // m/s, for the delay on a distant blast
+const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are dropped past this
 
 export class Sound {
   constructor() {
@@ -23,7 +24,14 @@ export class Sound {
       const ctx = this.ctx = new AC();
       this.master = ctx.createGain();
       this.master.gain.value = this.level();
-      this.master.connect(ctx.destination);
+      // A volley is six cannons and six blasts: squash the peaks rather than clip.
+      const squash = ctx.createDynamicsCompressor();
+      squash.threshold.value = -16;
+      squash.ratio.value = 6;
+      squash.attack.value = 0.004;
+      squash.release.value = 0.25;
+      this.master.connect(squash).connect(ctx.destination);
+      this.voices = 0;
       const len = ctx.sampleRate * 2;
       this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = this.noise.getChannelData(0);
@@ -131,6 +139,8 @@ export class Sound {
   burst({ dur, freq, q = 0.7, gain = 1, sweepTo = null, thump = 0, type = 'lowpass', delay = 0, cutoff = 0 }) {
     const ctx = this.ensure();
     if (!ctx || this.muted) return;
+    if (this.voices >= MAX_VOICES || (this.voices >= MAX_VOICES / 2 && gain < 0.3)) return;
+    this.voices++;
     const t = ctx.currentTime + delay;
     let out = this.master;
     if (cutoff) {
@@ -153,6 +163,7 @@ export class Sound {
     src.connect(f).connect(g).connect(out);
     src.start(t, Math.random());
     src.stop(t + dur);
+    src.onended = () => { this.voices--; };
     if (thump) {
       const o = ctx.createOscillator();
       const og = ctx.createGain();
@@ -176,8 +187,9 @@ export class Sound {
   }
 
   // Cannon: a sharp crack on top, a chest thump under it, a short tail.
-  fire(dist = 0) {
-    const { k, cutoff, delay } = this.far(dist);
+  fire(dist = 0, wait = 0) {
+    const { k, cutoff, delay: travel } = this.far(dist);
+    const delay = travel + wait;
     this.burst({ dur: 0.07, freq: 3200, q: 0.9, type: 'bandpass', gain: 0.75 * k, delay, cutoff });
     this.burst({ dur: 0.5, freq: 1900, sweepTo: 180, gain: 0.6 * k, thump: 130, delay, cutoff });
     this.burst({ dur: 1.1, freq: 420, sweepTo: 90, gain: 0.22 * k, delay: delay + 0.05, cutoff });

@@ -16,6 +16,17 @@ const START_INVENTORY = { shell: Infinity, breacher: 1, roller: 1, mound: 1, sca
 // something to spend in the shop.
 export const PAY = { perDamage: 2, kill: 150, survive: 80, roundWin: 300, stipend: 150 };
 
+// Each tank remembers its last few shots (`p.shots`, oldest first) so the UI
+// can show what changed since. Driving or falling further than `moved` metres
+// from where the last one was fired wipes them: the old aim no longer applies.
+export const AIM_HISTORY = { keep: 3, moved: 4 };
+
+// With `firing: 'volley'` nobody shoots on their own turn. Each round is a
+// string of volleys: CPUs do any driving, each human plans in turn (drive, aim,
+// then Fire locks the plan in and puts the turret back where everyone last saw
+// it), and after a short beat every tank fires at once.
+export const VOLLEY = { beat: 0.9, beatMax: 2.6, stagger: 0.09 };
+
 export class Game {
   constructor({
     players,
@@ -27,8 +38,10 @@ export class Game {
     hills = 45,
     maxTurnsPerRound = 40,
     twists = true,      // perk drafts and round modifiers (core/perks.js)
+    firing = 'turns',   // 'turns', or 'volley': everyone plans, then all fire together
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing };
+    this.volley = null;                         // { queue, plans, shown } while a volley is being planned
     this.rng = makeRng(seed);
     this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
     this.modifier = MODIFIER_BY_ID.clear;
@@ -53,6 +66,7 @@ export class Game {
       hp: TANK.maxHp, maxHp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
+      shots: [], shotCount: 0,   // aim history, see AIM_HISTORY
     }));
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
@@ -74,6 +88,7 @@ export class Game {
 
   get current() { return this.turn >= 0 ? this.players[this.turn] : null; }
   get humans() { return this.players.filter((p) => !p.ai); }
+  get volleyMode() { return this.cfg.firing === 'volley'; }
   alivePlayers() { return this.players.filter((p) => p.alive); }
 
   start() {
@@ -94,6 +109,7 @@ export class Game {
     for (const p of this.players) {
       p.y = t.heightAt(p.x, p.z);
       p.aim = {};
+      p.shots = [];
       p.maxHp = TANK.maxHp + perkSum(p, 'maxHp');
       p.hp = p.maxHp;
       p.armor = p.pendingArmor + perkSum(p, 'roundArmor');
@@ -121,7 +137,8 @@ export class Game {
     this.firstShooter = (this.firstShooter + 1) % this.players.length;
     this.emit({ type: 'roundStart', round: this.round, modifier: mod.id });
     this.emit({ type: 'terrain', full: true });
-    this.beginTurn(this.firstShooter);
+    if (this.volleyMode) this.beginVolley();
+    else this.beginTurn(this.firstShooter);
   }
 
   placeTanks() {
@@ -166,35 +183,150 @@ export class Game {
 
   // ---------- turns ----------
 
-  beginTurn(index) {
+  // A turn, or in volley mode one tank's go at planning. `go` is a CPU's drive
+  // for a volley (it only gets a go when it wants to move).
+  beginTurn(index, go = null) {
     this.turn = index;
     this.phase = 'aim';
     this.phaseTime = 0;
     const p = this.current;
     if (!(p.inventory[p.weapon] > 0)) p.weapon = 'shell';
     const repair = perkSum(p, 'regen');
-    if (repair && this.turnsThisRound > 0) p.hp = Math.min(p.maxHp, p.hp + repair);
+    if (repair && this.turnsThisRound > 0 && !this.volleyMode) p.hp = Math.min(p.maxHp, p.hp + repair);
     this.aiPlan = null;
     this.aiDrive = null;
     this.driveNote = null;
-    if (p.ai) this.planAi(p);
-    this.emit({ type: 'turn', player: p.id });
+    this.checkAimHistory(p);
+    if (this.volleyMode) {
+      this.volley.shown = { yaw: p.yaw, elev: p.elev, power: p.power };
+      if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
+    } else if (p.ai) this.planAi(p);
+    this.emit({ type: 'turn', player: p.id, plan: this.volleyMode });
+  }
+
+  // Forget a tank's earlier shots once it is no longer where it fired them from.
+  checkAimHistory(p) {
+    const last = p.shots[p.shots.length - 1];
+    if (!last || Math.hypot(p.x - last.at[0], p.y - last.at[1], p.z - last.at[2]) <= AIM_HISTORY.moved) return;
+    p.shots = [];
+    this.emit({ type: 'aimReset', player: p.id });
+  }
+
+  // ---------- volleys ----------
+
+  beginVolley() {
+    const n = this.players.length;
+    const order = this.players.map((_, k) => this.players[(this.firstShooter + this.turnsThisRound + k) % n]).filter((p) => p.alive);
+    // CPUs sort out their driving first, so every human plans against where they ended up.
+    this.volley = { queue: [...order.filter((p) => p.ai), ...order.filter((p) => !p.ai)].map((p) => p.id), plans: {}, shown: null };
+    if (this.turnsThisRound > 0) {
+      for (const p of order) {
+        const repair = perkSum(p, 'regen');
+        if (repair) p.hp = Math.min(p.maxHp, p.hp + repair);
+      }
+    }
+    this.nextPlanner();
+  }
+
+  nextPlanner() {
+    const v = this.volley;
+    while (v.queue.length) {
+      const p = this.players[v.queue.shift()];
+      if (!p.alive) continue;
+      if (!p.ai) { this.beginTurn(p.id); return; }
+      const go = this.aiWantsToDrive(p);
+      if (go) { this.beginTurn(p.id, go); return; }
+    }
+    this.startVolleyBeat();
+  }
+
+  // The current human is happy with the aim: keep it secret until the volley.
+  lockPlan() {
+    const p = this.current;
+    if (this.phase !== 'aim' || !p || !p.alive || p.ai) return false;
+    this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    Object.assign(p, this.volley.shown);
+    this.emit({ type: 'locked', player: p.id });
+    this.nextPlanner();
+    return true;
+  }
+
+  // Everyone has planned. CPUs aim now, at the tanks where they stand; then
+  // the turrets swing to their plans and the volley goes.
+  startVolleyBeat() {
+    const v = this.volley;
+    this.turn = -1;
+    this.phase = 'volley';
+    this.phaseTime = 0;
+    for (const p of this.players) {
+      if (!p.alive) { delete v.plans[p.id]; continue; }
+      if (!p.ai) continue;
+      const plan = this.planAiShot(p);
+      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon };
+    }
+    this.aiPlan = null;
+    this.emit({ type: 'volley', players: Object.keys(v.plans).map(Number) });
+  }
+
+  updateVolleyBeat(dt) {
+    let ready = this.phaseTime >= VOLLEY.beat;
+    for (const [pid, plan] of Object.entries(this.volley.plans)) {
+      if (!this.swingToward(this.players[pid], plan, dt)) ready = false;
+    }
+    if (ready || this.phaseTime >= VOLLEY.beatMax) this.launchVolley();
+  }
+
+  launchVolley() {
+    let k = 0;
+    for (const p of this.players) {
+      const plan = this.volley.plans[p.id];
+      if (!plan || !p.alive) continue;
+      p.yaw = ((plan.yaw % 360) + 360) % 360;
+      p.elev = plan.elev;
+      p.power = plan.power;
+      clampAim(p);
+      p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
+      this.launch(p, k++ * VOLLEY.stagger);
+    }
+    this.volley.plans = {};
+    this.phase = 'flight';
+    this.phaseTime = 0;
+  }
+
+  // Turn the turret, barrel and charge toward `plan` at the tank's real
+  // speeds. True once it is there.
+  swingToward(p, plan, dt) {
+    const dy = ((plan.yaw - p.yaw + 540) % 360) - 180;
+    const de = plan.elev - p.elev;
+    const dp = plan.power - p.power;
+    const ty = TANK.turretSpeed * dt;
+    const te = TANK.elevationSpeed * dt;
+    const tp = TANK.powerSpeed * 2 * dt;
+    p.yaw += Math.abs(dy) <= ty ? dy : Math.sign(dy) * ty;
+    p.elev += Math.abs(de) <= te ? de : Math.sign(de) * te;
+    p.power += Math.abs(dp) <= tp ? dp : Math.sign(dp) * tp;
+    clampAim(p);
+    return Math.abs(dy) < 0.01 && Math.abs(de) < 0.01 && Math.abs(dp) < 0.01;
   }
 
   // A CPU turn: now and then drive first (ai.planDrive), then plan the shot
   // from wherever it ends up. Its aim memory sees that it moved and loosens.
   planAi(p) {
-    const go = planDrive({
-      me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
-      tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
-    });
+    const go = this.aiWantsToDrive(p);
     if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
     else this.planAiShot(p);
   }
 
+  aiWantsToDrive(p) {
+    return planDrive({
+      me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
+      tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
+    });
+  }
+
   planAiShot(p) {
     const target = chooseTarget(p, this.players, p.ai, this.rng);
-    if (!target) return;
+    if (!target) return null;
     const sol = planShot({
       shooter: p,
       target,
@@ -206,7 +338,7 @@ export class Game {
       gravity: this.gravity,
       windK: this.windShare(p),
     });
-    this.aiPlan = { ...sol, weapon: chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
+    return (this.aiPlan = { ...sol, weapon: chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 });
   }
 
   // How much of the wind this tank's shots feel.
@@ -221,7 +353,7 @@ export class Game {
 
   driveTank(p, dir, dt) {
     const r = driveStep(p, this.terrain, dir, dt, this.obstacles());
-    if (r === 'ok') p.hitsHere = 0;
+    if (r === 'ok') { p.hitsHere = 0; this.checkAimHistory(p); }
     return r;
   }
 
@@ -258,15 +390,23 @@ export class Game {
     if (done) {
       this.aiDrive = null;
       this.phaseTime = 0;
-      this.planAiShot(p);
+      if (this.volleyMode) this.nextPlanner();
+      else this.planAiShot(p);
     }
   }
 
+  // The turn (or the volley) is over. The round limit counts whichever it was.
   nextTurn() {
     const alive = this.alivePlayers();
     this.turnsThisRound++;
-    if (alive.length <= 1 || this.turnsThisRound >= this.cfg.maxTurnsPerRound * this.players.length) {
+    const limit = this.cfg.maxTurnsPerRound * (this.volleyMode ? 1 : this.players.length);
+    if (alive.length <= 1 || this.turnsThisRound >= limit) {
       this.endRound();
+      return;
+    }
+    if (this.volleyMode) {
+      this.driftWind();
+      this.beginVolley();
       return;
     }
     let i = this.turn;
@@ -367,32 +507,45 @@ export class Game {
     p.weapon = list[(i + dir + list.length) % list.length].id;
   }
 
+  // Fire the current tank's shot. In volley mode this locks the plan in instead.
   fire() {
     const p = this.current;
     if (this.phase !== 'aim' || !p || !p.alive) return false;
+    if (this.volleyMode) return this.lockPlan();
+    if (!this.launch(p)) return false;
+    this.phase = 'flight';
+    this.phaseTime = 0;
+    return true;
+  }
+
+  // One tank shoots as it is aimed now. `delay` only staggers the sound and
+  // flash of a volley; the shells all leave on the same step.
+  launch(p, delay = 0) {
     const w = WEAPON_BY_ID[p.weapon];
     if (!(p.inventory[w.id] > 0)) return false;
     if (!w.infinite) p.inventory[w.id]--;
     const pos = muzzleOrigin(p);
     const vel = launchVelocity(p.yaw, p.elev, p.power);
-    this.spawnProjectile(pos, vel, w.id, p.id);
-    this.phase = 'flight';
-    this.phaseTime = 0;
-    this.emit({ type: 'fire', player: p.id, pos, weapon: w.id });
+    const shot = ++p.shotCount;
+    p.shots.push({ n: shot, yaw: p.yaw, elev: p.elev, power: p.power, weapon: w.id, at: [p.x, p.y, p.z] });
+    if (p.shots.length > AIM_HISTORY.keep) p.shots.shift();
+    this.spawnProjectile(pos, vel, w.id, p.id, shot);
+    this.emit({ type: 'fire', player: p.id, pos, weapon: w.id, shot, delay });
     return true;
   }
 
-  spawnProjectile(pos, vel, weaponId, owner) {
+  spawnProjectile(pos, vel, weaponId, owner, shot = 0) {
     const pr = makeProjectile(pos, vel);
     pr.id = (this.nextProjectileId = (this.nextProjectileId || 0) + 1);
     pr.weapon = weaponId;
     pr.owner = owner;
+    pr.shot = shot;       // which of the owner's shots it came from
     pr.dead = false;
     pr.splitDone = false;
     pr.g = this.gravity;
     pr.windK = this.windShare(this.players[owner]);
     this.projectiles.push(pr);
-    this.emit({ type: 'projectile', id: pr.id, weapon: weaponId });
+    this.emit({ type: 'projectile', id: pr.id, weapon: weaponId, owner, shot });
     return pr;
   }
 
@@ -401,8 +554,12 @@ export class Game {
   update(dt) {
     this.phaseTime += dt;
     this.scenery.update(dt, this.players);
-    if (this.phase === 'aim' && this.current && !this.current.alive) { this.nextTurn(); return; }
+    if (this.phase === 'aim' && this.current && !this.current.alive) {
+      if (this.volleyMode) this.nextPlanner(); else this.nextTurn();
+      return;
+    }
     if (this.phase === 'aim') this.updateAim(dt);
+    if (this.phase === 'volley') this.updateVolleyBeat(dt);
     if (this.phase === 'flight' || this.phase === 'settle') {
       this.acc += dt;
       let steps = 0;
@@ -424,6 +581,7 @@ export class Game {
   updateAim(dt) {
     const p = this.current;
     if (p && p.ai && this.aiDrive) { this.updateAiDrive(p, dt); return; }
+    if (p && p.ai && this.volleyMode) { this.nextPlanner(); return; }
     if (!p || !p.ai || !this.aiPlan) {
       if (p && p.ai && !this.aiPlan) this.nextTurn(); // nothing to shoot at
       return;
@@ -431,18 +589,7 @@ export class Game {
     const plan = this.aiPlan;
     p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
     if (this.phaseTime < plan.think) return;
-    // Swing the turret and barrel toward the plan at the tank's real speeds.
-    const dy = ((plan.yaw - p.yaw + 540) % 360) - 180;
-    const de = plan.elev - p.elev;
-    const dp = plan.power - p.power;
-    const ty = TANK.turretSpeed * dt;
-    const te = TANK.elevationSpeed * dt;
-    const tp = TANK.powerSpeed * 2 * dt;
-    p.yaw += Math.abs(dy) <= ty ? dy : Math.sign(dy) * ty;
-    p.elev += Math.abs(de) <= te ? de : Math.sign(de) * te;
-    p.power += Math.abs(dp) <= tp ? dp : Math.sign(dp) * tp;
-    clampAim(p);
-    if (Math.abs(dy) < 0.01 && Math.abs(de) < 0.01 && Math.abs(dp) < 0.01) {
+    if (this.swingToward(p, plan, dt)) {
       p.yaw = ((plan.yaw % 360) + 360) % 360;
       p.elev = plan.elev;
       p.power = plan.power;
@@ -466,7 +613,7 @@ export class Game {
         if (split) {
           pr.dead = true;
           for (const v of splitVelocities(pr.vel, split.count, split.spread)) {
-            const child = this.spawnProjectile(pr.pos, v, split.child, pr.owner);
+            const child = this.spawnProjectile(pr.pos, v, split.child, pr.owner, pr.shot);
             child.splitDone = true;
           }
           this.emit({ type: 'split', id: pr.id, pos: [...pr.pos] });
@@ -523,7 +670,7 @@ export class Game {
     for (let k = 0; k < n; k++) {
       const side = n === 1 ? 0 : (k / (n - 1)) * 2 - 1;
       const vel = [ux * 9 - uz * side * 5, 12, uz * 9 + ux * side * 5];
-      const child = this.spawnProjectile([point[0], this.terrain.heightAt(point[0], point[2]) + 0.8, point[2]], vel, 'bomblet', pr.owner);
+      const child = this.spawnProjectile([point[0], this.terrain.heightAt(point[0], point[2]) + 0.8, point[2]], vel, 'bomblet', pr.owner, pr.shot);
       child.splitDone = true;
     }
   }

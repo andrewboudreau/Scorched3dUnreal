@@ -38,6 +38,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 .readout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; text-align: center; }
 .readout label, .weapon label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .readout span { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 700; }
+/* The last shot's value and how far the aim has moved from it. */
+.readout .last { display: block; min-height: 26px; line-height: 13px; font-size: 10px; color: #7f8b99; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.readout .last b { display: block; color: #e3c56d; font-weight: 600; }
+.card.handoff { border-top: 3px solid var(--edge); max-width: 440px; text-align: center; }
+.card.handoff h2 { display: flex; align-items: center; justify-content: center; gap: 9px; }
 .weapon { margin-top: 6px; }
 .weapon span { font-weight: 700; font-size: 15px; }
 .ammo { color: var(--muted); font-weight: 500 !important; margin-left: 6px; font-size: 13px !important; }
