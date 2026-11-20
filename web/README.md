@@ -82,6 +82,19 @@ each other.
   of steering fuel, shown in a bar above the weapons. It does not climb or
   dive, only turns. One in the starting kit; 90 for two in the shop. On a
   shared screen every human's missile answers the same keys.
+- **Fog of war** (setup option, off by default; works online too). Your tank
+  sees 110 m around itself; the ground beyond is dimmed and enemy tanks out
+  there are hidden. You still have intel on them, drawn as a ring in their
+  colour with a "Name?" label: a rough fix (60 m of doubt) from the start of
+  the round, a rougher one (35 m) whenever they fire where you cannot see,
+  and an exact "last seen here" once they have been in sight. A hidden
+  tank's muzzle flash and smoke are not shown, and its shell is only drawn
+  once it starts coming down, so the trail does not lead back to it. Edge
+  arrows, F, the rangefinder card and the camera all go by what you know.
+  CPUs play by the same rules: they aim from their own intel and send scouts.
+- **Scout Missile** (fog of war only). No damage: where it lands it lights up
+  120 m, for you alone, for your next two shots (two volleys, or two of
+  your turns). One free each round; 50 for two in the shop.
 - **Kill cam.** When a shot in the air is about to end the round (its blast
   would leave at most one tank standing), time slows to about a quarter, the
   screen letterboxes, the HUD steps aside and the camera swings round to

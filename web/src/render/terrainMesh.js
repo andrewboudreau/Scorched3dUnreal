@@ -27,8 +27,13 @@ const C = {
 // Faint cloud shadows: render/sky.js writes each cloud's shadow here as
 // (x, z, radius) and the ground shader dims itself under them.
 export const MAX_CLOUD_SHADOWS = 14;
+export const MAX_FOG_SPOTS = 12;
 export const groundShade = {
   clouds: { value: Array.from({ length: MAX_CLOUD_SHADOWS }, () => new THREE.Vector3(0, 0, 0)) },
+  // Fog of war: the ground outside these circles (x, z, radius; radius 0 is
+  // unused) is dimmed, when `fogOn` is 1.
+  fog: { value: Array.from({ length: MAX_FOG_SPOTS }, () => new THREE.Vector3(0, 0, 0)) },
+  fogOn: { value: 0 },
 };
 
 // World-space value noise breaks up the vertex colours below the 3 m grid
@@ -42,6 +47,8 @@ NO_PATHS.needsUpdate = true;
 function addGroundDetail(material, paths) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uCloud = groundShade.clouds;
+    shader.uniforms.uFog = groundShade.fog;
+    shader.uniforms.uFogOn = groundShade.fogOn;
     shader.uniforms.uPath = paths.map;
     shader.uniforms.uPathScale = paths.scale;
     shader.vertexShader = shader.vertexShader
@@ -51,6 +58,8 @@ function addGroundDetail(material, paths) {
       .replace('#include <common>', `#include <common>
 varying vec3 vGroundP;
 uniform vec3 uCloud[${MAX_CLOUD_SHADOWS}];
+uniform vec3 uFog[${MAX_FOG_SPOTS}];
+uniform float uFogOn;
 uniform sampler2D uPath;
 uniform float uPathScale;
 float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -87,6 +96,16 @@ float gRough(vec2 p) { return gNoise(p * 0.45) * 0.65 + gNoise(p * 1.9) * 0.35; 
     shade = max(shade, 1.0 - smoothstep(c.z * 0.35, c.z, length((q - c.xy) * vec2(0.6, 1.0))));
   }
   diffuseColor.rgb *= 1.0 - 0.22 * shade;
+  if (uFogOn > 0.5) {
+    float d = 1e5;
+    for (int i = 0; i < ${MAX_FOG_SPOTS}; i++) {
+      vec3 c = uFog[i];
+      if (c.z > 0.0) d = min(d, length(q - c.xy) - c.z);
+    }
+    float f = smoothstep(-8.0, 10.0, d);
+    float grain = gNoise(q * 0.05 + vec2(d * 0.01)) * 0.12;
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (0.3 + grain) + vec3(0.05, 0.06, 0.08), f * 0.85);
+  }
 }`);
   };
 }

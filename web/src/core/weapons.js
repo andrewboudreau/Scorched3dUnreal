@@ -11,6 +11,9 @@
 //                                       as aimed, turret -/+turn, power -/+power
 //   steer  { rate, fuel }               the shooter can turn it left or right in
 //                                       flight, `rate` deg/s, for `fuel` seconds
+//   scout  { radius, turns }            fog of war: the shooter sees everything
+//                                       within `radius` of where it lands, for
+//                                       their next `turns` shots
 
 export const WEAPONS = [
   {
@@ -59,6 +62,11 @@ export const WEAPONS = [
     flight: [{ type: 'range', turn: 2, power: 5 }],
     impact: [],
   },
+  {
+    id: 'scout', name: 'Scout Missile', price: 50, bundle: 2, fog: true,
+    desc: 'Fog of war only. No damage: lights up everything within 120 m of where it lands, for you, for your next two shots.',
+    impact: [{ type: 'scout', radius: 120, turns: 2 }],
+  },
 ];
 
 export const ITEMS = [
@@ -89,6 +97,7 @@ export function impactEffects(weapon, point) {
     for (const part of parts) {
       if (part.type === 'blast') out.push({ type: 'blast', point, radius: part.radius, damage: part.damage, depth: part.depth });
       else if (part.type === 'mound') out.push({ type: 'mound', point, radius: part.radius, height: part.height });
+      else if (part.type === 'scout') out.push({ type: 'scout', point, radius: part.radius, turns: part.turns });
       else if (part.type === 'roll') run(part.then);
     }
   };

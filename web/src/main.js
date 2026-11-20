@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
-import { Game, PLAYER_COLORS } from './core/game.js';
+import { Game, PLAYER_COLORS, FOG } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
@@ -9,7 +9,7 @@ import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } f
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
-import { TerrainMesh } from './render/terrainMesh.js';
+import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { TankMesh, makeWreck } from './render/tankMesh.js';
 import { Effects, ShellVisual } from './render/effects.js';
@@ -70,6 +70,9 @@ let sceneryMesh = null;
 let tanks = [];
 let smoke = [];                 // per tank: seconds until its next puff
 let labels = [];
+let ghosts = [];                // fog: per tank, a ring and a label where this screen last placed it
+let pulses = [];                // fog: scout bursts spreading out
+let fogFor = null;              // fog: the tanks this screen sees for, this frame (null: sees everything)
 let wrecks = [];
 const shells = new Map();       // projectile id -> ShellVisual
 const fadingTrails = [];        // finished shells' trails, fading out
@@ -137,6 +140,10 @@ function disposeMatch() {
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.dispose(); }
   if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
+  ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
+  pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
+  ghosts = []; pulses = []; fogFor = null;
+  groundShade.fogOn.value = 0;
   wrecks.forEach((w) => scene.remove(w));
   shells.forEach((s) => { scene.remove(s.mesh, s.line); });
   shells.clear();
@@ -170,6 +177,19 @@ function startMatch(config) {
     el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}</div><div class="bar"><div class="fill hp"></div></div>`;
     $('labels').appendChild(el);
     return el;
+  });
+  ghosts = game.players.map((p) => {
+    const ring = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.renderOrder = 5;
+    ring.visible = false;
+    scene.add(ring);
+    const el = document.createElement('div');
+    el.className = 'tank-label ghost';
+    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}?</div><small></small>`;
+    el.style.display = 'none';
+    $('labels').appendChild(el);
+    return { ring, el };
   });
   locators = game.players.map((p) => {
     const el = document.createElement('div');
@@ -232,7 +252,7 @@ function handleEvents() {
       case 'turn': {
         const p = game.players[e.player];
         userCam = false;   // a new planner gets the camera back
-        if (!overview) aimCameraAt(p);
+        if (!overview && seen(p, fogView())) aimCameraAt(p);
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
           : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), 'Plan it, then Space to lock it in'];
@@ -266,6 +286,7 @@ function handleEvents() {
         // A volley's shots leave together; their flash and crack are spread a touch.
         const go = () => {
           if (!game || !tanks[e.player]) return;
+          if (!seen(game.players[e.player])) return;
           effects.muzzleFlash(e.pos);
           tanks[e.player].kick();
           addShake(e.pos, 0.6);
@@ -282,7 +303,7 @@ function handleEvents() {
         v.owner = owner ? owner.id : null;
         v.probe = pr?.probe || null;
         v.shot = e.shot;
-        if (pr) v.push(pr.pos);
+        if (pr && !shellHidden(pr)) v.push(pr.pos);
         shells.set(e.id, v);
         break;
       }
@@ -313,6 +334,9 @@ function handleEvents() {
         birds.scare(e.pos, 90 + e.radius * 5);
         addShake(e.pos, e.radius / 6);
         break;
+      case 'scout':
+        scoutPulse(e);
+        break;
       case 'mound':
         effects.dust(e.pos, e.radius);
         sound.thud(camDist(e.pos));
@@ -327,7 +351,7 @@ function handleEvents() {
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage': {
-        popDamage(e.player, e.amount);
+        if (seen(game.players[e.player])) popDamage(e.player, e.amount);
         if (insetFor === e.player) flashInset(e.amount);
         // Name the victim on the shooter's pip.
         const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
@@ -517,18 +541,20 @@ function updateLocators() {
   const placed = [];
   game.players.forEach((p, i) => {
     const el = locators[i];
-    const s = me && p !== me && p.alive ? screenSpot(p.x, p.y + 4, p.z) : null;
+    const b = me && p !== me && p.alive ? believed(p) : null;
+    const s = b ? screenSpot(b.x, b.y + 4, b.z) : null;
     if (!s || !s.off) { el.style.display = 'none'; return; }
     el.style.display = '';
     unstack(s, placed);
     place(el, s);
-    el.querySelector('small').textContent = `${Math.round(Math.hypot(p.x - me.x, p.z - me.z))} m`;
+    el.querySelector('small').textContent = `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`;
   });
 }
 
 // A three-second look at another tank; the camera then drifts back.
 function peekAt(p) {
   if (!game || game.phase !== 'aim' || !p.alive || p === game.current) { peek = null; return; }
+  if (!seen(p)) { const b = believed(p); if (b) peekSpot([b.x, b.y, b.z]); return; }
   peek = { id: p.id, until: performance.now() + 3000 };
   camGoal = null;
   overview = false;
@@ -546,11 +572,14 @@ function peekSpot(pos) {
 function peekNext() {
   const me = game.current;
   if (!me) return;
-  const foes = game.players.filter((p) => p.alive && p !== me)
-    .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
+  const where = (p) => believed(p) || { x: 1e6, z: 1e6 };
+  const foes = game.players.filter((p) => p.alive && p !== me && believed(p))
+    .sort((a, b) => Math.hypot(where(a).x - me.x, where(a).z - me.z) - Math.hypot(where(b).x - me.x, where(b).z - me.z));
   if (!foes.length) return;
-  const at = peek && performance.now() < peek.until ? foes.findIndex((p) => p.id === peek.id) : -1;
-  peekAt(foes[(at + 1) % foes.length]);
+  const at = peek && performance.now() < peek.until ? foes.findIndex((p) => p.id === (peek.id ?? peek.fogId)) : -1;
+  const next = foes[(at + 1) % foes.length];
+  peekAt(next);
+  if (peek && peek.id == null) peek.fogId = next.id;
 }
 
 // ---------------------------------------------------------------- rangefinder card
@@ -583,7 +612,7 @@ function updateRangeCard() {
 
   const ax = rangeAxes(a.yaw);
   const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
-  const foe = game.players.filter((p) => p.alive && p !== me)
+  const foe = game.players.filter((p) => p.alive && p !== me).map(believed).filter(Boolean)
     .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
   const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
   const w = WEAPON_BY_ID[me.weapon];
@@ -904,20 +933,22 @@ function updateCamera(dt) {
       // A shared-screen volley: stand back far enough to see every shell (or, in the beat
       // before, every tank about to fire).
       _box.makeEmpty();
-      if (game.phase === 'volley') game.players.forEach((p) => { if (p.alive) _box.expandByPoint(_v.set(p.x, p.y, p.z)); });
-      else game.projectiles.forEach((pr) => _box.expandByPoint(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])));
+      if (game.phase === 'volley') game.players.forEach((p) => { if (p.alive && seen(p)) _box.expandByPoint(_v.set(p.x, p.y, p.z)); });
+      else game.projectiles.forEach((pr) => { if (!shellHidden(pr)) _box.expandByPoint(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])); });
+      if (_box.isEmpty()) _box.expandByPoint(controls.target);
       _box.getCenter(camTarget);
       frame = Math.min(1300, Math.max(130, (_box.getSize(_v).length() * 0.62) / Math.tan((camera.fov * DEG) / 2)));
       camGoal = null;
-    } else if (game.phase === 'flight' && followShell && game.projectiles.length) {
+    } else if (game.phase === 'flight' && followShell && game.projectiles.some((pr) => !shellHidden(pr))) {
       const c = new THREE.Vector3();
-      game.projectiles.forEach((pr) => c.add(new THREE.Vector3(...pr.pos)));
-      c.divideScalar(game.projectiles.length);
+      const shown = game.projectiles.filter((pr) => !shellHidden(pr));
+      shown.forEach((pr) => c.add(new THREE.Vector3(...pr.pos)));
+      c.divideScalar(shown.length);
       camTarget.copy(c);
     } else if (game.phase === 'aim' && game.current) {
       const look = peek && performance.now() < peek.until ? (peek.id != null ? game.players[peek.id] : peek) : null;
       if (!look) peek = null;
-      const p = look || game.current;
+      const p = look || (seen(game.current) ? game.current : fogFor?.[0] || game.current);
       camTarget.set(p.x, p.y + 4, p.z);
       // Left far out (e.g. by the volley framing) with nobody steering: come back in.
       if (!look && !camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
@@ -1084,7 +1115,7 @@ function updateTracer() {
 function tankSmoke(dt) {
   const drift = [game.wind[0] * 1.5, game.wind[1] * 1.5];
   game.players.forEach((p, i) => {
-    if (!p.alive) return;
+    if (!p.alive || !seen(p)) return;
     const t = tanks[i];
     if ((smoke[i] -= dt) > 0) return;
     const hurt = 1 - p.hp / p.maxHp;
@@ -1209,13 +1240,112 @@ function updateLabels() {
   game.players.forEach((p, i) => {
     const el = labels[i];
     const v = new THREE.Vector3(p.x, p.y + 8, p.z).project(camera);
-    const visible = p.alive && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
     el.style.display = visible ? 'block' : 'none';
     if (!visible) return;
     el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
     el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
     el.querySelector('.fill').style.width = `${(p.hp / p.maxHp) * 100}%`;
   });
+}
+
+// ---------------------------------------------------------------- fog of war
+
+const RING = new THREE.RingGeometry(0.92, 1, 56);
+
+// The tanks this screen sees for: the human planning here, or every human
+// played here who is still in it. Null (see everything) without fog, or once
+// nobody is left on this screen to see for.
+function fogView() {
+  if (!game || !game.cfg.fog) return null;
+  const c = game.current;
+  if (c && game.phase === 'aim' && game.isLocal(c) && c.alive) return [c];
+  const mine = game.localHumans.filter((p) => p.alive);
+  return mine.length ? mine : null;
+}
+
+// Can this screen see tank `p`? Wrecks are always in plain view.
+function seen(p, view = fogFor) {
+  return !view || !p || !p.alive || view.includes(p) || view.some((v) => game.inSight(v, p));
+}
+
+// Where this screen believes `p` is: { x, y, z, r, at } with r the radius of
+// doubt (0 when seen or last seen), or null when it has no idea.
+function believed(p) {
+  if (seen(p)) return { x: p.x, y: p.y, z: p.z, r: 0, at: game.turnsThisRound, live: true };
+  let best = null;
+  for (const v of fogFor) {
+    const i = game.intel[v.id]?.[p.id];
+    if (i && (!best || i.at > best.at || (i.at === best.at && i.r < best.r))) best = i;
+  }
+  if (!best) return null;
+  const t = game.terrain;
+  return { x: best.x, y: t.inBounds(best.x, best.z) ? t.heightAt(best.x, best.z) : p.y, z: best.z, r: best.r, at: best.at };
+}
+
+// A shell from a tank this screen cannot see stays hidden while it climbs,
+// so its trail does not lead straight back to it.
+function shellHidden(pr) {
+  if (!fogFor || seen(game.players[pr.owner])) return false;
+  return !pr.roller && pr.vel[1] > 0;
+}
+
+function updateFog(dt) {
+  fogFor = fogView();
+  groundShade.fogOn.value = fogFor ? 1 : 0;
+  if (fogFor) {
+    const spots = groundShade.fog.value;
+    let k = 0;
+    for (const v of fogFor) if (k < spots.length) spots[k++].set(v.x, v.z, FOG.sight);
+    for (const r of game.reveals) if (k < spots.length && fogFor.some((v) => v.id === r.owner)) spots[k++].set(r.x, r.z, r.r);
+    for (; k < spots.length; k++) spots[k].set(0, 0, 0);
+  }
+  game.players.forEach((p, i) => {
+    const show = seen(p);
+    if (!show) tanks[i].root.visible = false;
+    const g = ghosts[i];
+    const b = !show ? believed(p) : null;
+    g.ring.visible = !!b;
+    if (!b) { g.el.style.display = 'none'; return; }
+    g.ring.position.set(b.x, b.y + 1.5, b.z);
+    g.ring.scale.setScalar(Math.max(8, b.r));
+    g.ring.material.opacity = b.r ? 0.4 : 0.6;
+    const v = _v.set(b.x, b.y + 7, b.z).project(camera);
+    const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    g.el.style.display = on ? 'block' : 'none';
+    if (!on) return;
+    g.el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+    g.el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
+    const ago = game.turnsThisRound - b.at;
+    const unit = game.volleyMode ? 'volley' : 'turn';
+    const text = (b.r ? 'roughly here' : 'last seen here') + (ago > 0 ? `, ${ago} ${unit}${ago > 1 ? 's' : ''} ago` : '');
+    const small = g.el.querySelector('small');
+    if (small.textContent !== text) small.textContent = text;
+  });
+  for (let i = pulses.length - 1; i >= 0; i--) {
+    const q = pulses[i];
+    q.t += dt;
+    const k = Math.min(1, q.t / 1.1);
+    q.mesh.scale.setScalar(Math.max(1, q.r * (1 - (1 - k) ** 3)));
+    q.mesh.material.opacity = 0.85 * (1 - k * k);
+    if (k >= 1) { scene.remove(q.mesh); q.mesh.material.dispose(); pulses.splice(i, 1); }
+  }
+}
+
+// A scout bursts: a bright ring spreads over what it lights up (for its owner's
+// screen; anyone else just sees a flash where it landed).
+function scoutPulse(e) {
+  effects.muzzleFlash(e.pos);
+  sound.ping(camDist(e.pos));
+  const mine = !fogFor || fogFor.some((v) => v.id === e.owner);
+  if (!mine) return;
+  const mesh = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({ color: '#bff3ff', transparent: true, opacity: 0.85, depthTest: false, side: THREE.DoubleSide }));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = 6;
+  mesh.position.set(e.pos[0], e.pos[1] + 2, e.pos[2]);
+  scene.add(mesh);
+  pulses.push({ mesh, r: e.radius, t: 0 });
+  if (game.volleyMode ? heroId === e.owner || heroId == null : true) banner('Scouted', 'Everything nearby is lit up for your next two shots', 1300);
 }
 
 // ---------------------------------------------------------------- screens
@@ -1281,6 +1411,7 @@ $('start').onclick = () => {
       maxWind: Number($('opt-wind').value),
       hills: Number($('opt-hills').value),
       twists: $('opt-twists').value === '1',
+      fog: $('opt-fog').value === '1',
     }, lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
     $('start').disabled = true;
     return;
@@ -1293,6 +1424,7 @@ $('start').onclick = () => {
     hills: Number($('opt-hills').value),
     twists: $('opt-twists').value === '1',
     firing: $('opt-firing').value,
+    fog: $('opt-fog').value === '1',
   });
 };
 
@@ -1426,7 +1558,7 @@ function openShopFor(pid) {
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided')).map((it) => {
+    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog)).map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
       const info = ITEM_INFO[it.id];
       const have = isW ? p.inventory[it.id] || 0 : info.have(p);
@@ -1824,9 +1956,12 @@ function tick(dt, draw = true) {
     game.update(sdt);
     handleEvents();
     game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, sdt));
+    updateFog(dt);
     tankSmoke(dt);
     for (const pr of game.projectiles) {
-      shells.get(pr.id)?.push(pr.pos);
+      const sv = shells.get(pr.id);
+      if (sv && shellHidden(pr)) sv.mesh.visible = false;
+      else sv?.push(pr.pos);
       if (!pr.roller) birds.scare(pr.pos, 28);
     }
     fadeTrails(dt);

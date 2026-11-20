@@ -28,6 +28,15 @@ export const AIM_HISTORY = { keep: 3, moved: 4 };
 // it), and after a short beat every tank fires at once.
 export const VOLLEY = { beat: 0.9, beatMax: 2.6, stagger: 0.09 };
 
+// Fog of war (`fog: true`). A tank sees `sight` metres around itself, plus
+// whatever its Scout Missiles light up. Of everyone else it only has intel:
+// where it last saw them, or a rough fix (`rough`, the radius of doubt) from
+// the start of the round or from hearing them fire (`flash`). Intel is only
+// updated at fixed points (round start, each turn or volley, each shot and
+// scout burst), so every copy of an online game holds the same; the CPUs aim
+// from it.
+export const FOG = { sight: 110, rough: 60, flash: 35 };
+
 export class Game {
   constructor({
     players,
@@ -40,11 +49,14 @@ export class Game {
     maxTurnsPerRound = 40,
     twists = true,      // perk drafts and round modifiers (core/perks.js)
     firing = 'turns',   // 'turns', or 'volley': everyone plans, then all fire together
+    fog = false,        // fog of war: see FOG
     // Online play (core/netplay.js): the ids of the tanks played on this
     // screen. The other humans plan elsewhere; their plans arrive by message.
     local = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing, local };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing, local, fog };
+    this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
+    this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
     this.rng = makeRng(seed);
     this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
@@ -137,6 +149,7 @@ export class Game {
       for (const id of p.perks) {
         for (const [w, n] of Object.entries(PERK_BY_ID[id].roundAmmo || {})) p.inventory[w] = (p.inventory[w] || 0) + n;
       }
+      if (this.cfg.fog) p.inventory.scout = (p.inventory.scout || 0) + 1;   // a free scout each round
       p.alive = true;
       p.falling = false;
       p.vy = 0;
@@ -151,6 +164,7 @@ export class Game {
     this.projectiles = [];
     this.turnsThisRound = 0;
     this.firstShooter = (this.firstShooter + 1) % this.players.length;
+    this.startIntel();
     this.emit({ type: 'roundStart', round: this.round, modifier: mod.id });
     this.emit({ type: 'terrain', full: true });
     if (this.volleyMode) this.beginVolley();
@@ -214,6 +228,7 @@ export class Game {
     this.aiDrive = null;
     this.driveNote = null;
     this.checkAimHistory(p);
+    this.refreshIntel();
     if (this.volleyMode) {
       this.volley.shown = { yaw: p.yaw, elev: p.elev, power: p.power };
       if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
@@ -236,6 +251,7 @@ export class Game {
     const order = this.players.map((_, k) => this.players[(this.firstShooter + this.turnsThisRound + k) % n]).filter((p) => p.alive);
     // CPUs sort out their driving first, so every human plans against where they ended up.
     this.volley = { queue: [...order.filter((p) => p.ai), ...order.filter((p) => !p.ai)].map((p) => p.id), plans: {}, done: [], shown: null };
+    this.refreshIntel();
     if (this.turnsThisRound > 0) {
       for (const p of order) {
         const repair = perkSum(p, 'regen');
@@ -303,6 +319,7 @@ export class Game {
     this.turn = -1;
     this.phase = 'volley';
     this.phaseTime = 0;
+    this.refreshIntel();
     for (const p of this.players) {
       if (!p.alive) { delete v.plans[p.id]; continue; }
       if (!p.ai) continue;
@@ -370,8 +387,10 @@ export class Game {
   }
 
   planAiShot(p) {
-    const target = chooseTarget(p, this.players, p.ai, this.rng);
+    const target = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
     if (!target) return null;
+    // In the fog, a CPU that only has a rough fix sends a scout there first, now and then.
+    const scout = target.rough && p.inventory.scout > 0 && this.rng.next() < 0.45;
     const sol = planShot({
       shooter: p,
       target,
@@ -383,7 +402,72 @@ export class Game {
       gravity: this.gravity,
       windK: this.windShare(p),
     });
-    return (this.aiPlan = { ...sol, weapon: chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 });
+    return (this.aiPlan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 });
+  }
+
+  // ---------- fog of war ----------
+
+  // Can `viewer` see `target` right now? Always, without fog.
+  inSight(viewer, target) {
+    if (!this.cfg.fog || viewer === target) return true;
+    if (!viewer.alive) return false;
+    if (Math.hypot(viewer.x - target.x, viewer.z - target.z) <= FOG.sight) return true;
+    return this.reveals.some((r) => r.owner === viewer.id && Math.hypot(r.x - target.x, r.z - target.z) <= r.r);
+  }
+
+  // The live enemies `p` knows of, as it knows them: the real tanks without
+  // fog; with it, stand-ins at its intel (`rough` when only roughly placed).
+  knownFoes(p) {
+    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive);
+    const out = [];
+    for (const q of this.players) {
+      const i = this.intel[p.id]?.[q.id];
+      if (q === p || !q.alive || !i) continue;
+      const t = this.terrain;
+      const y = t.inBounds(i.x, i.z) ? t.heightAt(i.x, i.z) : q.y;
+      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0 });
+    }
+    return out;
+  }
+
+  // Round start: everyone has a rough fix on everyone, then sees what it sees.
+  startIntel() {
+    this.reveals = [];
+    this.intel = this.players.map(() => ({}));
+    if (!this.cfg.fog) return;
+    for (const v of this.players) for (const q of this.players) if (v !== q) this.roughFix(v, q, FOG.rough, 1);
+    this.refreshIntel();
+  }
+
+  // `v` has a rough idea where `q` is: within `r` metres of a point near it.
+  // The offset is a hash of the moment, so every copy of the game agrees.
+  roughFix(v, q, r, salt) {
+    const h = hash32(this.cfg.seed, this.round, this.turnsThisRound, v.id, q.id, q.shotCount, salt);
+    const a = (h & 0xffff) / 0x10000 * Math.PI * 2;
+    const d = ((h >>> 16) / 0x10000) * r * 0.7;
+    this.intel[v.id][q.id] = { x: q.x + Math.cos(a) * d, z: q.z + Math.sin(a) * d, r, at: this.turnsThisRound };
+  }
+
+  // Everything each tank can see now goes into its intel, exactly; spent scout bursts go.
+  refreshIntel() {
+    if (!this.cfg.fog) return;
+    this.reveals = this.reveals.filter((r) => r.until > this.turnsThisRound);
+    for (const v of this.players) {
+      if (!v.alive) continue;
+      for (const q of this.players) {
+        if (q !== v && q.alive && this.inSight(v, q)) this.intel[v.id][q.id] = { x: q.x, z: q.z, r: 0, at: this.turnsThisRound };
+      }
+    }
+  }
+
+  // `p` fired: whoever cannot see it hears roughly where from.
+  heardFire(p) {
+    if (!this.cfg.fog) return;
+    for (const v of this.players) {
+      if (v === p || !v.alive) continue;
+      if (this.inSight(v, p)) this.intel[v.id][p.id] = { x: p.x, z: p.z, r: 0, at: this.turnsThisRound };
+      else this.roughFix(v, p, FOG.flash, 2);
+    }
   }
 
   // How much of the wind this tank's shots feel.
@@ -586,6 +670,7 @@ export class Game {
         this.spawnProjectile(pos, launchVelocity(pb.yaw, p.elev, pb.power), w.id, p.id, shot).probe = pb;
       }
     } else this.spawnProjectile(pos, vel, w.id, p.id, shot);
+    this.heardFire(p);
     this.emit({ type: 'fire', player: p.id, pos, weapon: w.id, shot, delay });
     return true;
   }
@@ -766,6 +851,15 @@ export class Game {
 
   applyEffect(fx, owner, directHit, shot = 0) {
     const t = this.terrain;
+    if (fx.type === 'scout') {
+      if (!this.cfg.fog || owner == null) return;
+      // Counted in the shooter's shots: in turns, everyone else's go in between.
+      const per = this.volleyMode ? 1 : this.alivePlayers().length;
+      this.reveals.push({ owner, x: fx.point[0], z: fx.point[2], r: fx.radius, until: this.turnsThisRound + 1 + (fx.turns - 1) * per });
+      this.refreshIntel();
+      this.emit({ type: 'scout', pos: fx.point, radius: fx.radius, owner });
+      return;
+    }
     if (fx.type === 'mound') {
       const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
       this.ground?.ops.push(['m', fx.point[0], fx.point[2], fx.radius, fx.height]);
@@ -858,6 +952,7 @@ export class Game {
       rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0,
       lastRoundResult: this.lastRoundResult,
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
+      reveals: copy(this.reveals), intel: copy(this.intel),
       ground: copy(this.ground),
       players: this.players.map(copy),
     };
@@ -876,6 +971,8 @@ export class Game {
       maxWind: s.maxWind, lastRoundResult: s.lastRoundResult, nextProjectileId: s.nextProjectileId,
     });
     this.wind = [...s.wind];
+    this.reveals = JSON.parse(JSON.stringify(s.reveals || []));
+    this.intel = JSON.parse(JSON.stringify(s.intel || []));
     this.modifier = MODIFIER_BY_ID[s.modifier] || MODIFIER_BY_ID.clear;
     this.rng.setState(s.rng);
     this.rogue.setState(s.rogue);
@@ -935,6 +1032,18 @@ export class Game {
       }
     }
   }
+}
+
+// A well-stirred 32-bit hash of some integers (fog offsets).
+function hash32(...xs) {
+  let h = 0x811c9dc5;
+  for (const x of xs) {
+    h = Math.imul(h ^ (x | 0), 0x01000193);
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x2c1b3c6d);
+    h ^= h >>> 12;
+  }
+  return h >>> 0;
 }
 
 // Same pads and the same craters, to the centimetre?

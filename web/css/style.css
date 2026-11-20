@@ -253,3 +253,5 @@ body.net-guest #setup .row-buttons, body.net-guest #setup .options, body.net-gue
 .room-empty { color: #9aa6b2; font-size: 13px; }
 .net-private { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; color: #9aa6b2; }
 .net-private input { width: auto; }
+.tank-label.ghost { opacity: .8; font-style: italic; }
+.tank-label.ghost small { display: block; font-size: 11px; color: #9aa6b2; font-style: normal; white-space: nowrap; }

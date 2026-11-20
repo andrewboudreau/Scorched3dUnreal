@@ -203,3 +203,16 @@ test('netplay: the host can reload too', () => {
   for (const frame of [30, 220, 500]) reloadAt(0, frame);
   for (const [phase, nth] of [['wait', 2], ['flight', 3], ['roundOver', 1]]) reloadAt(0, 0, phase, nth);
 });
+
+test('netplay: with fog of war on, every screen keeps the same intel', () => {
+  const room = makeRoom();
+  const clients = [makeClient(room, 0, 'Ana'), makeClient(room, 1, 'Bo')];
+  play(clients, 3, () => false);
+  clients[0].session.start({ ...CONFIG, fog: true }, [{ name: 'Rook', ai: 'hard' }]);
+  const done = play(clients, 40000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
+  assert.ok(done > 0, 'match finished');
+  const [a, b] = clients.map((c) => c.session.game);
+  assert.ok(a.cfg.fog && b.cfg.fog);
+  assert.equal(summary(b), summary(a));
+  assert.deepEqual(b.intel, a.intel);
+});
