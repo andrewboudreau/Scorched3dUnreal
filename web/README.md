@@ -90,8 +90,11 @@ each other.
   tank's hits out of shots and accuracy (rangefinder probes apart), damage
   dealt (overkill not counted), kills and longest hit, plus a few awards:
   sharpshooter (at least three shots), longest hit, most damage, most kills.
-- **Online.** Under the setup card, type a name and press *Create a room*,
-  then send friends the invite link (or the 4-letter code). The host picks
+- **Online.** Under the setup card is a live list of open rooms (and
+  matches being played, with who is in them), plus who else is on the menu
+  right now. Type a name and press *Join* on a room, or *Create a room* and
+  it appears in everyone's list. Tick *Private* to keep a room off the list;
+  friends then join with the invite link (or the 4-letter code). The host picks
   the rounds, wind, terrain and any CPU tanks, then starts. Up to six tanks.
   Online play is always volley: everyone plans on their own screen at the
   same time, a banner says who the game is waiting for, and all shells fly

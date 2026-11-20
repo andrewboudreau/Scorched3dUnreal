@@ -14,11 +14,13 @@ const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.wasm': 'application/wasm' };
 
 const rooms = new Map();
+const menu = new Map();          // visitor id -> { name, seen }
+const MENU_FOR = 20000;
 
-function makeRoom() {
+function makeRoom(priv) {
   let code;
   do code = Array.from({ length: 4 }, () => LETTERS[randomInt(LETTERS.length)]).join(''); while (rooms.has(code));
-  const room = { code, seats: [], log: [], started: false, waiters: [] };
+  const room = { code, seats: [], log: [], started: false, waiters: [], private: priv, created: Date.now() };
   rooms.set(code, room);
   return room;
 }
@@ -45,7 +47,25 @@ function join(room, name) {
   return { code: room.code, seat, token };
 }
 
-const nameOf = (b) => (String(b?.name ?? '').trim().slice(0, 14) || 'Player');
+const clip = (s) => String(s ?? '').trim().slice(0, 14);
+const nameOf = (b) => clip(b?.name) || 'Player';
+
+function list(id, name) {
+  const now = Date.now();
+  for (const [k, v] of menu) if (now - v.seen > MENU_FOR) menu.delete(k);
+  if (id && id.length <= 40) menu.set(id, { name: clip(name), seen: now });
+  const out = [];
+  for (const room of rooms.values()) {
+    if (room.private) continue;
+    const live = room.seats.filter((s) => !s.gone && now - s.seen < GONE_AFTER);
+    if (!room.seats.length || !live.includes(room.seats[0])) continue;
+    const open = !room.started && live.length < MAX_SEATS;
+    out.push({ code: room.code, host: room.seats[0].name, players: live.map((s) => s.name), open, started: room.started, created: room.created });
+  }
+  out.sort((a, b) => (b.open - a.open) || (b.created - a.created));
+  const others = [...menu].filter(([k]) => k !== id).map(([, v]) => v.name);
+  return { rooms: out.slice(0, 30).map(({ created, ...r }) => r), menu: { count: others.length, names: others.filter(Boolean).slice(0, 20) } };
+}
 const json = (res, code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
 const readBody = (req) => new Promise((ok) => {
   let s = '';
@@ -57,10 +77,11 @@ async function api(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean);   // api rooms [code] [action]
   const code = parts[2]?.toUpperCase();
   const action = parts[3];
+  if (req.method === 'GET' && parts.length === 2) return json(res, 200, list(url.searchParams.get('id'), url.searchParams.get('name')));
   if (req.method === 'POST' && parts.length === 2) {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
-    return json(res, 200, join(makeRoom(), nameOf(b)));
+    return json(res, 200, join(makeRoom(b.private === true), nameOf(b)));
   }
   const room = rooms.get(code);
   if (!room) return json(res, 404, { error: 'No room with that code.' });
@@ -71,6 +92,13 @@ async function api(req, res, url) {
     if (room.started) return json(res, 409, { error: 'That game has already started.' });
     if (room.seats.filter((s) => !s.gone).length >= MAX_SEATS) return json(res, 409, { error: 'That room is full.' });
     return json(res, 200, join(room, nameOf(b)));
+  }
+  if (req.method === 'POST' && action === 'leave') {
+    const b = await readBody(req);
+    const seat = seatOf(b?.token);
+    if (seat < 0) return json(res, 403, {});
+    if (!room.seats[seat].gone) { room.seats[seat].gone = true; append(room, -1, { t: 'gone', seat }); }
+    return json(res, 200, {});
   }
   if (req.method === 'POST' && action === 'send') {
     const b = await readBody(req);

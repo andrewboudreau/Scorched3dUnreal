@@ -79,9 +79,11 @@
       <button id="start" class="primary">Start match</button>
       <div id="online">
         <div class="online-head">Play online <small>with friends on other screens: everyone plans at once, then all fire together</small></div>
+        <div id="net-rooms"></div>
         <div id="net-entry" class="online-row">
           <input id="net-name" maxlength="14" placeholder="Your name" />
           <button id="net-create">Create a room</button>
+          <label class="net-private" title="Not listed: people join with the code"><input type="checkbox" id="net-private" /> Private</label>
           <span class="or">or</span>
           <input id="net-code" maxlength="4" placeholder="CODE" />
           <button id="net-join">Join</button>
@@ -92,6 +94,7 @@
           <button id="net-leave">Leave</button>
         </div>
         <div id="net-note" class="net-note"></div>
+        <div id="net-menu" class="net-note"></div>
       </div>
     </div>
   </div>

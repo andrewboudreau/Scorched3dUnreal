@@ -3,7 +3,7 @@ import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
-import { RoomLink } from './net.js';
+import { RoomLink, listRooms } from './net.js';
 import { TANK, muzzleOrigin, hitSphere } from './core/tank.js';
 import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
@@ -1501,7 +1501,7 @@ async function goOnline(how) {
   localStorage.setItem('craterfall.name', netName());
   link = new RoomLink();
   try {
-    if (how === 'create') await link.create(netName()); else await link.join(code, netName());
+    if (how === 'create') await link.create(netName(), $('net-private').checked); else await link.join(code, netName());
   } catch (err) {
     link.close();
     link = null;
@@ -1683,6 +1683,7 @@ function updateNetWait() {
 
 function leaveRoom() {
   sessionStorage.removeItem(ROOM_KEY);
+  if (link && !link.closed) link.leave();
   closeChat();
   $('net-clock').classList.add('hidden');
   if (link) link.close();
@@ -1696,7 +1697,61 @@ function leaveRoom() {
   $('remove-player').textContent = '- Remove tank';
   $('start').disabled = false;
   history.replaceState(null, '', location.pathname);
+  roomsSig = '';
+  refreshRooms();
 }
+
+// ---- the room list: open rooms anyone can join, matches being played, and
+// who else is on the menu. Polled while the setup screen is up.
+const visitorId = sessionStorage.getItem('craterfall.visitor') || Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+sessionStorage.setItem('craterfall.visitor', visitorId);
+let roomsSig = '';
+let roomsBusy = false;
+
+async function refreshRooms() {
+  if (roomsBusy || document.hidden || $('setup').classList.contains('hidden')) return;
+  roomsBusy = true;
+  try {
+    // In a room you are not "on the menu", but you still see who is.
+    const data = await listRooms(session ? {} : { id: visitorId, name: $('net-name').value.trim() });
+    renderRooms(data);
+  } catch {
+    renderRooms(null);
+  } finally {
+    roomsBusy = false;
+  }
+}
+
+function renderRooms(data) {
+  const sig = JSON.stringify([data, !!session]);
+  if (sig === roomsSig) return;
+  roomsSig = sig;
+  const box = $('net-rooms');
+  if (session || !data) box.innerHTML = '';
+  else if (!data.rooms.length) box.innerHTML = '<div class="room-empty">No open rooms right now. Create one and it shows up here for everyone.</div>';
+  else {
+    box.innerHTML = data.rooms.map((r) => `
+      <div class="room-row ${r.open ? '' : 'busy'}">
+        <span class="room-host">${escapeHtml(r.host)}'s room</span>
+        <span class="room-players">${r.players.map(escapeHtml).join(', ')}</span>
+        <span class="room-count">${r.players.length}/6</span>
+        ${r.open ? `<button data-code="${escapeHtml(r.code)}">Join</button>` : `<span class="room-tag">${r.started ? 'playing' : 'full'}</span>`}
+      </div>`).join('');
+  }
+  const m = data?.menu;
+  const others = !m || !m.count ? 'Nobody else is on the menu right now.'
+    : `Also on the menu: ${[...m.names, ...(m.count > m.names.length ? [`${m.count - m.names.length} more`] : [])].map(escapeHtml).join(', ')}`;
+  $('net-menu').innerHTML = data ? others : '';
+}
+
+$('net-rooms').addEventListener('click', (e) => {
+  const code = e.target.closest('button[data-code]')?.dataset.code;
+  if (!code) return;
+  $('net-code').value = code;
+  goOnline('join');
+});
+setInterval(refreshRooms, 4000);
+refreshRooms();
 
 // The room went away under us: say so, then back to the menu.
 function netEnded(text) {
@@ -1760,7 +1815,7 @@ function tick(dt, draw = true) {
     updateNetClock();
     noteTakenOver();
   }
-  if (session?.over) netEnded(session.over);
+  if (session?.over && game?.phase !== 'matchOver') netEnded(session.over);
   if (game) {
     updateKillCam();
     const sdt = dt * timeScale;   // game time: slowed for the kill cam

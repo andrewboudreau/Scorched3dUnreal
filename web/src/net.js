@@ -26,7 +26,7 @@ export class RoomLink {
     return data;
   }
 
-  async create(name) { return this.attach(await this.post('', { name })); }
+  async create(name, priv = false) { return this.attach(await this.post('', { name, private: priv })); }
   async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name })); }
 
   // Back into a seat this tab had before it reloaded: { code, seat, token }.
@@ -79,4 +79,20 @@ export class RoomLink {
   }
 
   close() { this.closed = true; }
+
+  // Leave on purpose (not a reload): the seat is let go at once.
+  leave() {
+    if (!this.code || !this.token) return;
+    fetch(`${this.base}/${this.code}/leave`, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: this.token }) }).catch(() => {});
+  }
+}
+
+// The open rooms and who else is on the menu. With an `id`, this screen counts
+// as on the menu too, under `name`.
+export async function listRooms({ id = '', name = '' } = {}, base = new URL('api/rooms', location.href).href) {
+  const q = new URLSearchParams();
+  if (id) { q.set('id', id); q.set('name', name); }
+  const r = await fetch(`${base}?${q}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
 }

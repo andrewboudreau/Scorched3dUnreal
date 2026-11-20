@@ -243,3 +243,13 @@ body.net-guest #setup .row-buttons, body.net-guest #setup .options, body.net-gue
 .chat-line { background: rgba(10, 14, 19, .78); border: 1px solid var(--edge); border-radius: 8px; padding: 5px 9px; font-size: 13px; color: #dfe6ee; transition: opacity 1s; overflow-wrap: anywhere; }
 .chat-line.fade { opacity: 0; }
 #chat-input { position: fixed; left: 14px; bottom: 60px; z-index: 31; width: min(420px, 80vw); }
+#net-rooms { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 220px; overflow: auto; }
+.room-row { display: grid; grid-template-columns: minmax(90px, auto) 1fr auto auto; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--edge); border-radius: 8px; background: rgba(255,255,255,.03); }
+.room-row.busy { opacity: .6; }
+.room-host { font-weight: 700; }
+.room-players { color: #9aa6b2; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-count { color: #9aa6b2; font-size: 13px; }
+.room-tag { font-size: 12px; color: #ffd166; }
+.room-empty { color: #9aa6b2; font-size: 13px; }
+.net-private { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; color: #9aa6b2; }
+.net-private input { width: auto; }
