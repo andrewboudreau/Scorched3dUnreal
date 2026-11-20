@@ -26,14 +26,14 @@ public class CraterfallModule : IApplicationPartModule
             if (string.IsNullOrEmpty(path))
             {
                 return http.Request.Path.Value!.EndsWith('/')
-                    ? Serve("index.html")
+                    ? Serve(http, "index.html")
                     : Results.Redirect($"{http.Request.PathBase}{http.Request.Path}/{http.Request.QueryString}");
             }
-            return Serve(path);
+            return Serve(http, path);
         });
     }
 
-    private IResult Serve(string relative)
+    private IResult Serve(HttpContext http, string relative)
     {
         var root = Path.GetFullPath(this.WebRoot());
         var full = Path.GetFullPath(Path.Combine(root, relative));
@@ -45,6 +45,8 @@ public class CraterfallModule : IApplicationPartModule
         else if (full.EndsWith(".html", StringComparison.OrdinalIgnoreCase)) type = "text/html; charset=utf-8";
 
         // Revalidate every load so a new drop shows up without a hard refresh.
+        // Without this the browser may cache by heuristic and keep running old scripts.
+        http.Response.Headers.CacheControl = "no-cache";
         return Results.File(full, type, lastModified: File.GetLastWriteTimeUtc(full));
     }
 }

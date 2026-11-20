@@ -160,23 +160,73 @@ export class Effects {
   }
 }
 
-// A projectile: a hot glowing slug plus a fading trail.
+// Missile parts, shared by every shell in flight. Built along +y (nose up),
+// then turned to face the way the shell is travelling.
+const MISSILE = (() => {
+  const body = new THREE.CylinderGeometry(0.26, 0.3, 1.9, 8);
+  const nose = new THREE.ConeGeometry(0.26, 0.7, 8).translate(0, 1.3, 0);
+  const fin = new THREE.BoxGeometry(0.06, 0.55, 0.5).translate(0, -0.72, 0.42);
+  const flame = new THREE.ConeGeometry(0.22, 0.9, 8).rotateX(Math.PI).translate(0, -1.4, 0);
+  return { body, nose, fin, flame };
+})();
+const UP = new THREE.Vector3(0, 1, 0);
+const _dir = new THREE.Vector3();
+
+// A projectile: a small missile (a ball for rollers, which tumble along the
+// ground) plus a fading trail. `probe` marks a rangefinder dart: slimmer, pale,
+// no exhaust.
 export class ShellVisual {
-  constructor(scene, color, radius = 0.55) {
+  constructor(scene, color, { ball = 0, probe = false } = {}) {
     this.scene = scene;
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), new THREE.MeshBasicMaterial({ color: '#fff2c4' }));
+    this.materials = [];
+    const mat = (m) => { this.materials.push(m); return m; };
+    if (ball) {
+      this.mesh = new THREE.Mesh(new THREE.SphereGeometry(ball, 10, 8), mat(new THREE.MeshBasicMaterial({ color: '#fff2c4' })));
+      this.ownGeometry = this.mesh.geometry;
+    } else {
+      this.mesh = new THREE.Group();
+      const skin = mat(new THREE.MeshStandardMaterial({ color: probe ? '#eef6fa' : '#d4d9de', roughness: 0.5, metalness: 0.3, flatShading: true }));
+      const paint = mat(new THREE.MeshStandardMaterial({ color: probe ? '#7fe3ff' : color, roughness: 0.6, flatShading: true, emissive: probe ? '#2a7d96' : '#000000' }));
+      this.mesh.add(new THREE.Mesh(MISSILE.body, skin), new THREE.Mesh(MISSILE.nose, paint));
+      for (let k = 0; k < 4; k++) {
+        const f = new THREE.Mesh(MISSILE.fin, paint);
+        f.rotation.y = (k * Math.PI) / 2;
+        this.mesh.add(f);
+      }
+      if (!probe) {
+        this.flame = new THREE.Mesh(MISSILE.flame, mat(new THREE.MeshBasicMaterial({ color: '#ffb347', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })));
+        this.mesh.add(this.flame);
+      }
+      this.mesh.scale.setScalar(probe ? 0.75 : 1.25);
+      this.mesh.visible = false;      // until it knows which way it is pointing
+    }
+    this.last = null;
     this.max = 400;
     this.points = new Float32Array(this.max * 3);
     this.count = 0;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.points, 3));
     g.setDrawRange(0, 0);
-    this.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 }));
+    this.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: probe ? '#9fe8ff' : color, transparent: true, opacity: probe ? 0.55 : 0.85 }));
     this.line.frustumCulled = false;
     scene.add(this.mesh, this.line);
   }
 
+  // Face the missile along its path (from the last position it was given).
+  aim(pos) {
+    if (this.last && !this.ownGeometry) {
+      _dir.set(pos[0] - this.last[0], pos[1] - this.last[1], pos[2] - this.last[2]);
+      if (_dir.lengthSq() > 1e-6) {
+        this.mesh.quaternion.setFromUnitVectors(UP, _dir.normalize());
+        this.mesh.visible = true;
+      }
+    }
+    if (this.flame) this.flame.scale.set(1, 0.75 + Math.random() * 0.5, 1);
+    this.last = [pos[0], pos[1], pos[2]];
+  }
+
   push(pos) {
+    this.aim(pos);
     this.mesh.position.set(...pos);
     if (this.count >= this.max) {
       this.points.copyWithin(0, 3);
@@ -191,9 +241,9 @@ export class ShellVisual {
   // Detach the trail so it can linger and fade after the shell is gone.
   finish() {
     this.scene.remove(this.mesh);
-    this.mesh.geometry.dispose();
-    this.mesh.material.dispose();
-    this.line.material.opacity = 0.35;
+    if (this.ownGeometry) this.ownGeometry.dispose();
+    this.materials.forEach((m) => m.dispose());
+    this.line.material.opacity = Math.min(this.line.material.opacity, 0.35);
     return this.line;
   }
 }

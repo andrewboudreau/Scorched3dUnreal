@@ -29,6 +29,7 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 | ← / → | turn the hull (free) |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
 | Space | fire (in a volley: lock in your shot) |
+| F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
 | C | follow-shell camera |
 | V | overview camera |
 | M | mute everything |
@@ -47,10 +48,24 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
     before the humans plan and aim at the last moment, at the tanks where
     they stand. A tank destroyed mid-volley has already fired, so mutual
     kills happen and a round can end in a draw. Wind drifts once per volley,
-    and the round limit (40) counts volleys. The camera pulls back to keep
-    every shell in view, and launch sounds are staggered and capped so a
-    six-tank volley does not turn into a wall of noise.
+    and the round limit (40) counts volleys. With one human the camera follows
+    that player's own shell and drops a small pip where each other tank's shot
+    lands (pinned to the screen edge when off camera); with several it pulls
+    back to keep every shell in view. Launch sounds are staggered and capped so
+    a six-tank volley does not turn into a wall of noise.
   - *Take turns*: the classic game, one tank aims and fires at a time.
+- **Finding the enemy.** While you plan, every opponent that is off screen has
+  an arrow on the screen edge with its name and range. Click it, a scoreboard
+  row, or press F for a three-second look; the camera then comes back.
+- **Your tank, inset.** While the camera is off with your shell, a small view
+  in the bottom-right corner keeps your own tank in sight, and flashes red
+  with the damage when something lands on it (one human only).
+- **Rangefinder.** No damage: five small probes leave together, one as aimed,
+  two with the turret 2° either side and two with power 5 lower and higher.
+  Each landing keeps a labelled marker ("as aimed", "turret 269.4°",
+  "power 65.0") until you fire again, so you can read off which way to adjust.
+  Two come in the starting kit; more are 60 for three in the shop. Shells are
+  drawn as small finned missiles; Roller rounds are still balls.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last
   shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
   It is cleared at the start of a round and when the tank ends up more than

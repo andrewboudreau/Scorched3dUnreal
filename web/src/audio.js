@@ -4,9 +4,8 @@
 // so the volume slider and M reach all of it.
 
 const VOLUME_KEY = 'craterfall.volume';
-// Real sound speed (340 m/s) put far blasts a second behind their flash, which
-// read as lag. Distance still muffles and quiets a sound; it only arrives a touch late.
-const MAX_TRAVEL = 0.08;   // s, the most a distant sound trails its flash
+// No speed-of-sound delay: real sound speed put far blasts up to a second
+// behind their flash, which read as lag. Distance only muffles and quiets.
 const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are dropped past this
 
 export class Sound {
@@ -179,19 +178,18 @@ export class Sound {
     }
   }
 
-  // How a sound `dist` metres from the camera arrives: quieter, duller, a hair later.
+  // How a sound `dist` metres from the camera arrives: quieter and duller.
   far(dist = 0) {
     return {
       k: 1 / (1 + dist / 260),
       cutoff: dist > 40 ? Math.max(260, 9000 * Math.exp(-dist / 260)) : 0,
-      delay: Math.min(MAX_TRAVEL, dist / 5000),
     };
   }
 
   // Cannon: a sharp crack on top, a chest thump under it, a short tail.
   fire(dist = 0, wait = 0) {
-    const { k, cutoff, delay: travel } = this.far(dist);
-    const delay = travel + wait;
+    const { k, cutoff } = this.far(dist);
+    const delay = wait;
     this.burst({ dur: 0.07, freq: 3200, q: 0.9, type: 'bandpass', gain: 0.75 * k, delay, cutoff });
     this.burst({ dur: 0.5, freq: 1900, sweepTo: 180, gain: 0.6 * k, thump: 130, delay, cutoff });
     this.burst({ dur: 1.1, freq: 420, sweepTo: 90, gain: 0.22 * k, delay: delay + 0.05, cutoff });
@@ -199,16 +197,35 @@ export class Sound {
 
   explode(radius = 10, dist = 0) {
     const s = Math.min(1.6, radius / 12);
-    const { k, cutoff, delay } = this.far(dist);
-    this.burst({ dur: 1.0 + s, freq: 1400, sweepTo: 80, gain: (0.6 + s * 0.4) * k, thump: 70, delay, cutoff });
-    if (dist < 220) this.burst({ dur: 0.12, freq: 2600, q: 0.8, type: 'bandpass', gain: 0.4 * k, delay });
+    const { k, cutoff } = this.far(dist);
+    // A sharp crack on top at any range: without it a far, muffled blast has a
+    // soft start, and a soft start sounds late.
+    this.burst({ dur: 0.1, freq: 2200, q: 0.8, type: 'bandpass', gain: 0.45 * Math.max(k, 0.35) });
+    this.burst({ dur: 1.0 + s, freq: 1400, sweepTo: 80, gain: (0.6 + s * 0.4) * k, thump: 70, cutoff });
     // The rumble that rolls back off the hills.
-    this.burst({ dur: 1.8 + s, freq: 240, sweepTo: 60, gain: 0.2 * k * s, delay: delay + 0.35, cutoff: cutoff ? Math.min(cutoff, 500) : 500 });
+    this.burst({ dur: 1.8 + s, freq: 240, sweepTo: 60, gain: 0.2 * k * s, delay: 0.35, cutoff: cutoff ? Math.min(cutoff, 500) : 500 });
   }
 
   thud(dist = 0) {
-    const { k, cutoff, delay } = this.far(dist);
-    this.burst({ dur: 0.25, freq: 400, gain: 0.5 * k, thump: 60, delay, cutoff });
+    const { k, cutoff } = this.far(dist);
+    this.burst({ dur: 0.25, freq: 400, gain: 0.5 * k, thump: 60, cutoff });
+  }
+
+  // A rangefinder probe touching down: a short, soft ping.
+  ping(dist = 0) {
+    const ctx = this.ensure();
+    if (!ctx || this.muted) return;
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.setValueAtTime(1500, t);
+    o.frequency.exponentialRampToValueAtTime(1100, t + 0.18);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16 * Math.max(0.35, this.far(dist).k), t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 0.25);
   }
 
   click() { this.burst({ dur: 0.05, freq: 5000, gain: 0.15 }); }

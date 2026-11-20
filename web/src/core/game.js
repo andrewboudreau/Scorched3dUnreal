@@ -1,7 +1,7 @@
 import { makeRng } from './rng.js';
 import { Heightfield } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities } from './weapons.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes } from './weapons.js';
 import { TANK, muzzleOrigin, hitSphere, clampAim, driveStep } from './tank.js';
 import { planShot, planDrive, chooseTarget, chooseWeapon } from './ai.js';
 import { Scenery } from './scenery.js';
@@ -9,7 +9,7 @@ import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, p
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
-const START_INVENTORY = { shell: Infinity, breacher: 1, roller: 1, mound: 1, scatter: 0 };
+const START_INVENTORY = { shell: Infinity, breacher: 1, roller: 1, mound: 1, scatter: 0, ranger: 2 };
 
 // Money awards.
 // Everyone gets the stipend, so even a tank that was knocked out early has
@@ -529,7 +529,13 @@ export class Game {
     const shot = ++p.shotCount;
     p.shots.push({ n: shot, yaw: p.yaw, elev: p.elev, power: p.power, weapon: w.id, at: [p.x, p.y, p.z] });
     if (p.shots.length > AIM_HISTORY.keep) p.shots.shift();
-    this.spawnProjectile(pos, vel, w.id, p.id, shot);
+    const range = (w.flight || []).find((f) => f.type === 'range');
+    if (range) {
+      // Rangefinder: five probes leave together, each a small change to the aim.
+      for (const pb of rangeProbes(p.yaw, p.power, range, TANK.minPower, TANK.maxPower)) {
+        this.spawnProjectile(pos, launchVelocity(pb.yaw, p.elev, pb.power), w.id, p.id, shot).probe = pb;
+      }
+    } else this.spawnProjectile(pos, vel, w.id, p.id, shot);
     this.emit({ type: 'fire', player: p.id, pos, weapon: w.id, shot, delay });
     return true;
   }

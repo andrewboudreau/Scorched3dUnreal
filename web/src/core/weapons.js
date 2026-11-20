@@ -7,6 +7,8 @@
 //   split  { count, spread, child }     at the apex, become `count` child shells
 //   roll   { then: [...parts] }         roll along the ground first, then run `then`
 //   mound  { radius, height }           heap dirt instead of removing it
+//   range  { turn, power }              leave the barrel as five harmless probes:
+//                                       as aimed, turret -/+turn, power -/+power
 
 export const WEAPONS = [
   {
@@ -42,6 +44,12 @@ export const WEAPONS = [
     id: 'mound', name: 'Mound', price: 90, bundle: 3,
     desc: 'Throws up a hill of dirt. Bury a tank or build cover.',
     impact: [{ type: 'mound', radius: 20, height: 14 }],
+  },
+  {
+    id: 'ranger', name: 'Rangefinder', price: 60, bundle: 3,
+    desc: 'No damage. Five markers: as aimed, turret ±2° and power ±5. Shows which way to adjust.',
+    flight: [{ type: 'range', turn: 2, power: 5 }],
+    impact: [],
   },
 ];
 
@@ -93,4 +101,18 @@ export function splitVelocities(vel, count, spread) {
     out.push([vel[0] + px * spread * s, vel[1], vel[2] + pz * spread * s]);
   }
   return out;
+}
+
+// A rangefinder's five probes: the shot as aimed, then the turret turned each
+// way and the power eased off and pushed. `power` is clamped to [minPower, maxPower].
+export function rangeProbes(yaw, power, part, minPower, maxPower) {
+  const pw = (d) => Math.min(maxPower, Math.max(minPower, power + d));
+  const wrap = (a) => ((a % 360) + 360) % 360;
+  return [
+    { key: 'aim', yaw: wrap(yaw), power },
+    { key: 'turn-', yaw: wrap(yaw - part.turn), power },
+    { key: 'turn+', yaw: wrap(yaw + part.turn), power },
+    { key: 'power-', yaw: wrap(yaw), power: pw(-part.power) },
+    { key: 'power+', yaw: wrap(yaw), power: pw(part.power) },
+  ];
 }

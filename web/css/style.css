@@ -163,3 +163,29 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 .wb-item:disabled { opacity: .75; }
 .wb-key { font-size: 11px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; }
 .wb-n { color: var(--muted); font-weight: 500; font-size: 13px; }
+
+/* Rangefinder marks: pale cyan squares, steady rather than pinging. */
+.pip.probe i { inset: 1px; border-radius: 2px; }
+.pip.probe i::before { animation: none; opacity: .8; inset: -5px; border-width: 1px; border-radius: 2px; }
+.pip.probe span { font-weight: 600; }
+
+/* Off-screen opponents while you plan. */
+.locator { position: absolute; width: 14px; height: 14px; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; }
+.locator i { position: absolute; inset: 0; border-radius: 50%; background: rgba(10, 14, 19, .8); border: 2px solid var(--c); }
+.locator i::after { content: ''; position: absolute; left: 50%; top: 50%; border: 6px solid transparent; border-left: 10px solid var(--c);
+  border-right-width: 0; transform: translate(-50%, -50%) rotate(var(--a)) translate(15px); }
+.locator b, .locator small { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+.locator b { top: 17px; font-size: 12px; color: var(--c); }
+.locator small { top: 32px; font-size: 11px; color: #dfe6ee; font-weight: 600; }
+.locator:hover i { background: var(--c); }
+.sb-row[data-id] { cursor: pointer; }
+
+/* Picture in picture: your tank while the camera is away with your shell. */
+#inset { position: fixed; right: 16px; bottom: 54px; z-index: 2; pointer-events: none; border: 2px solid var(--c, #fff);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
+#inset-name { position: absolute; left: 8px; top: 6px; font-size: 12px; font-weight: 700; color: var(--c, #fff); text-shadow: 0 1px 3px #000; }
+#inset-dmg { position: absolute; right: 10px; top: 4px; font-size: 20px; font-weight: 800; color: #ff6b5b; opacity: 0; text-shadow: 0 2px 6px #000; }
+#inset.hit { animation: inset-hit .7s ease-out; }
+#inset.hit #inset-dmg { animation: inset-dmg 1.6s ease-out; }
+@keyframes inset-hit { from { border-color: #ff5b4b; box-shadow: 0 0 0 4px rgba(255, 91, 75, .6), 0 6px 24px rgba(0, 0, 0, .45); } }
+@keyframes inset-dmg { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }

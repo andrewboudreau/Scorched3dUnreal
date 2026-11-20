@@ -24,6 +24,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false;    // tick() asks for one update a frame
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 $('app').appendChild(renderer.domElement);
@@ -75,6 +76,8 @@ let handoffOpen = false;        // volley planning: waiting for the next human t
 // the screen; then the camera stands back to frame every shell instead.
 let heroId = null;
 const pips = [];
+let locators = [];              // per tank: edge arrow pointing at it when off screen
+let peek = null;                // { id, until }: a quick look at another tank while planning
 let followShell = true;
 let overview = false;
 let pinned = false;
@@ -163,6 +166,17 @@ function startMatch(config) {
     $('labels').appendChild(el);
     return el;
   });
+  locators = game.players.map((p) => {
+    const el = document.createElement('div');
+    el.className = 'locator';
+    el.style.setProperty('--c', p.color);
+    el.innerHTML = `<i></i><b>${escapeHtml(p.name)}</b><small></small>`;
+    el.style.display = 'none';
+    el.addEventListener('click', () => peekAt(p));
+    $('labels').appendChild(el);
+    return el;
+  });
+  peek = null;
   buildScoreboard();
   $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
   game.start();
@@ -191,6 +205,8 @@ function handleEvents() {
         wrecks.forEach((w) => scene.remove(w));
         wrecks = [];
         clearTrails();
+        pips.forEach((q) => q.el.remove());
+        pips.length = 0;
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
@@ -232,6 +248,8 @@ function handleEvents() {
         if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
         break;
       case 'fire': {
+        // Its next shot retires a tank's rangefinder marks.
+        pips.forEach((q) => { if (q.sticky && q.owner === e.player) { q.sticky = false; q.until = performance.now() + 600; } });
         // A volley's shots leave together; their flash and crack are spread a touch.
         const go = () => {
           if (!game || !tanks[e.player]) return;
@@ -247,8 +265,9 @@ function handleEvents() {
       case 'projectile': {
         const pr = game.projectiles.find((p) => p.id === e.id);
         const owner = pr ? game.players[pr.owner] : null;
-        const v = new ShellVisual(scene, owner ? owner.color : '#ffffff', rollPart(WEAPON_BY_ID[e.weapon]) ? ROLL.radius : undefined);
+        const v = new ShellVisual(scene, owner ? owner.color : '#ffffff', { ball: rollPart(WEAPON_BY_ID[e.weapon]) ? ROLL.radius : 0, probe: !!pr?.probe });
         v.owner = owner ? owner.id : null;
+        v.probe = pr?.probe || null;
         v.shot = e.shot;
         if (pr) v.push(pr.pos);
         shells.set(e.id, v);
@@ -261,10 +280,13 @@ function handleEvents() {
         break;
       case 'impact':
       case 'lost': {
-        const owner = shells.get(e.id)?.owner;
-        if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
+        const v = shells.get(e.id);
+        const owner = v?.owner;
+        if (v?.probe) {
+          if (e.type === 'impact') { addProbePip(owner, e.pos, v.probe); sound.ping(camDist(e.pos)); }
+        } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
-        if (e.type === 'lost' && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner('Out of the arena', '', 900);
+        if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner('Out of the arena', '', 900);
         break;
       }
       case 'explosion':
@@ -288,6 +310,7 @@ function handleEvents() {
         break;
       case 'damage': {
         popDamage(e.player, e.amount);
+        if (insetFor === e.player) flashInset(e.amount);
         // Name the victim on the shooter's pip.
         const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
         if (pip) pip.el.querySelector('span').textContent = `${game.players[e.by].name} hit ${e.player === heroId ? 'you' : game.players[e.player].name}`;
@@ -351,58 +374,187 @@ function closeHandoff() {
 }
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 
-// ---------------------------------------------------------------- volley pips
+// ---------------------------------------------------------------- pips and locators
 
-// A small dot in the shooter's colour where another tank's shell came down,
-// pinned to the screen edge (with an arrow) when that spot is off camera.
-// They last until a few seconds into the next planning phase.
-function addPip(owner, pos) {
+// A small dot where a shell came down, pinned to the screen edge (with an
+// arrow) when that spot is off camera. In a volley, other tanks' landings get
+// one in the shooter's colour, lasting a few seconds into the next planning
+// phase. A rangefinder's probes get `sticky` ones, kept until that tank fires
+// again and shown only to it while it plans.
+function addPip(owner, pos, { label, color, sticky = false } = {}) {
   const now = performance.now();
   // A cluster's bomblets land together: one pip covers them.
-  if (pips.some((q) => q.owner === owner && now - q.born < 2500 && Math.hypot(q.pos[0] - pos[0], q.pos[2] - pos[2]) < 40)) return;
+  if (!sticky && pips.some((q) => q.owner === owner && !q.sticky && now - q.born < 2500 && Math.hypot(q.pos[0] - pos[0], q.pos[2] - pos[2]) < 40)) return;
   const p = game.players[owner];
   const el = document.createElement('div');
-  el.className = 'pip';
-  el.style.setProperty('--c', p.color);
-  el.innerHTML = `<i></i><span>${escapeHtml(p.name)}</span>`;
+  el.className = sticky ? 'pip probe' : 'pip';
+  el.style.setProperty('--c', color || p.color);
+  el.innerHTML = `<i></i><span>${escapeHtml(label || p.name)}</span>`;
   $('labels').appendChild(el);
-  pips.push({ owner, pos: [...pos], el, born: now, until: 0 });
+  pips.push({ owner, pos: [...pos], el, born: now, until: 0, sticky });
 }
 
+function addProbePip(owner, pos, pb) {
+  const label = pb.key === 'aim' ? 'as aimed'
+    : pb.key.startsWith('turn') ? `turret ${pb.yaw.toFixed(1)}°` : `power ${pb.power.toFixed(1)}`;
+  addPip(owner, pos, { label, color: '#9fe8ff', sticky: true });
+}
+
+// Where a world point sits on screen. One that is off screen (or behind the
+// camera) is pulled onto an edge, in far enough for a name to fit and clear of
+// the HUD panels; `angle` then points from there toward it.
 const _pipV = new THREE.Vector3();
+function screenSpot(x, y, z) {
+  const W = window.innerWidth, H = window.innerHeight;
+  const v = _pipV.set(x, y, z).project(camera);
+  let nx = v.x, ny = v.y;
+  const behind = v.z > 1;
+  if (behind) { nx = -nx; ny = -ny; }
+  const off = behind || Math.abs(nx) > 1 || Math.abs(ny) > 1;
+  if (off) { const m = Math.max(Math.abs(nx), Math.abs(ny)) || 1; nx /= m; ny /= m; }
+  const [l, r, t, b] = off ? [80, W - 80, 60, H - 125] : [10, W - 10, 10, H - 10];
+  const sx = Math.min(r, Math.max(l, (nx * 0.5 + 0.5) * W));
+  let sy = Math.min(b, Math.max(t, (-ny * 0.5 + 0.5) * H));
+  if (off) {
+    if (sx < 250 && sy < 265) sy = 265;            // under the aim card
+    if (sx > W - 235 && sy < 135) sy = 135;        // under the scoreboard
+  }
+  return { sx, sy, off, angle: Math.atan2(-ny, nx), l, r, t, b };
+}
+
+// Slide an edge marker along its edge until it clears the ones already placed.
+function unstack(s, placed) {
+  const alongY = s.sx === s.l || s.sx === s.r;
+  for (let tries = 0; tries < 6 && placed.some(([px, py]) => Math.hypot(px - s.sx, py - s.sy) < 34); tries++) {
+    if (alongY) s.sy = Math.min(s.b, Math.max(s.t, s.sy + 36)); else s.sx = Math.min(s.r, Math.max(s.l, s.sx + 90));
+  }
+  placed.push([s.sx, s.sy]);
+}
+
+function place(el, s) {
+  el.classList.toggle('edge', s.off);
+  el.style.left = `${s.sx}px`;
+  el.style.top = `${s.sy}px`;
+  if (s.off) el.style.setProperty('--a', `${s.angle}rad`);
+}
+
 function updatePips() {
   const now = performance.now();
-  const W = window.innerWidth, H = window.innerHeight;
-  const placed = [];            // edge pips so far this frame, so they don't stack
+  const placed = [];
+  const labels = [];            // label boxes already placed, so close-together marks stay readable
   for (let i = pips.length - 1; i >= 0; i--) {
     const q = pips[i];
-    if (!q.until && game.phase === 'aim') q.until = now + 4000;
+    if (!q.until && !q.sticky && game.phase === 'aim') q.until = now + 4000;
     const left = q.until ? (q.until - now) / 1000 : Infinity;
     if (left <= 0) { q.el.remove(); pips.splice(i, 1); continue; }
+    const hide = handoffOpen || (q.sticky && game.phase === 'aim' && game.current && game.current.id !== q.owner);
+    q.el.style.display = hide ? 'none' : '';
+    if (hide) continue;
     q.el.style.opacity = Math.min(1, left / 1.2);
-    const v = _pipV.set(q.pos[0], q.pos[1] + 1, q.pos[2]).project(camera);
-    let x = v.x, y = v.y;
-    const behind = v.z > 1;
-    if (behind) { x = -x; y = -y; }
-    const off = behind || Math.abs(x) > 1 || Math.abs(y) > 1;
-    if (off) { const m = Math.max(Math.abs(x), Math.abs(y)) || 1; x /= m; y /= m; }
-    // On the edge, stay in far enough for the name to fit and clear of the
-    // weapon and help bars along the bottom.
-    const [l, r, t, b] = off ? [80, W - 80, 60, H - 125] : [10, W - 10, 10, H - 10];
-    let sx = Math.min(r, Math.max(l, (x * 0.5 + 0.5) * W));
-    let sy = Math.min(b, Math.max(t, (-y * 0.5 + 0.5) * H));
-    if (off) {
-      const alongY = sx === l || sx === r;   // on a side edge, slide up/down; else left/right
-      for (let tries = 0; tries < 6 && placed.some(([px, py]) => Math.hypot(px - sx, py - sy) < 34); tries++) {
-        if (alongY) sy = Math.min(b, Math.max(t, sy + 36)); else sx = Math.min(r, Math.max(l, sx + 90));
-      }
-      placed.push([sx, sy]);
-    }
-    q.el.classList.toggle('edge', off);
-    q.el.style.left = `${sx}px`;
-    q.el.style.top = `${sy}px`;
-    if (off) q.el.style.setProperty('--a', `${Math.atan2(-y, x)}rad`);
+    const s = screenSpot(q.pos[0], q.pos[1] + 1, q.pos[2]);
+    if (s.off) unstack(s, placed);
+    place(q.el, s);
+    // Marks that land close together (a rangefinder's always do from afar):
+    // the dots stay put and their names stack downward.
+    const span = q.el.lastElementChild;
+    const w = (q.w ||= span.offsetWidth || 60) / 2 + 4;
+    let top = 14;
+    while (top < 100 && labels.some(([x, y, hw]) => Math.abs(x - s.sx) < hw + w && Math.abs(y - (s.sy + top)) < 13)) top += 13;
+    span.style.top = `${top}px`;
+    labels.push([s.sx, s.sy + top, w]);
   }
+}
+
+// While you plan, every opponent that is off screen gets an arrow on the
+// screen edge with its name and range. Click one, or press F, to look.
+function updateLocators() {
+  const me = game.phase === 'aim' && !handoffOpen && !overview && game.current && !game.current.ai ? game.current : null;
+  const placed = [];
+  game.players.forEach((p, i) => {
+    const el = locators[i];
+    const s = me && p !== me && p.alive ? screenSpot(p.x, p.y + 4, p.z) : null;
+    if (!s || !s.off) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    unstack(s, placed);
+    place(el, s);
+    el.querySelector('small').textContent = `${Math.round(Math.hypot(p.x - me.x, p.z - me.z))} m`;
+  });
+}
+
+// A three-second look at another tank; the camera then drifts back.
+function peekAt(p) {
+  if (!game || game.phase !== 'aim' || !p.alive || p === game.current) { peek = null; return; }
+  peek = { id: p.id, until: performance.now() + 3000 };
+  camGoal = null;
+  overview = false;
+}
+
+// F: look at the next opponent, nearest first.
+function peekNext() {
+  const me = game.current;
+  if (!me) return;
+  const foes = game.players.filter((p) => p.alive && p !== me)
+    .sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
+  if (!foes.length) return;
+  const at = peek && performance.now() < peek.until ? foes.findIndex((p) => p.id === peek.id) : -1;
+  peekAt(foes[(at + 1) % foes.length]);
+}
+
+// ---------------------------------------------------------------- inset
+
+// While shells fly and the camera is away from your tank, a small view in
+// the corner keeps it in sight, so you can see what is coming at you.
+// Only with one human: on a shared screen there is no single "your tank".
+const insetCam = new THREE.PerspectiveCamera(46, 1.6, 0.5, 4000);
+let insetFor = null;            // player id shown in the inset this frame
+const _back = new THREE.Vector3();
+
+function insetPlayer() {
+  if (!game || overview || !followShell || pinned) return null;
+  if (game.phase !== 'flight' && game.phase !== 'settle') return null;
+  const hs = game.humans;
+  if (hs.length !== 1) return null;
+  const p = hs[0];
+  if (!p.alive && insetFor !== p.id) return null;       // keep it on a tank knocked out mid-volley
+  if (controls.target.distanceTo(_v.set(p.x, p.y, p.z)) < 110) return null;   // already in the main view
+  return p;
+}
+
+function renderInset() {
+  const p = insetPlayer();
+  insetFor = p ? p.id : null;
+  $('inset').classList.toggle('hidden', !p);
+  if (!p) return;
+  const W = window.innerWidth;
+  const w = Math.round(Math.min(360, Math.max(220, W * 0.24)));
+  const h = Math.round(w * 0.6);
+  const x = W - w - 16, y = 54;                          // from the bottom-left, as GL counts
+  const box = $('inset');
+  box.style.width = `${w}px`;
+  box.style.height = `${h}px`;
+  box.style.setProperty('--c', p.color);
+  $('inset-name').textContent = whose(p, 'tank');
+  _back.set(-Math.cos(p.yaw * DEG), 0, -Math.sin(p.yaw * DEG));
+  insetCam.position.set(p.x + _back.x * 40, p.y + 22, p.z + _back.z * 40);
+  const t = game.terrain;
+  if (t.inBounds(insetCam.position.x, insetCam.position.z)) insetCam.position.y = Math.max(insetCam.position.y, t.heightAt(insetCam.position.x, insetCam.position.z) + 6);
+  insetCam.lookAt(p.x, p.y + 2, p.z);
+  insetCam.aspect = w / h;
+  insetCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setScissor(x, y, w, h);
+  renderer.setViewport(x, y, w, h);
+  renderer.render(scene, insetCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, window.innerHeight);
+}
+
+function flashInset(amount) {
+  const box = $('inset');
+  $('inset-dmg').textContent = `-${Math.round(amount)}`;
+  box.classList.remove('hit');
+  void box.offsetWidth;                                  // restart the animation
+  box.classList.add('hit');
 }
 
 function popDamage(pid, amount) {
@@ -463,10 +615,12 @@ function updateCamera(dt) {
       c.divideScalar(game.projectiles.length);
       camTarget.copy(c);
     } else if (game.phase === 'aim' && game.current) {
-      const p = game.current;
+      const look = peek && performance.now() < peek.until ? game.players[peek.id] : null;
+      if (!look) peek = null;
+      const p = look || game.current;
       camTarget.set(p.x, p.y + 4, p.z);
       // Left far out (e.g. by the volley framing) with nobody steering: come back in.
-      if (!camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
+      if (!look && !camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
     }
   }
   const before = controls.target.clone();
@@ -529,6 +683,7 @@ window.addEventListener('keydown', (e) => {
   if (k === ' ') { e.preventDefault(); if (game.current && !game.current.ai && game.fire()) { /* fired */ } }
   else if (k === 'tab') { game.cycleWeapon(e.shiftKey ? -1 : 1); sound.click(); }
   else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
+  else if (k === 'f') peekNext();
   else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
   else if (k === 'v') {
     overview = !overview;
@@ -670,13 +825,16 @@ function showHud(on) { $('hud').classList.toggle('hidden', !on); }
 
 function buildScoreboard() {
   $('scoreboard').innerHTML = game.players.map((p) => `
-    <div class="sb-row" id="sb-${p.id}">
+    <div class="sb-row" id="sb-${p.id}" data-id="${p.id}" title="Click to look at ${escapeHtml(p.name)}">
       <span class="swatch" style="background:${p.color}"></span>
       <span style="width:74px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(p.name)}</span>
       <div class="bar"><div class="fill hp"></div></div>
       <span class="wins"></span>
       <div class="sb-perks"></div>
     </div>`).join('');
+  $('scoreboard').querySelectorAll('.sb-row').forEach((row) => {
+    row.onclick = () => game && peekAt(game.players[Number(row.dataset.id)]);
+  });
 }
 
 const perkChip = (id, long) => `<span class="perk" title="${escapeHtml(PERK_BY_ID[id].desc)}">${long ? PERK_BY_ID[id].name : PERK_BY_ID[id].tag}</span>`;
@@ -984,6 +1142,7 @@ function tick(dt) {
     updateHud();
     updateLabels();
     updatePips();
+    updateLocators();
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;
@@ -1002,7 +1161,9 @@ function tick(dt) {
   soundScape(dt);
   effects.update(dt);
   updateCamera(dt);
+  renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   renderer.render(scene, camera);
+  renderInset();
 }
 
 // A backdrop field for the menu; dropped once a real match starts.
@@ -1027,4 +1188,5 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },
+  audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };
