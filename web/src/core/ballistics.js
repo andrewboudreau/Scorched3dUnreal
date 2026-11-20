@@ -22,11 +22,14 @@ export function launchVelocity(yawDeg, elevDeg, power) {
   return [d[0] * power, d[1] * power, d[2] * power];
 }
 
-// Semi-implicit Euler with gravity and a horizontal wind acceleration.
+// Semi-implicit Euler with gravity and a horizontal wind acceleration. A
+// projectile may carry its own gravity `g` and wind share `windK` (round
+// modifiers and perks); without them it flies under the defaults.
 export function stepProjectile(p, wind, dt = SIM_DT) {
-  p.vel[0] += wind[0] * dt;
-  p.vel[1] -= GRAVITY * dt;
-  p.vel[2] += wind[1] * dt;
+  const k = p.windK ?? 1;
+  p.vel[0] += wind[0] * k * dt;
+  p.vel[1] -= (p.g ?? GRAVITY) * dt;
+  p.vel[2] += wind[1] * k * dt;
   p.prev[0] = p.pos[0]; p.prev[1] = p.pos[1]; p.prev[2] = p.pos[2];
   p.pos[0] += p.vel[0] * dt;
   p.pos[1] += p.vel[1] * dt;
@@ -56,8 +59,10 @@ export function groundContact(p, terrain) {
 
 // Full flight to the ground. `targets` is an optional list of {x,y,z,r}
 // spheres (tanks); hitting one ends the flight there.
-export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT }) {
+export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1 }) {
   const p = makeProjectile(pos, vel);
+  p.g = gravity;
+  p.windK = windK;
   const path = recordPath ? [[...p.pos]] : null;
   while (p.time < maxTime) {
     stepProjectile(p, wind);

@@ -26,6 +26,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 .fill.armor { background: rgba(120, 180, 255, .85); height: 3px; top: auto; }
 .fill.pw { background: linear-gradient(90deg, #ffd166, #ff7b39); transition: none; }
 .pc-money { color: var(--accent); font-weight: 600; }
+.fuel { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.fuel label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.fuel .bar { flex: 1; height: 6px; margin: 0; }
+.fuel span { font-size: 12px; font-variant-numeric: tabular-nums; width: 34px; text-align: right; }
+.fill.fl { background: linear-gradient(90deg, #d98a3a, #f2c14e); transition: none; }
+#pc-note { min-height: 16px; font-size: 12px; color: #ffb38a; }
+.perks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.perk { display: inline-block; font-size: 11px; font-weight: 600; line-height: 1.5; padding: 0 6px; border-radius: 4px; white-space: nowrap;
+  color: #d9ccff; background: rgba(150, 120, 255, .18); border: 1px solid rgba(170, 145, 255, .45); }
 .readout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; text-align: center; }
 .readout label, .weapon label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .readout span { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 700; }
@@ -41,7 +50,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 #wind-speed { font-weight: 700; font-variant-numeric: tabular-nums; }
 
 #scoreboard { top: 14px; right: 14px; width: 210px; }
-.sb-row { display: flex; align-items: center; gap: 7px; margin: 4px 0; font-size: 13px; }
+.sb-row { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 7px; margin: 4px 0; font-size: 13px; }
+.sb-perks { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 3px; padding-left: 19px; text-decoration: none; }
+.sb-perks:empty { display: none; }
+.sb-perks .perk { font-size: 10px; padding: 0 4px; }
 .sb-row.dead { opacity: .4; text-decoration: line-through; }
 .sb-row.active { font-weight: 700; }
 .sb-row .bar { flex: 1; height: 6px; margin: 0; }
@@ -116,8 +128,17 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 .shop-note { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 13px; }
 .shop-note.good { color: #9be36b; font-weight: 600; }
 
+/* Perk draft */
+#draft-card { width: min(760px, 94vw); }
+#draft-items { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.draft-item { border-color: rgba(170, 145, 255, .4); background: rgba(150, 120, 255, .07); }
+.draft-item .desc { font-size: 13px; color: var(--text); min-height: 38px; }
+.draft-item button.buy { background: #5b46b8; border-color: #8a75e6; margin-top: 4px; }
+.draft-item button.buy:hover { background: #6d57cf; }
+.options input[type=range] { width: 110px; padding: 0; }
+
 /* Weapons carried by the tank whose turn it is */
-#weapon-bar { position: fixed; z-index: 2; bottom: 52px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
+#weapon-bar { position: fixed; z-index: 2; bottom: 70px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: center; max-width: 94vw; }
 .wb-item { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
   padding: 6px 10px; font-weight: 600; backdrop-filter: blur(6px); }

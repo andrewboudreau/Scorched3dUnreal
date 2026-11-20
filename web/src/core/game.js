@@ -2,9 +2,10 @@ import { makeRng } from './rng.js';
 import { Heightfield } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities } from './weapons.js';
-import { TANK, muzzleOrigin, hitSphere, clampAim } from './tank.js';
-import { planShot, chooseTarget, chooseWeapon } from './ai.js';
+import { TANK, muzzleOrigin, hitSphere, clampAim, driveStep } from './tank.js';
+import { planShot, planDrive, chooseTarget, chooseWeapon } from './ai.js';
 import { Scenery } from './scenery.js';
+import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -25,9 +26,15 @@ export class Game {
     resolution = 256,
     hills = 45,
     maxTurnsPerRound = 40,
+    twists = true,      // perk drafts and round modifiers (core/perks.js)
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists };
     this.rng = makeRng(seed);
+    this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
+    this.modifier = MODIFIER_BY_ID.clear;
+    this.gravity = GRAVITY;
+    this.maxWind = maxWind;
+    this.draft = {};                            // human id -> perk ids on offer
     this.players = players.map((p, i) => ({
       id: i,
       name: p.name || `Player ${i + 1}`,
@@ -38,9 +45,12 @@ export class Game {
       wins: 0,
       inventory: { ...START_INVENTORY },
       pendingArmor: 0,
+      pendingFuel: 0,
+      perks: [],
       // per-round state
       x: 0, y: 0, z: 0, yaw: 0, elev: 45, power: 60,
-      hp: TANK.maxHp, armor: 0, alive: true,
+      hull: 0, fuel: 0, fuelMax: 0, hitsHere: 0,
+      hp: TANK.maxHp, maxHp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
     }));
@@ -75,15 +85,26 @@ export class Game {
   startRound() {
     this.round++;
     const t = this.terrain;
+    const mod = this.modifier = this.cfg.twists ? pickModifier(this.rogue, this.modifier.id) : MODIFIER_BY_ID.clear;
+    this.gravity = GRAVITY * (mod.gravity || 1);
+    this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
     t.generate({ seed: this.cfg.seed + this.round * 7919, amplitude: this.cfg.hills });
     this.placeTanks();
     this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });
     for (const p of this.players) {
       p.y = t.heightAt(p.x, p.z);
       p.aim = {};
-      p.hp = TANK.maxHp;
-      p.armor = p.pendingArmor;
+      p.maxHp = TANK.maxHp + perkSum(p, 'maxHp');
+      p.hp = p.maxHp;
+      p.armor = p.pendingArmor + perkSum(p, 'roundArmor');
       p.pendingArmor = 0;
+      p.fuelMax = Math.round((TANK.fuel + perkSum(p, 'fuel') + p.pendingFuel) * (mod.fuel || 1));
+      p.fuel = p.fuelMax;
+      p.pendingFuel = 0;
+      p.hitsHere = 0;
+      for (const id of p.perks) {
+        for (const [w, n] of Object.entries(PERK_BY_ID[id].roundAmmo || {})) p.inventory[w] = (p.inventory[w] || 0) + n;
+      }
       p.alive = true;
       p.falling = false;
       p.vy = 0;
@@ -93,12 +114,12 @@ export class Game {
       p.roundDamage = 0;
     }
     // Everyone starts aiming at the arena centre.
-    for (const p of this.players) p.yaw = ((Math.atan2(-p.z, -p.x) * 180) / Math.PI + 360) % 360;
+    for (const p of this.players) p.hull = p.yaw = ((Math.atan2(-p.z, -p.x) * 180) / Math.PI + 360) % 360;
     this.wind = this.randomWind();
     this.projectiles = [];
     this.turnsThisRound = 0;
     this.firstShooter = (this.firstShooter + 1) % this.players.length;
-    this.emit({ type: 'roundStart', round: this.round });
+    this.emit({ type: 'roundStart', round: this.round, modifier: mod.id });
     this.emit({ type: 'terrain', full: true });
     this.beginTurn(this.firstShooter);
   }
@@ -125,15 +146,15 @@ export class Game {
   }
 
   randomWind() {
-    const m = this.cfg.maxWind;
+    const m = this.maxWind;
     if (m <= 0) return [0, 0];
     const a = this.rng.range(0, Math.PI * 2);
-    const s = this.rng.range(0, m);
+    const s = this.rng.range(this.modifier.wind > 1 ? m * 0.5 : 0, m);
     return [Math.cos(a) * s, Math.sin(a) * s];
   }
 
   driftWind() {
-    const m = this.cfg.maxWind;
+    const m = this.maxWind;
     if (m <= 0) return;
     let [wx, wz] = this.wind;
     wx += this.rng.gauss() * m * 0.15;
@@ -151,12 +172,27 @@ export class Game {
     this.phaseTime = 0;
     const p = this.current;
     if (!(p.inventory[p.weapon] > 0)) p.weapon = 'shell';
+    const repair = perkSum(p, 'regen');
+    if (repair && this.turnsThisRound > 0) p.hp = Math.min(p.maxHp, p.hp + repair);
     this.aiPlan = null;
+    this.aiDrive = null;
+    this.driveNote = null;
     if (p.ai) this.planAi(p);
     this.emit({ type: 'turn', player: p.id });
   }
 
+  // A CPU turn: now and then drive first (ai.planDrive), then plan the shot
+  // from wherever it ends up. Its aim memory sees that it moved and loosens.
   planAi(p) {
+    const go = planDrive({
+      me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
+      tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
+    });
+    if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
+    else this.planAiShot(p);
+  }
+
+  planAiShot(p) {
     const target = chooseTarget(p, this.players, p.ai, this.rng);
     if (!target) return;
     const sol = planShot({
@@ -167,8 +203,63 @@ export class Game {
       rng: this.rng,
       difficulty: p.ai,
       memory: p.aim,
+      gravity: this.gravity,
+      windK: this.windShare(p),
     });
     this.aiPlan = { ...sol, weapon: chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
+  }
+
+  // How much of the wind this tank's shots feel.
+  windShare(p) { return Math.max(0, 1 + perkSum(p, 'windScale')); }
+
+  // ---------- driving ----------
+
+  // Things a tank cannot drive through: the other tanks and standing houses.
+  obstacles() {
+    return [...this.players, ...this.scenery.props.filter((q) => q.kind === 'house' && q.state === 'ok')];
+  }
+
+  driveTank(p, dir, dt) {
+    const r = driveStep(p, this.terrain, dir, dt, this.obstacles());
+    if (r === 'ok') p.hitsHere = 0;
+    return r;
+  }
+
+  // Where would `budget` fuel along `heading` really get it? Nothing moves.
+  previewDrive(p, heading, budget) {
+    const ghost = { x: p.x, y: p.y, z: p.z, hull: heading, fuel: Math.min(budget, p.fuel) };
+    const others = this.obstacles().filter((o) => o !== p);
+    while (driveStep(ghost, this.terrain, 1, 0.1, others) === 'ok');
+    return { x: ghost.x, y: ghost.y, z: ghost.z, moved: Math.hypot(ghost.x - p.x, ghost.z - p.z) };
+  }
+
+  // The current human drives: `dir` +1/-1 along the hull, `turn` +1/-1 swings
+  // the hull (free). Returns what happened, for the HUD.
+  drive(dir, turn, dt) {
+    const p = this.current;
+    if (this.phase !== 'aim' || !p || p.ai || !p.alive) return 'idle';
+    if (turn) p.hull = (((p.hull + turn * TANK.hullTurnSpeed * dt) % 360) + 360) % 360;
+    if (!dir) return turn ? 'turn' : 'idle';
+    return (this.driveNote = this.driveTank(p, dir, dt));
+  }
+
+  updateAiDrive(p, dt) {
+    const d = this.aiDrive;
+    d.time += dt;
+    if (d.time < 0.5) return;
+    let done = d.time > 7;   // never let a drive hold the turn up
+    const dh = ((d.heading - p.hull + 540) % 360) - 180;
+    const turn = TANK.hullTurnSpeed * dt;
+    if (Math.abs(dh) > 1) p.hull = (((p.hull + Math.max(-turn, Math.min(turn, dh))) % 360) + 360) % 360;
+    else {
+      const r = this.driveTank(p, 1, dt);
+      if (r !== 'ok' || p.fuel <= d.until + 0.01) done = true;
+    }
+    if (done) {
+      this.aiDrive = null;
+      this.phaseTime = 0;
+      this.planAiShot(p);
+    }
   }
 
   nextTurn() {
@@ -189,9 +280,10 @@ export class Game {
     let winner = null;
     if (alive.length === 1) winner = alive[0];
     else if (alive.length > 1) winner = alive.reduce((a, b) => (b.hp > a.hp ? b : a));
-    for (const p of this.players) p.money += PAY.stipend;
-    for (const p of alive) p.money += PAY.survive;
-    if (winner) { winner.wins++; winner.money += PAY.roundWin; winner.score += 1; }
+    const payK = this.modifier.pay || 1;
+    for (const p of this.players) p.money += PAY.stipend * payK;
+    for (const p of alive) p.money += PAY.survive * payK;
+    if (winner) { winner.wins++; winner.money += PAY.roundWin * payK; winner.score += 1; }
     this.lastRoundResult = { round: this.round, winner: winner ? winner.id : null };
     this.phase = this.round >= this.cfg.rounds ? 'matchOver' : 'roundOver';
     this.phaseTime = 0;
@@ -199,35 +291,60 @@ export class Game {
     this.emit({ type: this.phase, winner: winner ? winner.id : null });
   }
 
-  // From roundOver: humans shop, AIs buy automatically.
+  // From roundOver: every tank is offered three perks and keeps one, then
+  // shops. Humans do both through the UI; CPUs do both here.
   openShop() {
     if (this.phase !== 'roundOver') return;
-    for (const p of this.players) if (p.ai) this.aiShop(p);
     this.phase = 'shop';
     this.phaseTime = 0;
+    this.draft = {};
+    for (const p of this.players) {
+      const offer = this.cfg.twists ? draftOffer(p, this.rogue) : [];
+      if (!offer.length) continue;
+      if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
+      else this.draft[p.id] = offer;
+    }
+    for (const p of this.players) if (p.ai) this.aiShop(p);
     this.emit({ type: 'shop' });
     if (!this.humans.length) this.closeShop();
   }
 
+  pickPerk(playerId, id) {
+    const offer = this.draft[playerId];
+    if (this.phase !== 'shop' || !offer || !offer.includes(id)) return false;
+    this.players[playerId].perks.push(id);
+    delete this.draft[playerId];
+    return true;
+  }
+
   closeShop() {
     if (this.phase !== 'shop') return;
+    // Anyone who walked past the draft takes the first card.
+    for (const [pid, offer] of Object.entries(this.draft)) this.pickPerk(Number(pid), offer[0]);
     this.startRound();
+  }
+
+  // What this tank pays for an armory item (perks can lower it).
+  priceOf(p, id) {
+    const it = WEAPON_BY_ID[id] || ITEMS.find((x) => x.id === id);
+    if (!it || !(it.price > 0)) return Infinity;
+    return Math.round((it.price * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;
   }
 
   buy(playerId, id) {
     const p = this.players[playerId];
     const w = WEAPON_BY_ID[id];
-    const item = ITEMS.find((it) => it.id === id);
-    const price = w ? w.price : item ? item.price : Infinity;
+    const price = this.priceOf(p, id);
     if (!(price > 0) || p.money < price) return false;
     p.money -= price;
     if (w) p.inventory[id] = (p.inventory[id] || 0) + w.bundle;
     else if (id === 'armor') p.pendingArmor += 30;
+    else if (id === 'fuel') p.pendingFuel += TANK.fuelCan;
     return true;
   }
 
   aiShop(p) {
-    const wishlist = ['breacher', 'scatter', 'armor', 'roller', 'breacher'];
+    const wishlist = ['breacher', 'scatter', 'armor', 'roller', 'fuel', 'breacher'];
     for (const id of wishlist) this.buy(p.id, id);
   }
 
@@ -272,6 +389,8 @@ export class Game {
     pr.owner = owner;
     pr.dead = false;
     pr.splitDone = false;
+    pr.g = this.gravity;
+    pr.windK = this.windShare(this.players[owner]);
     this.projectiles.push(pr);
     this.emit({ type: 'projectile', id: pr.id, weapon: weaponId });
     return pr;
@@ -304,6 +423,7 @@ export class Game {
 
   updateAim(dt) {
     const p = this.current;
+    if (p && p.ai && this.aiDrive) { this.updateAiDrive(p, dt); return; }
     if (!p || !p.ai || !this.aiPlan) {
       if (p && p.ai && !this.aiPlan) this.nextTurn(); // nothing to shoot at
       return;
@@ -390,6 +510,22 @@ export class Game {
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
     for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit);
+    if (pr.weapon === 'shell' && !directHit) this.throwShrapnel(pr, point);
+  }
+
+  // Shrapnel perk: a plain Shell that hits the ground lobs bomblets onward.
+  throwShrapnel(pr, point) {
+    const n = perkSum(this.players[pr.owner], 'shrapnel');
+    if (!n) return;
+    const h = Math.hypot(pr.vel[0], pr.vel[2]) || 1;
+    const ux = pr.vel[0] / h;
+    const uz = pr.vel[2] / h;
+    for (let k = 0; k < n; k++) {
+      const side = n === 1 ? 0 : (k / (n - 1)) * 2 - 1;
+      const vel = [ux * 9 - uz * side * 5, 12, uz * 9 + ux * side * 5];
+      const child = this.spawnProjectile([point[0], this.terrain.heightAt(point[0], point[2]) + 0.8, point[2]], vel, 'bomblet', pr.owner);
+      child.splitDone = true;
+    }
   }
 
   // A roller on the ground: follow the surface until it stops, runs out of
@@ -422,13 +558,16 @@ export class Game {
     }
     if (fx.type === 'blast') {
       const [bx, by, bz] = fx.point;
-      this.emit({ type: 'explosion', pos: fx.point, radius: fx.radius });
-      this.carve(bx, by, bz, fx.radius, fx.depth);
+      const o = owner != null ? this.players[owner] : null;
+      const radius = fx.radius * (1 + (o ? perkSum(o, 'blastRadius') : 0));
+      const damage = fx.damage * (1 + (o ? perkSum(o, 'blastDamage') : 0));
+      this.emit({ type: 'explosion', pos: fx.point, radius });
+      this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
       for (const p of this.players) {
         if (!p.alive) continue;
         const s = hitSphere(p);
         const dist = p === directHit ? 0 : Math.max(0, Math.hypot(s.x - bx, s.y - by, s.z - bz) - TANK.hitRadius * 0.5);
-        const dmg = blastDamage(dist, fx.radius, fx.damage);
+        const dmg = blastDamage(dist, radius, damage);
         if (dmg > 0) this.damage(p, dmg, owner);
       }
     }
@@ -443,14 +582,16 @@ export class Game {
     }
     p.hp = Math.max(0, p.hp - rest);
     const attacker = from != null ? this.players[from] : null;
+    const payK = this.modifier.pay || 1;
     if (attacker && attacker !== p) {
-      attacker.money += Math.round(amount * PAY.perDamage);
+      attacker.money += Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK);
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
+      p.hitsHere++;
     }
     this.emit({ type: 'damage', player: p.id, amount, hp: p.hp });
     if (p.hp <= 0 && p.alive) {
       p.alive = false;
-      if (attacker && attacker !== p) attacker.money += PAY.kill;
+      if (attacker && attacker !== p) attacker.money += PAY.kill * payK;
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
       // The wreck cooks off: a small crater of its own.
       this.carve(p.x, p.y, p.z, 7, 0.4);
@@ -490,7 +631,7 @@ export class Game {
           p.falling = false;
           const drop = p.fallFrom - g;
           const dmg = Math.max(0, (drop - 2.5) * 2.2);
-          if (dmg > 0 && p.alive) {
+          if (dmg > 0 && p.alive && !hasPerk(p, 'noFall')) {
             this.emit({ type: 'landed', player: p.id, drop });
             this.damage(p, dmg, null);
           }

@@ -30,6 +30,10 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 10, damage: 28, depth: 0.55 }],
   },
   {
+    id: 'bomblet', name: 'Bomblet', hidden: true,   // thrown by the Shrapnel perk
+    impact: [{ type: 'blast', radius: 6, damage: 16, depth: 0.45 }],
+  },
+  {
     id: 'roller', name: 'Roller', price: 130, bundle: 3,
     desc: 'Lands, rolls downhill and blows up where it stops or on the first tank it touches.',
     impact: [{ type: 'roll', then: [{ type: 'blast', radius: 14, damage: 55, depth: 0.6 }] }],
@@ -43,6 +47,7 @@ export const WEAPONS = [
 
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },
+  { id: 'fuel', name: 'Fuel Can', price: 70, desc: '+20 m of driving for the next round.' },
 ];
 
 export const WEAPON_BY_ID = Object.fromEntries(WEAPONS.map((w) => [w.id, w]));

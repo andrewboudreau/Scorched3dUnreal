@@ -3,7 +3,9 @@ import { BRIDGE } from '../core/scenery.js';
 
 // Draws core/scenery.js: one InstancedMesh per kind of prop, a merged bridge
 // and a water plane. Static props are rewritten only when the scenery's
-// `version` changes; villagers and sheep move every frame.
+// `version` changes; villagers and sheep move every frame. A villager is a
+// head-and-hat instance plus five `limb` boxes (tunic, legs, arms), so the
+// limbs can swing as it walks and only the clothes take the villager's colour.
 
 const M = new THREE.Matrix4();
 const Q = new THREE.Quaternion();
@@ -13,6 +15,20 @@ const S = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const AXIS = new THREE.Vector3();
 const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
+const BODY = new THREE.Matrix4();
+const LIMB = new THREE.Matrix4();
+const LEG_COLOUR = new THREE.Color('#3b3f52');
+const VILLAGER_SCALE = 1.35;
+const WHITE = new THREE.Color('#ffffff');
+// Where each limb hangs from, in the villager's own space (x is forward):
+// [x, y, z, which way it swings, kind]. Kind 0 is a leg, 1 an arm, 2 the tunic.
+const LIMBS = [
+  [0, 0.66, 0.13, 1, 0], [0, 0.66, -0.13, -1, 0],
+  [0, 1.26, 0.33, -1, 1], [0, 1.26, -0.33, 1, 1],
+  [0, 1.36, 0, 0, 2],
+];
+const TUNIC = new THREE.Vector3(2.4, 1.2, 3.2);
+const ONE = new THREE.Vector3(1, 1, 1);
 
 // Merge coloured parts into one flat-shaded geometry. Each part is
 // [geometry, colour, x, y, z, (sx, sy, sz), (rotY)].
@@ -100,10 +116,12 @@ function assets() {
       [box(3.2, 0.25, 0.4), '#3a2a20', -0.8, 0.75, 0.6, 1, 1, 1, 0.5],
     ]),
     villager: merge([
-      [new THREE.CylinderGeometry(0.22, 0.42, 1.25, 6), '#ffffff', 0, 0.7, 0],
-      [new THREE.SphereGeometry(0.27, 6, 5), '#e8c39e', 0, 1.55, 0],
-      [box(0.5, 0.12, 0.5), '#5a4632', 0, 1.82, 0],          // hat
+      [new THREE.SphereGeometry(0.25, 6, 5), '#e8c39e', 0, 1.55, 0],
+      [box(0.56, 0.06, 0.56), '#5a4632', 0, 1.76, 0],                           // hat brim
+      [box(0.3, 0.16, 0.3), '#5a4632', 0, 1.86, 0],
     ]),
+    // An arm, a leg or (scaled up) the tunic, hanging down from its joint at the origin.
+    limb: merge([[box(0.15, 0.64, 0.15), '#ffffff', 0, -0.32, 0]]),
     sheep: merge([
       [box(1.3, 0.75, 0.8), '#f2efe6', 0, 0.85, 0],
       [box(0.42, 0.42, 0.42), '#2e2a27', 0.8, 1.05, 0],
@@ -121,6 +139,7 @@ function assets() {
     house: ['#ffffff', '#f4e3c4', '#e2d6c8', '#dfe6ea'],
     ruin: ['#ffffff', '#ffffff', '#ffffff', '#ffffff'],
     villager: ['#c9584a', '#4f78c2', '#d9b84e', '#6fa06a'],
+    limb: ['#c9584a', '#4f78c2', '#d9b84e', '#6fa06a'],
     sheep: ['#ffffff', '#f2ecdf', '#e6e0d4', '#fff8ea'],
   };
   for (const k of Object.keys(tints)) tints[k] = tints[k].map((c) => new THREE.Color(c));
@@ -151,8 +170,8 @@ function assets() {
 }
 
 const STATIC = ['pine', 'oak', 'bush', 'rock', 'house', 'ruin'];
-const WALKERS = ['villager', 'sheep'];
-const SHADOW = { pine: true, oak: true, rock: true, house: true, ruin: true, villager: true, sheep: true };
+const WALKERS = ['villager', 'limb', 'sheep'];
+const SHADOW = { pine: true, oak: true, bush: true, rock: true, house: true, ruin: true, villager: true, limb: true, sheep: true };
 
 export class SceneryMesh {
   constructor(scenery) {
@@ -173,6 +192,7 @@ export class SceneryMesh {
     for (const p of sc.props) count[p.kind] = (count[p.kind] || 0) + 1;
     count.ruin = count.house || 0;
     for (const w of sc.walkers) count[w.kind] = (count[w.kind] || 0) + 1;
+    count.limb = (count.villager || 0) * LIMBS.length;
     for (const kind of [...STATIC, ...WALKERS]) {
       if (!count[kind]) continue;
       const mesh = new THREE.InstancedMesh(a.geo[kind], a.material, count[kind]);
@@ -266,7 +286,8 @@ export class SceneryMesh {
     if (this.bridge) this.bridge.visible = !!(sc.bridge && sc.bridge.alive);
   }
 
-  // `time` in seconds drives the water ripple and the walkers' bob.
+  // `time` in seconds drives the water ripple, the villagers' stride and the
+  // sheep's hop.
   sync(time) {
     const a = assets();
     const sc = this.scenery;
@@ -280,13 +301,42 @@ export class SceneryMesh {
       const mesh = this.meshes[w.kind];
       if (!mesh) continue;
       const i = next[w.kind] = (next[w.kind] ?? -1) + 1;
-      if (!w.alive) { mesh.setMatrixAt(i, HIDDEN); continue; }
+      const limbs = w.kind === 'villager' ? this.meshes.limb : null;
+      if (!w.alive) {
+        mesh.setMatrixAt(i, HIDDEN);
+        if (limbs) for (let k = 0; k < LIMBS.length; k++) limbs.setMatrixAt(i * LIMBS.length + k, HIDDEN);
+        continue;
+      }
+      const flee = w.mode === 'flee';
       const moving = w.mode !== 'idle';
-      const hop = moving ? Math.abs(Math.sin(time * (w.mode === 'flee' ? 14 : 7) + i)) * (w.kind === 'sheep' ? 0.12 : 0.08) : 0;
       Q.setFromAxisAngle(UP, -w.heading);
-      M.compose(P.set(w.x, w.y + hop, w.z), Q, S.setScalar(w.kind === 'villager' ? 1.35 : 1.2));
-      mesh.setMatrixAt(i, M);
-      if (!mesh.userData.tinted) mesh.setColorAt(i, a.tints[w.kind][w.tint]);
+      if (w.kind === 'sheep') {
+        // Trot in little hops, rocking nose to tail; graze with the head down when still.
+        const phase = time * (flee ? 15 : 6) + i * 1.9;
+        const hop = moving ? Math.abs(Math.sin(phase)) * (flee ? 0.34 : 0.14) : 0;
+        const pitch = moving ? Math.cos(phase * 2) * (flee ? 0.16 : 0.07) : -0.2 * Math.max(0, Math.sin(time * 0.35 + i * 2.3));
+        Q.multiply(Q2.setFromAxisAngle(AXIS.set(0, 0, 1), pitch));
+        M.compose(P.set(w.x, w.y + hop, w.z), Q, S.setScalar(1.2));
+        mesh.setMatrixAt(i, M);
+      } else {
+        // Stride: legs scissor, arms swing against them; arms go up when running away.
+        const phase = time * (flee ? 15 : 7.5) + i * 2.1;
+        const bob = moving ? Math.abs(Math.cos(phase)) * (flee ? 0.09 : 0.05) : 0;
+        BODY.compose(P.set(w.x, w.y + bob, w.z), Q, S.setScalar(VILLAGER_SCALE));
+        mesh.setMatrixAt(i, BODY);
+        const stride = moving ? Math.sin(phase) * (flee ? 0.95 : 0.6) : 0;
+        LIMBS.forEach(([lx, ly, lz, dir, kind], k) => {
+          const arm = kind === 1;
+          let angle = stride * dir * (arm ? 0.8 : 1);
+          if (arm && flee) angle = 2.7 + Math.sin(phase * 1.3 + k) * 0.35;
+          else if (arm && !moving) angle = Math.sin(time * 1.1 + i + k) * 0.05;
+          LIMB.compose(P.set(lx, ly, lz), Q2.setFromAxisAngle(AXIS.set(0, 0, 1), angle), kind === 2 ? TUNIC : ONE);
+          LIMB.premultiply(BODY);
+          limbs.setMatrixAt(i * LIMBS.length + k, LIMB);
+          if (!limbs.userData.tinted) limbs.setColorAt(i * LIMBS.length + k, kind ? a.tints.limb[w.tint] : LEG_COLOUR);
+        });
+      }
+      if (!mesh.userData.tinted) mesh.setColorAt(i, w.kind === 'villager' ? WHITE : a.tints[w.kind][w.tint]);
     }
     for (const kind of WALKERS) {
       const mesh = this.meshes[kind];

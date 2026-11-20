@@ -3,12 +3,15 @@ import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS } from './core/weapons.js';
 import { TANK, muzzleOrigin } from './core/tank.js';
-import { ROLL } from './core/ballistics.js';
+import { ROLL, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
+import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { TankMesh, makeWreck } from './render/tankMesh.js';
 import { Effects, ShellVisual } from './render/effects.js';
+import { Sky } from './render/sky.js';
+import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -20,14 +23,13 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffe
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const HORIZON = new THREE.Color('#d8dcd6');
-scene.fog = new THREE.Fog(HORIZON, 700, 2600);
+const sky = new Sky(scene);   // sun, sky light, fog, clouds
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 6000);
 camera.position.set(0, 420, 520);
@@ -40,93 +42,13 @@ controls.minDistance = 12;
 controls.maxDistance = 1400;
 controls.target.set(0, 20, 0);
 
-// Sky dome with a warm horizon and a sun glow.
-const sunDir = new THREE.Vector3(0.55, 0.62, 0.35).normalize();
-const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(4500, 32, 16),
-  new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      top: { value: new THREE.Color('#2c6fd8') },
-      horizon: { value: HORIZON },
-      bottom: { value: new THREE.Color('#a39276') },
-      sun: { value: sunDir },
-    },
-    vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; varying vec3 vDir;
-      void main(){
-        float h = vDir.y;
-        vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.55)) : mix(horizon, bottom, pow(-h, 0.4));
-        float s = max(dot(vDir, sun), 0.0);
-        c += vec3(1.0, 0.85, 0.6) * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.25);
-        gl_FragColor = vec4(c, 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }`,
-  }),
-);
-scene.add(sky);
-
-scene.add(new THREE.HemisphereLight('#cfe1ff', '#6b5638', 0.8));
-const sun = new THREE.DirectionalLight('#fff0d8', 2.2);
-sun.position.copy(sunDir).multiplyScalar(700);
-sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
-const sc = sun.shadow.camera;
-sc.left = -480; sc.right = 480; sc.top = 480; sc.bottom = -480; sc.near = 50; sc.far = 1800;
-sun.shadow.bias = -0.0005;
-sun.shadow.normalBias = 0.8;
-scene.add(sun);
-
 // A desert floor far below the slab so it never floats in a void.
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), new THREE.MeshStandardMaterial({ color: '#8f7a5c', roughness: 1 }));
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = -140;
 scene.add(floor);
 
-// A few slow clouds, drifting with the wind.
-const clouds = (() => {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
-  grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  const map = new THREE.CanvasTexture(c);
-  map.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.SpriteMaterial({ map, transparent: true, opacity: 0.7, depthWrite: false, fog: false });
-  const SPAN = 1700;
-  const list = [];
-  for (let i = 0; i < 12; i++) {
-    const cloud = new THREE.Group();
-    const size = 170 + Math.random() * 160;
-    for (let k = 0; k < 4; k++) {
-      const puff = new THREE.Sprite(material);
-      puff.position.set((k - 1.5) * size * 0.42 + (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 26, (Math.random() - 0.5) * 60);
-      puff.scale.set(size * (0.8 + Math.random() * 0.5), size * (0.3 + Math.random() * 0.14), 1);
-      cloud.add(puff);
-    }
-    cloud.position.set((Math.random() * 2 - 1) * SPAN, 190 + Math.random() * 190, (Math.random() * 2 - 1) * SPAN);
-    scene.add(cloud);
-    list.push(cloud);
-  }
-  return {
-    update(dt, wind) {
-      for (const cloud of list) {
-        cloud.position.x += (4 + wind[0] * 9) * dt;
-        cloud.position.z += (1.5 + wind[1] * 9) * dt;
-        if (cloud.position.x > SPAN) cloud.position.x -= SPAN * 2; else if (cloud.position.x < -SPAN) cloud.position.x += SPAN * 2;
-        if (cloud.position.z > SPAN) cloud.position.z -= SPAN * 2; else if (cloud.position.z < -SPAN) cloud.position.z += SPAN * 2;
-      }
-    },
-  };
-})();
-
+const birds = new Birds(scene);
 const effects = new Effects(scene);
 const sound = new Sound();
 
@@ -142,7 +64,7 @@ let game = null;
 let terrainMesh = null;
 let sceneryMesh = null;
 let tanks = [];
-let hullYaw = [];
+let smoke = [];                 // per tank: seconds until its next puff
 let labels = [];
 let wrecks = [];
 const shells = new Map();       // projectile id -> ShellVisual
@@ -160,6 +82,21 @@ const _sGoal = new THREE.Spherical();
 const _off = new THREE.Vector3();
 const camTarget = new THREE.Vector3(0, 20, 0);
 let shopQueue = [];
+let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
+let dayLock = null;             // debug: hold the sun still at this time of day
+let bannerHold = 0;             // a round banner keeps the turn banner waiting until then
+let driveNote = { text: '', until: 0 };
+const _v = new THREE.Vector3();
+const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
+
+// A short line showing where the shot starts out, for tanks with Tracer Rounds.
+const tracer = new THREE.Line(
+  new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(80 * 3), 3)),
+  new THREE.LineBasicMaterial({ color: '#fff6c9', transparent: true, opacity: 0.8 }),
+);
+tracer.frustumCulled = false;
+tracer.visible = false;
+scene.add(tracer);
 
 function disposeMatch() {
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.geometry.dispose(); terrainMesh.skirtGeometry.dispose(); }
@@ -188,6 +125,8 @@ function startMatch(config) {
     scene.add(m.root);
     return m;
   });
+  smoke = game.players.map(() => 0);
+  sky.fit(game.terrain.half);
   labels = game.players.map((p) => {
     const el = document.createElement('div');
     el.className = 'tank-label';
@@ -224,8 +163,13 @@ function handleEvents() {
         ghosts.forEach((arr) => arr.forEach((l) => scene.remove(l)));
         ghosts.clear();
         effects.clear();
-        hullYaw = game.players.map((p) => p.yaw);
-        banner(`Round ${e.round}`, `of ${game.cfg.rounds}`, 1800);
+        day = (e.round - 1) / game.cfg.rounds;
+        birds.reset(game.terrain, e.round * 7 + game.players.length);
+        if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds}`, 1800);
+        else {
+          banner(`Round ${e.round}: ${game.modifier.name}`, game.modifier.desc, 3000);
+          bannerHold = performance.now() + 2800;
+        }
         break;
       case 'terrain':
         if (e.full) { terrainMesh.rebuild(); sceneryMesh.rebuild(); } else terrainMesh.updateRegion(e.region);
@@ -233,11 +177,13 @@ function handleEvents() {
       case 'turn': {
         const p = game.players[e.player];
         if (!overview) aimCameraAt(p);
-        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(`${p.name}'s turn`, p.ai ? `CPU · ${p.ai}` : 'Aim and fire', 1100); }, 50);
+        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire', 1100); },
+          Math.max(50, bannerHold - performance.now()));
         break;
       }
       case 'fire': {
-        sound.fire();
+        sound.fire(camDist(e.pos));
+        birds.scare(e.pos, 70);
         effects.muzzleFlash(e.pos);
         tanks[e.player].kick();
         (ghosts.get(e.player) || []).forEach((l) => scene.remove(l));
@@ -266,33 +212,37 @@ function handleEvents() {
         break;
       case 'explosion':
         effects.explosion(e.pos, e.radius);
-        sound.explode(e.radius);
+        sound.explode(e.radius, camDist(e.pos));
+        birds.scare(e.pos, 90 + e.radius * 5);
         addShake(e.pos, e.radius / 6);
         break;
       case 'mound':
         effects.dust(e.pos, e.radius);
-        sound.thud();
+        sound.thud(camDist(e.pos));
         break;
       case 'rollStart':
         // The shell is on the ground now; its visual keeps following it.
         effects.dust(e.pos, 4);
-        sound.thud();
+        sound.thud(camDist(e.pos));
         break;
       case 'prop':
-        if (e.kind === 'house') { effects.dust(e.pos, 7); sound.thud(); }
-        else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(); }
+        if (e.kind === 'house') { effects.dust(e.pos, 7); sound.thud(camDist(e.pos)); }
+        else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage':
         popDamage(e.player, e.amount);
         break;
-      case 'landed':
-        sound.thud();
+      case 'landed': {
+        const q = game.players[e.player];
+        effects.dust([q.x, q.y, q.z], 4);
+        sound.thud(camDist([q.x, q.y, q.z]));
         break;
+      }
       case 'destroyed': {
         const p = game.players[e.player];
         const by = e.by != null ? game.players[e.by] : null;
         effects.explosion([p.x, p.y + 2, p.z], 16);
-        sound.explode(18);
+        sound.explode(18, camDist([p.x, p.y, p.z]));
         const w = makeWreck(p.color);
         w.position.set(p.x, game.terrain.heightAt(p.x, p.z), p.z);
         w.rotation.y = Math.random() * Math.PI * 2;
@@ -388,7 +338,15 @@ function updateCamera(dt) {
   camera.position.add(lastShake);
 }
 
-renderer.domElement.addEventListener('pointerdown', () => { camGoal = null; });
+// Only a real drag or a wheel zoom takes the camera over; a plain click (e.g. to
+// focus the page) must not strand it halfway through a fly-in.
+let dragFrom = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; }
+});
+window.addEventListener('pointerup', () => { dragFrom = null; });
+renderer.domElement.addEventListener('wheel', () => { camGoal = null; }, { passive: true });
 
 // ---------------------------------------------------------------- input
 
@@ -396,7 +354,7 @@ const held = new Set();
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
-  if (k === 'tab') e.preventDefault();
+  if (k === 'tab' || k.startsWith('arrow')) e.preventDefault();
   held.add(k);
   if (e.repeat || !game) return;
   if (k === ' ') { e.preventDefault(); if (game.current && !game.current.ai && game.fire()) { /* fired */ } }
@@ -408,7 +366,16 @@ window.addEventListener('keydown', (e) => {
     if (overview) camGoal = new THREE.Vector3(0, 610, 520);
     else if (game.current) aimCameraAt(game.current);
   } else if (k === 'm') banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700);
+  else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
 });
+
+function setVolume(v, announce = false) {
+  sound.setVolume(Math.round(v * 10) / 10);
+  $('opt-volume').value = Math.round(sound.volume * 100);
+  if (announce) banner(`Volume ${Math.round(sound.volume * 100)}%`, '', 700);
+}
+$('opt-volume').value = Math.round(sound.volume * 100);
+$('opt-volume').addEventListener('input', () => { sound.ensure(); setVolume(Number($('opt-volume').value) / 100); });
 window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
@@ -443,10 +410,89 @@ $('weapon-bar').addEventListener('click', (e) => {
 function applyHeldKeys(dt) {
   if (!game || game.phase !== 'aim' || !game.current || game.current.ai) return;
   const fine = held.has('shift') ? 0.2 : 1;
-  const ax = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
-  const ay = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0);
+  const ax = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
+  const ay = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
   const ap = (held.has('e') || held.has('pageup') ? 1 : 0) - (held.has('q') || held.has('pagedown') ? 1 : 0);
   if (ax || ay || ap) game.adjustAim(ax * TANK.turretSpeed * dt * fine, ay * TANK.elevationSpeed * dt * fine, ap * TANK.powerSpeed * dt * fine);
+  // The arrow keys drive: up and down along the hull, left and right swing it.
+  const go = (held.has('arrowup') ? 1 : 0) - (held.has('arrowdown') ? 1 : 0);
+  const turn = (held.has('arrowright') ? 1 : 0) - (held.has('arrowleft') ? 1 : 0);
+  if (go || turn) {
+    // Driving with the camera far away (or zoomed right out) brings it back to the tank.
+    if (!camGoal && !overview && !pinned && camera.position.distanceTo(controls.target) > 260) aimCameraAt(game.current);
+    const why = DRIVE_NOTES[game.drive(go, turn, dt)];
+    if (why) driveNote = { text: why, until: performance.now() + 1200 };
+  }
+}
+
+const DRIVE_NOTES = {
+  empty: 'Out of fuel', steep: 'Too steep to climb', water: 'Water ahead', edge: 'Edge of the arena', blocked: 'Something is in the way',
+};
+
+function updateTracer() {
+  const p = game.current;
+  const reach = p && !p.ai && game.phase === 'aim' ? perkSum(p, 'tracer') : 0;
+  tracer.visible = reach > 0;
+  if (!reach) return;
+  const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power));
+  pr.g = game.gravity;
+  pr.windK = game.windShare(p);
+  const a = tracer.geometry.attributes.position;
+  let n = 0;
+  let gone = 0;
+  let last = [...pr.pos];
+  a.setXYZ(n++, ...pr.pos);
+  for (let step = 1; gone < reach && n < a.count; step++) {
+    stepProjectile(pr, game.wind);
+    if (step % 3) continue;
+    gone += Math.hypot(pr.pos[0] - last[0], pr.pos[1] - last[1], pr.pos[2] - last[2]);
+    last = [...pr.pos];
+    if (game.terrain.inBounds(pr.pos[0], pr.pos[2]) && pr.pos[1] < game.terrain.heightAt(pr.pos[0], pr.pos[2])) break;
+    a.setXYZ(n++, ...pr.pos);
+  }
+  a.needsUpdate = true;
+  tracer.geometry.setDrawRange(0, n);
+}
+
+// Exhaust while the engine works, a lazy puff from the tank whose turn it is,
+// dust off the tracks, and dark smoke from a tank that is nearly done for.
+function tankSmoke(dt) {
+  const drift = [game.wind[0] * 1.5, game.wind[1] * 1.5];
+  game.players.forEach((p, i) => {
+    if (!p.alive) return;
+    const t = tanks[i];
+    if ((smoke[i] -= dt) > 0) return;
+    const hurt = 1 - p.hp / p.maxHp;
+    if (t.work > 0.1) {
+      smoke[i] = 0.09;
+      effects.puff(t.exhaust(_v, Math.random() < 0.5 ? 1 : -1), { size: 0.8 + t.work * 0.5, life: 1.1, drift });
+      if (Math.random() < 0.5) effects.puff({ x: p.x, y: p.y + 0.4, z: p.z }, { color: '#a08463', size: 2.2, life: 1.2, rise: 0.8, opacity: 0.3, drift });
+    } else if (hurt > 0.6) {
+      smoke[i] = 0.3 - hurt * 0.15;
+      effects.puff({ x: p.x + (Math.random() - 0.5), y: p.y + 2.6, z: p.z + (Math.random() - 0.5) }, { color: '#2b2826', size: 1.5 + hurt, life: 2.4, rise: 3.2, opacity: 0.55, drift });
+    } else if (p === game.current && game.phase === 'aim') {
+      smoke[i] = 0.7;
+      effects.puff(t.exhaust(_v, Math.random() < 0.5 ? 1 : -1), { size: 0.6, life: 1.0, opacity: 0.3, drift });
+    } else smoke[i] = 0.3;
+  });
+}
+
+// What the ambient sound should follow this frame.
+function soundScape(dt) {
+  const scenery = game ? game.scenery : menuField.scenery;
+  let sheep = Infinity;
+  for (const w of scenery.walkers) if (w.alive && w.kind === 'sheep') sheep = Math.min(sheep, camDist([w.x, w.y, w.z]));
+  let driving = 0;
+  let shell = null;
+  if (game) {
+    game.players.forEach((p, i) => { if (p.alive) driving = Math.max(driving, tanks[i].work / (1 + camDist([p.x, p.y, p.z]) / 160)); });
+    for (const pr of game.projectiles) {
+      if (pr.dead || pr.roller) continue;
+      const dist = camDist(pr.pos);
+      if (!shell || dist < shell.dist) shell = { dist, falling: Math.max(0, Math.min(1, -pr.vel[1] / 45)) };
+    }
+  }
+  sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep });
 }
 
 // ---------------------------------------------------------------- HUD
@@ -460,7 +506,16 @@ function buildScoreboard() {
       <span style="width:74px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(p.name)}</span>
       <div class="bar"><div class="fill hp"></div></div>
       <span class="wins"></span>
+      <div class="sb-perks"></div>
     </div>`).join('');
+}
+
+const perkChip = (id, long) => `<span class="perk" title="${escapeHtml(PERK_BY_ID[id].desc)}">${long ? PERK_BY_ID[id].name : PERK_BY_ID[id].tag}</span>`;
+function setPerks(el, p, long) {
+  const key = p.id + p.perks.join();
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.innerHTML = p.perks.map((id) => perkChip(id, long)).join('');
 }
 
 function updateHud() {
@@ -470,9 +525,14 @@ function updateHud() {
     $('pc-swatch').style.background = p.color;
     $('pc-name').textContent = p.name;
     $('pc-tag').textContent = p.ai ? `CPU ${p.ai}` : 'Human';
-    $('pc-hp').style.width = `${p.hp}%`;
+    $('pc-hp').style.width = `${(p.hp / p.maxHp) * 100}%`;
     $('pc-armor').style.width = `${Math.min(100, p.armor * 3.3)}%`;
     $('pc-money').textContent = p.money;
+    $('pc-fuel').style.width = `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`;
+    $('ro-fuel').textContent = `${Math.floor(p.fuel + 0.05)} m`;
+    const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
+    $('pc-note').textContent = noting ? driveNote.text : '';
+    setPerks($('pc-perks'), p, true);
     $('ro-yaw').textContent = `${p.yaw.toFixed(1)}°`;
     $('ro-elev').textContent = `${p.elev.toFixed(1)}°`;
     $('ro-power').textContent = p.power.toFixed(1);
@@ -495,10 +555,12 @@ function updateHud() {
     if (!row) continue;
     row.classList.toggle('dead', !q.alive);
     row.classList.toggle('active', game.current === q);
-    row.querySelector('.fill').style.width = `${q.hp}%`;
+    row.querySelector('.fill').style.width = `${(q.hp / q.maxHp) * 100}%`;
     row.querySelector('.wins').textContent = '★'.repeat(Math.min(q.wins, 3)) + (q.wins > 3 ? q.wins : '');
+    setPerks(row.querySelector('.sb-perks'), q, false);
   }
-  $('round-label').textContent = `Round ${game.round} / ${game.cfg.rounds}`;
+  const mod = game.modifier;
+  $('round-label').textContent = `Round ${game.round} / ${game.cfg.rounds}${mod.id === 'clear' ? '' : ` · ${mod.name}: ${mod.desc}`}`;
 }
 
 function updateLabels() {
@@ -510,7 +572,7 @@ function updateLabels() {
     if (!visible) return;
     el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
     el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
-    el.querySelector('.fill').style.width = `${p.hp}%`;
+    el.querySelector('.fill').style.width = `${(p.hp / p.maxHp) * 100}%`;
   });
 }
 
@@ -557,6 +619,7 @@ $('start').onclick = () => {
     rounds: Number($('opt-rounds').value),
     maxWind: Number($('opt-wind').value),
     hills: Number($('opt-hills').value),
+    twists: $('opt-twists').value === '1',
   });
 };
 
@@ -577,7 +640,7 @@ function showRoundResult(kind) {
     return;
   }
   $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
-  $('ro-continue').textContent = game.humans.length ? 'Continue to the armory' : `Start round ${game.round + 1}`;
+  $('ro-continue').textContent = !game.humans.length ? `Start round ${game.round + 1}` : game.cfg.twists ? 'Continue to the perk draft' : 'Continue to the armory';
   $('ro-table').innerHTML = standingsTable([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
 }
@@ -586,26 +649,68 @@ $('ro-continue').onclick = () => {
   $('roundover').classList.add('hidden');
   shopQueue = game.players.filter((p) => !p.ai).map((p) => p.id);
   game.openShop();
-  if (game.phase === 'shop') openShopFor(shopQueue.shift());
+  if (game.phase === 'shop') nextShopper();
 };
+
+const whose = (p, thing) => (/^you$/i.test(p.name.trim()) ? `Your ${thing}` : `${p.name}'s ${thing}`);
+const hotseatStep = (p, doing) => {
+  const humans = game.humans;
+  return humans.length > 1 ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · ${doing}` : doing;
+};
+
+// Each human in turn: pick a perk (if one is on offer), then shop.
+function nextShopper() {
+  const pid = shopQueue.shift();
+  $('draft').classList.add('hidden');
+  $('shop').classList.add('hidden');
+  if (pid == null) { game.closeShop(); return; }
+  if (game.draft[pid]) openDraftFor(pid); else openShopFor(pid);
+}
+
+// The perk draft: three cards, keep one for the rest of the match.
+function openDraftFor(pid) {
+  const p = game.players[pid];
+  $('draft').classList.remove('hidden');
+  $('draft-card').style.borderTopColor = p.color;
+  $('draft-swatch').style.background = p.color;
+  $('draft-player').textContent = whose(p, 'perk draft');
+  $('draft-step').textContent = hotseatStep(p, 'pick one, it lasts the whole match');
+  $('draft-owned').innerHTML = p.perks.length ? `Already yours: ${p.perks.map((id) => perkChip(id, true)).join(' ')}` : 'Your first perk. They stack, round after round.';
+  $('draft-items').innerHTML = game.draft[pid].map((id) => {
+    const k = PERK_BY_ID[id];
+    return `<div class="shop-item draft-item">
+      <div class="si-head"><b>${k.name}</b><span class="perk">${k.tag}</span></div>
+      <div class="desc">${k.desc}</div>
+      <button class="buy" data-id="${id}">Take ${k.name}</button>
+    </div>`;
+  }).join('');
+  $('draft-items').onclick = (e) => {
+    const b = e.target.closest('button.buy');
+    if (!b || !game.pickPerk(pid, b.dataset.id)) return;
+    sound.click();
+    $('draft').classList.add('hidden');
+    openShopFor(pid);
+  };
+}
 
 // The armory, one human at a time. Each item is a card that says what it is,
 // what one purchase gives, what the shopper already holds, and has one button.
 const SHOP_ITEMS = [...WEAPONS.filter((w) => !w.hidden && !w.infinite), ...ITEMS];
 const SHOP_HINT = 'Shells are free and never run out. Everything here is extra.';
+// The armory items that are not weapons: what the shopper has queued, and what one purchase adds.
+const ITEM_INFO = {
+  armor: { have: (p) => p.pendingArmor, owned: (n) => `+${n} fitted`, none: 'None fitted', gives: '+30 armor' },
+  fuel: { have: (p) => p.pendingFuel, owned: (n) => `+${n} m loaded`, none: 'None loaded', gives: `+${TANK.fuelCan} m of driving` },
+};
 
 function openShopFor(pid) {
-  if (pid == null) { $('shop').classList.add('hidden'); game.closeShop(); return; }
   const p = game.players[pid];
-  const humans = game.humans;
   const next = shopQueue.length ? game.players[shopQueue[0]] : null;
   $('shop').classList.remove('hidden');
   $('shop-card').style.borderTopColor = p.color;
   $('shop-swatch').style.background = p.color;
-  $('shop-player').textContent = /^you$/i.test(p.name.trim()) ? 'Your armory' : `${p.name}'s armory`;
-  $('shop-step').textContent = humans.length > 1
-    ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · shopping for round ${game.round + 1}`
-    : `Shopping for round ${game.round + 1}`;
+  $('shop-player').textContent = whose(p, 'armory');
+  $('shop-step').textContent = hotseatStep(p, `shopping for round ${game.round + 1}`);
   $('shop-done').textContent = next ? `Done · pass to ${next.name}` : `Done · start round ${game.round + 1}`;
   const note = (text, good = false) => {
     $('shop-note').textContent = text;
@@ -615,35 +720,39 @@ function openShopFor(pid) {
     $('shop-money').textContent = `$${p.money}`;
     $('shop-items').innerHTML = SHOP_ITEMS.map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
-      const have = isW ? p.inventory[it.id] || 0 : p.pendingArmor;
-      const owned = isW ? `You have ${have}` : have ? `+${have} fitted` : 'None fitted';
-      const gives = isW ? `${it.bundle} per purchase` : '+30 armor';
-      const short = it.price - p.money;
+      const info = ITEM_INFO[it.id];
+      const have = isW ? p.inventory[it.id] || 0 : info.have(p);
+      const owned = isW ? `You have ${have}` : have ? info.owned(have) : info.none;
+      const gives = isW ? `${it.bundle} per purchase` : info.gives;
+      const price = game.priceOf(p, it.id);
+      const short = price - p.money;
       return `<div class="shop-item${short > 0 ? ' cant' : ''}${it.id === justBought ? ' bought' : ''}">
         <div class="si-head"><b>${it.name}</b><span class="si-own${have ? ' has' : ''}">${owned}</span></div>
         <div class="desc">${it.desc}</div>
         <div class="si-foot">
           <span class="si-gives">${gives}${short > 0 ? `<span class="si-short">need $${short} more</span>` : ''}</span>
-          <button class="buy" data-id="${it.id}" ${short > 0 ? 'disabled' : ''}>${short > 0 ? `$${it.price}` : `Buy for $${it.price}`}</button>
+          <button class="buy" data-id="${it.id}" ${short > 0 ? 'disabled' : ''}>${short > 0 ? `$${price}` : `Buy for $${price}`}</button>
         </div>
       </div>`;
     }).join('');
   };
   $('shop-items').onclick = (e) => {
     const b = e.target.closest('button.buy');
-    if (!b || b.disabled || !game.buy(pid, b.dataset.id)) return;
-    const it = SHOP_ITEMS.find((x) => x.id === b.dataset.id);
+    const it = SHOP_ITEMS.find((x) => x.id === b?.dataset.id);
+    const price = it ? game.priceOf(p, it.id) : 0;
+    if (!b || b.disabled || !game.buy(pid, it.id)) return;
     sound.click();
     render(it.id);
-    note(`Bought ${it.bundle ? `${it.bundle} × ${it.name}` : it.name} for $${it.price}. $${p.money} left.`, true);
+    note(`Bought ${it.bundle ? `${it.bundle} × ${it.name}` : it.name} for $${price}. $${p.money} left.`, true);
     const funds = $('shop-money');
     funds.classList.remove('pulse');
     void funds.offsetWidth;   // restart the animation
     funds.classList.add('pulse');
   };
   render();
-  note(SHOP_ITEMS.some((it) => it.price <= p.money) ? SHOP_HINT : `Nothing in reach this time. ${SHOP_HINT}`);
-  $('shop-done').onclick = () => openShopFor(shopQueue.shift());
+  const haggle = perkSum(p, 'discount') ? ' Haggler prices applied.' : '';
+  note(SHOP_ITEMS.some((it) => game.priceOf(p, it.id) <= p.money) ? SHOP_HINT + haggle : `Nothing in reach this time. ${SHOP_HINT}`);
+  $('shop-done').onclick = nextShopper;
 }
 
 $('mo-again').onclick = () => {
@@ -652,36 +761,60 @@ $('mo-again').onclick = () => {
   disposeMatch();
   game = null;
   scene.add(menuMesh.group, menuScenery.group);
+  tracer.visible = false;
+  sky.fit(menuField.terrain.half);
+  birds.reset(menuField.terrain, 5);
   $('setup').classList.remove('hidden');
   renderSetup();
 };
 
 // ---------------------------------------------------------------- loop
 
-const clock = new THREE.Clock();
+let lastFrame = performance.now();
+let elapsed = 0;
 function frame() {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.1, clock.getDelta());
+  const now = performance.now();
+  tick(Math.min(0.1, (now - lastFrame) / 1000));
+  lastFrame = now;
+}
+
+// One frame of everything, `dt` seconds long.
+function tick(dt) {
+  elapsed += dt;
+  let dayGoal = 0.12;
   if (game) {
     applyHeldKeys(dt);
     game.update(dt);
     handleEvents();
-    game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, hullYaw[i] ?? 0, dt));
-    for (const pr of game.projectiles) shells.get(pr.id)?.push(pr.pos);
+    game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, dt));
+    tankSmoke(dt);
+    for (const pr of game.projectiles) {
+      shells.get(pr.id)?.push(pr.pos);
+      if (!pr.roller) birds.scare(pr.pos, 28);
+    }
     // Only the current player's last shot is shown as a ghost.
     ghosts.forEach((arr, pid) => arr.forEach((l) => { l.visible = game.current?.id === pid && game.phase === 'aim'; }));
-    sceneryMesh.sync(clock.elapsedTime);
+    updateTracer();
+    sceneryMesh.sync(elapsed);
     updateHud();
     updateLabels();
+    // The sun moves a little every turn and a lot over the match.
+    const within = Math.min(1, game.turnsThisRound / (game.players.length * 6));
+    dayGoal = (game.round - 1 + within) / game.cfg.rounds;
   } else {
     // Idle orbit behind the menu.
     menuField.scenery.update(dt);
-    menuScenery.sync(clock.elapsedTime);
+    menuScenery.sync(elapsed);
     const t = performance.now() * 0.00005;
     camTarget.set(0, 0, 0);
     camGoal = new THREE.Vector3(Math.cos(t) * 600, 300, Math.sin(t) * 600);
   }
-  clouds.update(dt, game ? game.wind : [0.4, 0.2]);
+  day = dayLock ?? day + Math.max(-dt * 0.5, Math.min(dt * 0.012, dayGoal - day));
+  sky.setDay(day);
+  sky.update(dt, game ? game.wind : [0.4, 0.2]);
+  birds.update(dt);
+  soundScape(dt);
   effects.update(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
@@ -696,12 +829,16 @@ menuMesh.rebuild();
 const menuScenery = new SceneryMesh(menuField.scenery);
 menuScenery.rebuild();
 scene.add(menuMesh.group, menuScenery.group);
+sky.fit(menuField.terrain.half);
+birds.reset(menuField.terrain, 5);
 
 renderSetup();
 $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, get camGoal() { return camGoal; },
+window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, effects, tick, held,
+  get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
-  release() { pinned = false; } };
+  release() { pinned = false; },
+  setDay(k) { dayLock = k; } };

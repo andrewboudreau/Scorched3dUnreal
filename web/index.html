@@ -18,6 +18,8 @@
       <div class="pc-name"><span id="pc-swatch" class="swatch"></span><span id="pc-name">-</span><span id="pc-tag" class="tag"></span></div>
       <div class="bar"><div id="pc-hp" class="fill hp"></div><div id="pc-armor" class="fill armor"></div></div>
       <div class="pc-money">$<span id="pc-money">0</span></div>
+      <div class="fuel"><label>Fuel</label><div class="bar"><div id="pc-fuel" class="fill fl"></div></div><span id="ro-fuel">0 m</span></div>
+      <div id="pc-note"></div>
       <div class="readout">
         <div><label>Turret</label><span id="ro-yaw">0°</span></div>
         <div><label>Elevation</label><span id="ro-elev">0°</span></div>
@@ -25,6 +27,7 @@
       </div>
       <div class="bar power"><div id="pc-power" class="fill pw"></div></div>
       <div class="weapon"><label>Weapon</label><span id="ro-weapon">Shell</span><span id="ro-ammo" class="ammo"></span></div>
+      <div id="pc-perks" class="perks"></div>
     </div>
 
     <div id="wind" class="panel">
@@ -40,8 +43,8 @@
 
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
-      &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> fire &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview
-      &nbsp; <b>M</b> mute &nbsp; drag to orbit, wheel to zoom
+      &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> fire<br />
+      <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>
     <div id="labels"></div>
@@ -61,6 +64,8 @@
         <label>Rounds <select id="opt-rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select></label>
         <label>Wind <select id="opt-wind"><option value="0">Calm</option><option value="0.8">Breezy</option><option value="1.5" selected>Gusty</option><option value="2.5">Gale</option></select></label>
         <label>Terrain <select id="opt-hills"><option value="20">Rolling</option><option value="45" selected>Hilly</option><option value="80">Mountains</option></select></label>
+        <label>Twists <select id="opt-twists"><option value="1" selected>Perks and modifiers</option><option value="0">Off</option></select></label>
+        <label>Volume <input id="opt-volume" type="range" min="0" max="100" step="10" value="60" /></label>
       </div>
       <button id="start" class="primary">Start match</button>
     </div>
@@ -72,6 +77,20 @@
       <h2 id="ro-title">Round over</h2>
       <table id="ro-table"></table>
       <button id="ro-continue" class="primary">Continue</button>
+    </div>
+  </div>
+
+  <!-- Perk draft: one human at a time, before their armory -->
+  <div id="draft" class="screen hidden">
+    <div id="draft-card" class="card shop-card">
+      <div class="shop-head">
+        <div>
+          <div id="draft-step" class="shop-step"></div>
+          <h2><span id="draft-swatch" class="swatch"></span><span id="draft-player"></span></h2>
+        </div>
+      </div>
+      <div id="draft-items" class="shop-grid"></div>
+      <div id="draft-owned" class="shop-note"></div>
     </div>
   </div>
 

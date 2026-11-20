@@ -114,6 +114,21 @@ export class Effects {
     }
   }
 
+  // One soft puff that rises and thins out: exhaust, or smoke from a hurt tank.
+  puff(pos, { color = '#6b6660', size = 1, life = 1.4, rise = 2.2, opacity = 0.45, drift = null } = {}) {
+    const sm = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTex, color, transparent: true, depthWrite: false, opacity: 0 }));
+    sm.position.set(pos.x, pos.y, pos.z);
+    const dx = (drift ? drift[0] : 0) + (Math.random() - 0.5) * 0.8;
+    const dz = (drift ? drift[1] : 0) + (Math.random() - 0.5) * 0.8;
+    this.scene.add(sm);
+    this.items.push({ life: 0, max: life, obj: sm, update: (it, t, dt) => {
+      const k = t / it.max;
+      sm.position.x += dx * dt; sm.position.y += rise * dt; sm.position.z += dz * dt;
+      sm.scale.setScalar(size * (0.7 + k * 1.9));
+      sm.material.opacity = opacity * Math.min(1, t * 8) * (1 - k);
+    } });
+  }
+
   muzzleFlash(pos) {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
     glow.position.set(...pos);

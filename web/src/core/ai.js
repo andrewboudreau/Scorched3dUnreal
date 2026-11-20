@@ -21,7 +21,7 @@ export const DIFFICULTY = {
 const RAD = 180 / Math.PI;
 const wrap180 = (a) => ((a + 540) % 360) - 180;
 
-export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5 }) {
+export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1 }) {
   const sx = shooter.x;
   const sz = shooter.z;
   const tx = target[0];
@@ -33,7 +33,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
   // flat-ground power for that range.
   let yaw = targetBearing;
   let elev = rng.range(42, 62);
-  let power = Math.sqrt((targetDist * GRAVITY) / Math.sin((2 * elev) / RAD)) * rng.range(0.95, 1.05);
+  let power = Math.sqrt((targetDist * gravity) / Math.sin((2 * elev) / RAD)) * rng.range(0.95, 1.05);
   power = Math.min(TANK.maxPower, Math.max(TANK.minPower, power));
 
   let best = { yaw, elev, power, miss: Infinity };
@@ -43,7 +43,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev),
       vel: launchVelocity(yaw, elev, power),
-      wind, terrain,
+      wind, terrain, gravity, windK,
     });
     const [ix, , iz] = shot.point;
     const miss = Math.hypot(ix - tx, iz - tz);
@@ -80,9 +80,9 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
 // target id -> the aiming error it still carries against that target. The
 // first shot gets a full-sized error; every later shot keeps only part of it.
 // A target or shooter that has moved, or a change in the wind, puts some back.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory }) {
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1 }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng });
+  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
   let m = memory[target.id];
   if (!m) {
@@ -129,6 +129,34 @@ export function chooseTarget(me, players, difficulty, rng) {
   }
   if (difficulty === 'easy') return rng.pick(enemies);
   return enemies.reduce((a, b) => (Math.hypot(b.x - me.x, b.z - me.z) < Math.hypot(a.x - me.x, a.z - me.z) ? b : a));
+}
+
+// Should a CPU spend fuel this turn, and where to? It moves to climb out of a
+// hole or to get off a spot it keeps being hit on, and otherwise stays put.
+// Returns { heading (degrees), budget (fuel to spend) } or null.
+// `tryDrive(heading, budget)` must report where that drive would really end:
+// { x, y, z, moved }.
+export function planDrive({ me, terrain, rng, difficulty = 'normal', tryDrive }) {
+  if (difficulty === 'easy' || !(me.fuel > 4)) return null;
+  // How far below its surroundings the tank sits.
+  let rim = 0;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    rim += terrain.heightAt(me.x + Math.cos(a) * 14, me.z + Math.sin(a) * 14);
+  }
+  const sunk = rim / 8 - me.y;
+  const shaken = (me.hitsHere || 0) >= 2;
+  if (!(sunk > 3 || (shaken && rng.next() < 0.6))) return null;
+  const budget = sunk > 3 ? me.fuel : Math.min(me.fuel, 16);
+  let best = null;
+  for (let k = 0; k < 8; k++) {
+    const heading = (k / 8) * 360 + rng.range(-15, 15);
+    const end = tryDrive(heading, budget);
+    if (end.moved < 5) continue;
+    const score = (end.y - me.y) * (sunk > 3 ? 2 : 0.5) + end.moved * 0.4 + rng.range(0, 2);
+    if (!best || score > best.score) best = { heading: ((heading % 360) + 360) % 360, budget, score };
+  }
+  return best;
 }
 
 export function chooseWeapon(me, target, rng) {

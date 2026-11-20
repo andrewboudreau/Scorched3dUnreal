@@ -20,18 +20,27 @@ const C = {
   sideDeep: new THREE.Color('#2e2117'),
 };
 
+// Faint cloud shadows: render/sky.js writes each cloud's shadow here as
+// (x, z, radius) and the ground shader dims itself under them.
+export const MAX_CLOUD_SHADOWS = 14;
+export const groundShade = {
+  clouds: { value: Array.from({ length: MAX_CLOUD_SHADOWS }, () => new THREE.Vector3(0, 0, 0)) },
+};
+
 // World-space value noise breaks up the vertex colours below the 3 m grid
 // so the ground reads as grass and dirt rather than smooth paint. The same
 // noise tilts the shading normal a little, which gives nearby ground a rough,
 // tufted surface; it fades out with distance so far hills stay calm.
 function addGroundDetail(material) {
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uCloud = groundShade.clouds;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGroundP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vGroundP;
+uniform vec3 uCloud[${MAX_CLOUD_SHADOWS}];
 float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float gNoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -53,6 +62,12 @@ float gRough(vec2 p) { return gNoise(p * 0.45) * 0.65 + gNoise(p * 1.9) * 0.35; 
   vec2 q = vGroundP.xz;
   float n = gNoise(q * 0.08) * 0.5 + gNoise(q * 0.31) * 0.3 + gNoise(q * 1.7) * 0.2;
   diffuseColor.rgb *= 0.84 + 0.32 * n;
+  float shade = 0.0;
+  for (int i = 0; i < ${MAX_CLOUD_SHADOWS}; i++) {
+    vec3 c = uCloud[i];
+    shade = max(shade, 1.0 - smoothstep(c.z * 0.35, c.z, length((q - c.xy) * vec2(0.6, 1.0))));
+  }
+  diffuseColor.rgb *= 1.0 - 0.22 * shade;
 }`);
   };
 }
