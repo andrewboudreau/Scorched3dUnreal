@@ -40,8 +40,11 @@ export class Game {
     maxTurnsPerRound = 40,
     twists = true,      // perk drafts and round modifiers (core/perks.js)
     firing = 'turns',   // 'turns', or 'volley': everyone plans, then all fire together
+    // Online play (core/netplay.js): the ids of the tanks played on this
+    // screen. The other humans plan elsewhere; their plans arrive by message.
+    local = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing, local };
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
     this.rng = makeRng(seed);
     this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
@@ -57,7 +60,7 @@ export class Game {
       money: 0,
       score: 0,
       wins: 0,
-      inventory: { ...START_INVENTORY },
+      inventory: { ...START_INVENTORY, ...(local ? { guided: 0 } : {}) },   // no steering online
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
@@ -92,6 +95,12 @@ export class Game {
 
   get current() { return this.turn >= 0 ? this.players[this.turn] : null; }
   get humans() { return this.players.filter((p) => !p.ai); }
+  get online() { return !!this.cfg.local; }
+  // Is this tank planned on this screen? (Every human, offline.)
+  isLocal(p) { return !p.ai && (!this.cfg.local || this.cfg.local.includes(p.id)); }
+  get localHumans() { return this.players.filter((p) => this.isLocal(p)); }
+  // Names one volley of one round, for messages about it.
+  get volleyKey() { return `${this.round}.${this.turnsThisRound}`; }
   get volleyMode() { return this.cfg.firing === 'volley'; }
   alivePlayers() { return this.players.filter((p) => p.alive); }
 
@@ -110,6 +119,9 @@ export class Game {
     t.generate({ seed: this.cfg.seed + this.round * 7919, amplitude: this.cfg.hills });
     this.placeTanks();
     this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });
+    // Everything that reshapes the ground this round, so another copy of the
+    // game can rebuild it exactly (see rebuildGround).
+    this.ground = { starts: this.padOrder.map((i) => [i, this.players[i].x, this.players[i].z]), ops: [] };
     for (const p of this.players) {
       p.y = t.heightAt(p.x, p.z);
       p.aim = {};
@@ -155,6 +167,7 @@ export class Game {
       const j = this.rng.int(0, i);
       [order[i], order[j]] = [order[j], order[i]];
     }
+    this.padOrder = order;   // pads are flattened in this order; overlaps depend on it
     order.forEach((pi, k) => {
       const a = base + (k / n) * Math.PI * 2 + this.rng.range(-0.25, 0.25);
       const r = ring * this.rng.range(0.8, 1.15);
@@ -222,7 +235,7 @@ export class Game {
     const n = this.players.length;
     const order = this.players.map((_, k) => this.players[(this.firstShooter + this.turnsThisRound + k) % n]).filter((p) => p.alive);
     // CPUs sort out their driving first, so every human plans against where they ended up.
-    this.volley = { queue: [...order.filter((p) => p.ai), ...order.filter((p) => !p.ai)].map((p) => p.id), plans: {}, shown: null };
+    this.volley = { queue: [...order.filter((p) => p.ai), ...order.filter((p) => !p.ai)].map((p) => p.id), plans: {}, done: [], shown: null };
     if (this.turnsThisRound > 0) {
       for (const p of order) {
         const repair = perkSum(p, 'regen');
@@ -237,11 +250,38 @@ export class Game {
     while (v.queue.length) {
       const p = this.players[v.queue.shift()];
       if (!p.alive) continue;
-      if (!p.ai) { this.beginTurn(p.id); return; }
+      if (!p.ai) {
+        if (this.isLocal(p)) { this.beginTurn(p.id); return; }
+        continue;   // plans on another screen
+      }
       const go = this.aiWantsToDrive(p);
       if (go) { this.beginTurn(p.id, go); return; }
     }
+    if (this.online) {
+      // Hold here until every other human's plan is in (see netplay.js).
+      this.turn = -1;
+      this.phase = 'wait';
+      this.phaseTime = 0;
+      this.emit({ type: 'waiting' });
+      return;
+    }
     this.startVolleyBeat();
+  }
+
+  // Online: the humans who still have to plan this volley.
+  waitingOn() {
+    if (!this.volley) return [];
+    return this.players.filter((p) => p.alive && !p.ai && !this.volley.done.includes(p.id));
+  }
+
+  // Online: another screen's human has planned. Their tank goes where they
+  // drove it; the aim stays secret until the volley.
+  remotePlan(id, plan, tank) {
+    const p = this.players[id];
+    if (!this.volley || !p) return;
+    if (tank && p.alive) Object.assign(p, tank);
+    if (plan) this.volley.plans[id] = plan; else delete this.volley.plans[id];
+    if (!this.volley.done.includes(id)) this.volley.done.push(id);
   }
 
   // The current human is happy with the aim: keep it secret until the volley.
@@ -249,6 +289,7 @@ export class Game {
     const p = this.current;
     if (this.phase !== 'aim' || !p || !p.alive || p.ai) return false;
     this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    this.volley.done.push(p.id);
     Object.assign(p, this.volley.shown);
     this.emit({ type: 'locked', player: p.id });
     this.nextPlanner();
@@ -442,6 +483,8 @@ export class Game {
     this.phase = 'shop';
     this.phaseTime = 0;
     this.draft = {};
+    this.shopped = [];                          // online: humans whose shopping is in
+    for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
       const offer = this.cfg.twists ? draftOffer(p, this.rogue) : [];
       if (!offer.length) continue;
@@ -457,6 +500,7 @@ export class Game {
     const offer = this.draft[playerId];
     if (this.phase !== 'shop' || !offer || !offer.includes(id)) return false;
     this.players[playerId].perks.push(id);
+    this.players[playerId].picked = id;
     delete this.draft[playerId];
     return true;
   }
@@ -481,6 +525,7 @@ export class Game {
     const price = this.priceOf(p, id);
     if (!(price > 0) || p.money < price) return false;
     p.money -= price;
+    if (p.bought) p.bought.push(id);
     if (w) p.inventory[id] = (p.inventory[id] || 0) + w.bundle;
     else if (id === 'armor') p.pendingArmor += 30;
     else if (id === 'fuel') p.pendingFuel += TANK.fuelCan;
@@ -723,6 +768,7 @@ export class Game {
     const t = this.terrain;
     if (fx.type === 'mound') {
       const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
+      this.ground?.ops.push(['m', fx.point[0], fx.point[2], fx.radius, fx.height]);
       this.emit({ type: 'terrain', region });
       this.emit({ type: 'mound', pos: fx.point, radius: fx.radius });
       this.liftBuried();
@@ -783,6 +829,7 @@ export class Game {
   // Dig a crater and let the scenery react to it.
   carve(x, y, z, radius, depth) {
     const region = this.terrain.carveCrater(x, y, z, radius, depth);
+    this.ground?.ops.push(['c', x, y, z, radius, depth]);
     this.emit({ type: 'terrain', region });
     this.scenery.afterBlast(x, z, radius);
     this.relayScenery();
@@ -797,6 +844,69 @@ export class Game {
       const g = this.terrain.heightAt(p.x, p.z);
       if (g > p.y) p.y = g;
     }
+  }
+
+  // ---------- online (core/netplay.js) ----------
+
+  // Everything another copy of the game needs to carry on from here exactly:
+  // taken by the host at the start of each volley. Plain JSON.
+  snapshot() {
+    const copy = (o) => JSON.parse(JSON.stringify(o));   // Infinity becomes null; restore puts it back
+    return {
+      round: this.round, turnsThisRound: this.turnsThisRound, firstShooter: this.firstShooter,
+      wind: [...this.wind], gravity: this.gravity, maxWind: this.maxWind, modifier: this.modifier.id,
+      rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0,
+      lastRoundResult: this.lastRoundResult,
+      volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
+      ground: copy(this.ground),
+      players: this.players.map(copy),
+    };
+  }
+
+  // Take on the host's snapshot. The ground is only rebuilt when this copy's
+  // craters have drifted from the host's.
+  restore(s) {
+    if (s.round !== this.round || !sameGround(this.ground, s.ground)) {
+      this.rebuildGround(s.round, s.ground);
+      this.emit({ type: 'terrain', full: true });
+    }
+    this.ground = JSON.parse(JSON.stringify(s.ground));
+    Object.assign(this, {
+      round: s.round, turnsThisRound: s.turnsThisRound, firstShooter: s.firstShooter, gravity: s.gravity,
+      maxWind: s.maxWind, lastRoundResult: s.lastRoundResult, nextProjectileId: s.nextProjectileId,
+    });
+    this.wind = [...s.wind];
+    this.modifier = MODIFIER_BY_ID[s.modifier] || MODIFIER_BY_ID.clear;
+    this.rng.setState(s.rng);
+    this.rogue.setState(s.rogue);
+    s.players.forEach((q, i) => {
+      const p = this.players[i];
+      const wasAlive = p.alive;
+      Object.assign(p, JSON.parse(JSON.stringify(q)));
+      for (const k of Object.keys(p.inventory)) if (WEAPON_BY_ID[k]?.infinite) p.inventory[k] = Infinity;
+      if (wasAlive && !p.alive) this.emit({ type: 'destroyed', player: p.id, by: null, pos: [p.x, p.y, p.z] });
+    });
+    if (s.volley) this.volley = { queue: [], plans: s.volley.plans, done: s.volley.done, shown: null };
+    this.projectiles = [];
+  }
+
+  // Remake this round's ground from its seed, the tank pads and every crater
+  // and mound since, in order.
+  rebuildGround(round, ground) {
+    const t = this.terrain;
+    t.generate({ seed: this.cfg.seed + round * 7919, amplitude: this.cfg.hills });
+    for (const [i, x, z] of ground.starts) {
+      const p = this.players[i];
+      p.x = x; p.z = z;
+      t.flatten(x, z, TANK.padRadius);
+      p.y = t.heightAt(x, z);
+    }
+    this.scenery.generate({ seed: this.cfg.seed + round * 104729, tanks: this.players });
+    for (const op of ground.ops) {
+      if (op[0] === 'c') { t.carveCrater(op[1], op[2], op[3], op[4], op[5]); this.scenery.afterBlast(op[1], op[3], op[4]); }
+      else { t.raiseMound(op[1], op[2], op[3], op[4]); this.scenery.afterMound(op[1], op[2], op[3]); }
+    }
+    this.scenery.drainEvents();
   }
 
   // Tanks drop into craters dug beneath them and take fall damage on landing.
@@ -825,4 +935,11 @@ export class Game {
       }
     }
   }
+}
+
+// Same pads and the same craters, to the centimetre?
+function sameGround(a, b) {
+  if (!a || !b) return false;
+  const r = (g) => JSON.stringify([g.starts, g.ops], (k, v) => (typeof v === 'number' ? Math.round(v * 100) : v));
+  return r(a) === r(b);
 }

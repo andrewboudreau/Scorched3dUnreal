@@ -19,6 +19,9 @@ public class CraterfallModule : IApplicationPartModule
 
     public void Configure(WebApplication app)
     {
+        // Online rooms (Rooms.cs). Their literal routes win over the file route below.
+        Rooms.Map(app, $"/{Name}");
+
         // "{**path}" also matches the bare /Craterfall, which needs the trailing slash
         // added so the page's relative script paths resolve under it.
         app.MapGet($"/{Name}/{{**path}}", (HttpContext http, string? path) =>

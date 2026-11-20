@@ -77,6 +77,31 @@
         <label>Volume <input id="opt-volume" type="range" min="0" max="100" step="10" value="60" /></label>
       </div>
       <button id="start" class="primary">Start match</button>
+      <div id="online">
+        <div class="online-head">Play online <small>with friends on other screens: everyone plans at once, then all fire together</small></div>
+        <div id="net-entry" class="online-row">
+          <input id="net-name" maxlength="14" placeholder="Your name" />
+          <button id="net-create">Create a room</button>
+          <span class="or">or</span>
+          <input id="net-code" maxlength="4" placeholder="CODE" />
+          <button id="net-join">Join</button>
+        </div>
+        <div id="net-room" class="online-row hidden">
+          <span>Room <b id="net-code-show"></b></span>
+          <button id="net-copy">Copy invite link</button>
+          <button id="net-leave">Leave</button>
+        </div>
+        <div id="net-note" class="net-note"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Online: the room is gone -->
+  <div id="net-ended" class="screen hidden">
+    <div class="card">
+      <h2>Game over</h2>
+      <p id="net-ended-text" class="sub"></p>
+      <button id="net-ended-ok" class="primary">Back to the menu</button>
     </div>
   </div>
 
@@ -139,6 +164,7 @@
   </div>
 
   <div id="killcam-cap"></div>
+  <div id="net-wait" class="panel small hidden"></div>
   <div id="loading" class="screen"><div class="card">Loading…</div></div>
 
   <script type="module" src="src/main.js"></script>

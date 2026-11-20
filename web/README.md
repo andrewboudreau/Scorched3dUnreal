@@ -17,6 +17,10 @@ from disk will not work. Python's server sends no cache headers, so after editin
 a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 "Disable cache" ticked.
 
+To try online play locally, run `node tools/devserver.mjs` instead. It serves
+the game on the same port and adds the rooms API, so two browser tabs can play
+each other.
+
 ## Controls
 
 | Key | Action |
@@ -86,6 +90,16 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
   tank's hits out of shots and accuracy (rangefinder probes apart), damage
   dealt (overkill not counted), kills and longest hit, plus a few awards:
   sharpshooter (at least three shots), longest hit, most damage, most kills.
+- **Online.** Under the setup card, type a name and press *Create a room*,
+  then send friends the invite link (or the 4-letter code). The host picks
+  the rounds, wind, terrain and any CPU tanks, then starts. Up to six tanks.
+  Online play is always volley: everyone plans on their own screen at the
+  same time, a banner says who the game is waiting for, and all shells fly
+  together once everyone has locked in. Between rounds each player drafts
+  and shops on their own screen, and the next round starts when all are
+  done. The Guided Missile is left out online, since its steering is live.
+  If a player stops answering for about 45 seconds, a CPU takes over their
+  tank. If the host goes, the match ends.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last
   shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
   It is cleared at the start of a round and when the tank ends up more than
@@ -169,13 +183,21 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`) and the flocks (`birds.js`).
 - `src/audio.js` is the synthesised sound.
+- `src/core/netplay.js` runs an online match: every screen keeps its own
+  `Game` and reads the same ordered message log (plans, shop choices). At
+  each volley, and again before each round, the host sends its full state
+  (`Game.snapshot`) and the others take it, so small floating-point drift
+  never adds up. `src/net.js` is the browser's link to the room (long
+  polling, sends kept in order).
 - `src/main.js` holds the scene, camera rig, input, HUD and menus. It turns `Game`
   events into visuals and sound.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
   draft, modifiers, driving and fuel (`twists.test.js`), road routing (`paths.test.js`),
-  aim history and both firing modes (`volley.test.js`), and whole CPU-only matches.
+  aim history and both firing modes (`volley.test.js`), whole CPU-only matches, and
+  online matches between several simulated screens with deliberate drift
+  (`netplay.test.js`).
 
 The ballistics, crater falloff and AI solver follow the Unreal project's
 `CraterMath`, `TankAiming` and the legacy aim-guesser loop. The AI aims with
@@ -190,7 +212,10 @@ time of day.
 
 `web/module/` packages the game as a SharedTools.Web module drop. Its csproj links
 `index.html`, `css/`, `src/` and `vendor/` in as `wwwroot`, so there is one copy of the game.
-`CraterfallModule` serves those files under `/Craterfall/`.
+`CraterfallModule` serves those files under `/Craterfall/`, and `Rooms.cs`
+serves the online rooms API under `/Craterfall/api/rooms`. Rooms live in
+memory on the server, so a redeploy ends any match in progress.
+`tools/devserver.mjs` is a copy of the same API for local testing; keep the two in step.
 
 ```powershell
 cd web/module

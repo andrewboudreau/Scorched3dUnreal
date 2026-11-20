@@ -222,3 +222,18 @@ table.stats { font-size: 12px; }
 table.stats th { font-size: 10px; }
 table.stats td, table.stats th { padding: 3px 6px; text-align: right; }
 table.stats td:nth-child(2), table.stats th:nth-child(2) { text-align: left; }
+
+/* Online: the lobby on the setup card, and who the game is waiting for. */
+#online { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.1); }
+.online-head { font-weight: 700; margin-bottom: 8px; }
+.online-head small { display: block; font-weight: 400; color: #9aa6b2; margin-top: 2px; }
+.online-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.online-row input { width: 130px; }
+#net-code { width: 70px; text-transform: uppercase; letter-spacing: .15em; }
+.online-row .or { color: #9aa6b2; }
+#net-code-show { font-size: 20px; letter-spacing: .2em; color: #ffd166; }
+.net-note { min-height: 18px; margin-top: 8px; font-size: 13px; color: #9aa6b2; }
+.player-row .online-tag { font-size: 12px; color: #9aa6b2; text-align: right; }
+.player-row .online-tag.gone { color: #e8553f; }
+body.net-guest #setup .row-buttons, body.net-guest #setup .options, body.net-guest #start { display: none; }
+#net-wait { top: 100px; left: 50%; transform: translateX(-50%); color: #dfe6ee; }

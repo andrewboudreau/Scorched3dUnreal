@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
+import { Session } from './core/netplay.js';
+import { RoomLink } from './net.js';
 import { TANK, muzzleOrigin, hitSphere } from './core/tank.js';
 import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
@@ -233,7 +235,7 @@ function handleEvents() {
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
           : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), 'Plan it, then Space to lock it in'];
-        if (e.plan && !p.ai && game.humans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
+        if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
         setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
           Math.max(50, bannerHold - performance.now()));
         break;
@@ -244,7 +246,7 @@ function handleEvents() {
         break;
       case 'volley': {
         closeHandoff();
-        const alive = game.humans.filter((h) => h.alive && e.players.includes(h.id));
+        const alive = game.localHumans.filter((h) => h.alive && e.players.includes(h.id));
         heroId = alive.length === 1 ? alive[0].id : null;
         if (heroId != null && followShell && !overview) aimCameraAt(game.players[heroId]);
         banner('Fire!', `${e.players.length} tanks, all together`, 1300);
@@ -562,7 +564,7 @@ function rangeOwner() {
   if (!game || handoffOpen) return null;
   if (game.phase === 'aim') return game.current && !game.current.ai ? game.current : null;
   if (heroId != null) return game.players[heroId];
-  return game.humans.length === 1 ? game.humans[0] : null;
+  return game.localHumans.length === 1 ? game.localHumans[0] : null;
 }
 
 let rcSpot = null;              // where a click on the card looks
@@ -690,7 +692,7 @@ function applySteering() {
   if (!game || game.phase !== 'flight') { $('steer-hint').classList.add('hidden'); return; }
   const dir = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
   let fuel = -1;
-  for (const p of game.humans) {
+  for (const p of game.localHumans) {
     game.steer(p.id, dir);
     for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) fuel = Math.max(fuel, pr.steer.fuel);
   }
@@ -807,7 +809,7 @@ const _back = new THREE.Vector3();
 function insetPlayer() {
   if (!game || overview || !followShell || pinned || killCam) return null;
   if (game.phase !== 'flight' && game.phase !== 'settle') return null;
-  const hs = game.humans;
+  const hs = game.localHumans;
   if (hs.length !== 1) return null;
   const p = hs[0];
   if (!p.alive && insetFor !== p.id) return null;       // keep it on a tank knocked out mid-volley
@@ -1227,6 +1229,10 @@ const setupRows = [
 const CPU_NAMES = ['Rook', 'Vex', 'Marlow', 'Kestrel', 'Bastion', 'Ivo'];
 
 function renderSetup() {
+  if (session && !session.game) { renderLobby(); return; }
+  document.body.classList.remove('net-lobby', 'net-guest');
+  $('start').textContent = 'Start match';
+  $('opt-firing').disabled = false;
   $('setup-players').innerHTML = setupRows.map((r, i) => `
     <div class="player-row">
       <span class="swatch" style="background:${PLAYER_COLORS[i]};width:18px;height:18px"></span>
@@ -1243,14 +1249,40 @@ function renderSetup() {
 }
 
 $('add-player').onclick = () => {
+  if (session && !session.game) {
+    if (lobbySeats().length + lobbyCpus().length >= 6) return;
+    setupRows.push({ name: CPU_NAMES[(lobbyCpus().length + 1) % CPU_NAMES.length], type: 'normal' });
+    renderSetup();
+    return;
+  }
   if (setupRows.length >= 6) return;
   setupRows.push({ name: CPU_NAMES[setupRows.length % CPU_NAMES.length], type: 'normal' });
   renderSetup();
 };
-$('remove-player').onclick = () => { if (setupRows.length > 2) { setupRows.pop(); renderSetup(); } };
+$('remove-player').onclick = () => {
+  if (session && !session.game) {
+    const i = setupRows.map((r) => r.type !== 'human').lastIndexOf(true);
+    if (i >= 0) { setupRows.splice(i, 1); renderSetup(); }
+    return;
+  }
+  if (setupRows.length > 2) { setupRows.pop(); renderSetup(); }
+};
 
 $('start').onclick = () => {
   sound.ensure();
+  if (session) {
+    // The host starts the room's match; everyone's screen starts it when the message comes round.
+    if (!session.isHost || session.game) return;
+    if (lobbySeats().length + lobbyCpus().length < 2) { $('net-note').textContent = 'Add a CPU tank, or wait for someone to join.'; return; }
+    session.start({
+      rounds: Number($('opt-rounds').value),
+      maxWind: Number($('opt-wind').value),
+      hills: Number($('opt-hills').value),
+      twists: $('opt-twists').value === '1',
+    }, lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
+    $('start').disabled = true;
+    return;
+  }
   $('setup').classList.add('hidden');
   startMatch({
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
@@ -1309,7 +1341,7 @@ function showRoundResult(kind) {
     return;
   }
   $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
-  $('ro-continue').textContent = !game.humans.length ? `Start round ${game.round + 1}` : game.cfg.twists ? 'Continue to the perk draft' : 'Continue to the armory';
+  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.cfg.twists ? 'Continue to the perk draft' : 'Continue to the armory';
   $('ro-table').innerHTML = standingsTable([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
 }
@@ -1323,7 +1355,7 @@ $('ro-continue').onclick = () => {
 
 const whose = (p, thing) => (/^you$/i.test(p.name.trim()) ? `Your ${thing}` : `${p.name}'s ${thing}`);
 const hotseatStep = (p, doing) => {
-  const humans = game.humans;
+  const humans = game.localHumans;
   return humans.length > 1 ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · ${doing}` : doing;
 };
 
@@ -1332,7 +1364,11 @@ function nextShopper() {
   const pid = shopQueue.shift();
   $('draft').classList.add('hidden');
   $('shop').classList.add('hidden');
-  if (pid == null) { game.closeShop(); return; }
+  if (pid == null) {
+    if (session) for (const p of game.localHumans) session.shopDone(p.id);   // the host closes the armory for everyone
+    else game.closeShop();
+    return;
+  }
   if (game.draft[pid]) openDraftFor(pid); else openShopFor(pid);
 }
 
@@ -1380,14 +1416,14 @@ function openShopFor(pid) {
   $('shop-swatch').style.background = p.color;
   $('shop-player').textContent = whose(p, 'armory');
   $('shop-step').textContent = hotseatStep(p, `shopping for round ${game.round + 1}`);
-  $('shop-done').textContent = next ? `Done · pass to ${next.name}` : `Done · start round ${game.round + 1}`;
+  $('shop-done').textContent = next ? `Done · pass to ${next.name}` : session ? 'Done · ready for the next round' : `Done · start round ${game.round + 1}`;
   const note = (text, good = false) => {
     $('shop-note').textContent = text;
     $('shop-note').classList.toggle('good', good);
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.map((it) => {
+    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided')).map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
       const info = ITEM_INFO[it.id];
       const have = isW ? p.inventory[it.id] || 0 : info.have(p);
@@ -1426,6 +1462,7 @@ function openShopFor(pid) {
 
 $('mo-again').onclick = () => {
   $('matchover').classList.add('hidden');
+  leaveRoom();
   closeHandoff();
   showHud(false);
   disposeMatch();
@@ -1437,6 +1474,154 @@ $('mo-again').onclick = () => {
   $('setup').classList.remove('hidden');
   renderSetup();
 };
+
+// ---------------------------------------------------------------- online
+
+// A room on the server (net.js) and the match played through it
+// (core/netplay.js). Null when playing on this screen only.
+let link = null;
+let session = null;
+let lobbySig = '';
+
+const lobbySeats = () => (session ? session.seats.filter((s) => !s.gone) : []);
+const lobbyCpus = () => setupRows.filter((r) => r.type !== 'human');
+const netName = () => ($('net-name').value.trim() || setupRows.find((r) => r.type === 'human')?.name || 'Player').slice(0, 14);
+
+async function goOnline(how) {
+  sound.ensure();
+  if (link) return;
+  const code = $('net-code').value.trim();
+  if (how === 'join' && code.length !== 4) { $('net-note').textContent = 'Type the 4-letter room code first.'; return; }
+  $('net-note').textContent = how === 'join' ? 'Joining…' : 'Making a room…';
+  localStorage.setItem('craterfall.name', netName());
+  link = new RoomLink();
+  try {
+    if (how === 'create') await link.create(netName()); else await link.join(code, netName());
+  } catch (err) {
+    link.close();
+    link = null;
+    $('net-note').textContent = err.message === 'Failed to fetch' ? 'Could not reach the server.' : err.message;
+    return;
+  }
+  session = new Session({
+    seat: link.seat,
+    send: (msg) => link.send(msg),
+    onStart: (config) => {
+      $('setup').classList.add('hidden');
+      startMatch(config);
+      return game;
+    },
+  });
+  link.onEntry = (e) => session.receive(e);
+  link.onLost = () => netEnded('The connection to the room was lost (it may have expired, or the server restarted).');
+  history.replaceState(null, '', `?room=${link.code}`);
+  lobbySig = '';
+  renderLobby();
+}
+
+// The setup card while in a room: its people, then the host's CPU tanks.
+function renderLobby() {
+  const seats = lobbySeats();
+  const cpus = lobbyCpus();
+  const sig = JSON.stringify([seats, cpus.map((r) => r.type), session.isHost, cpus.length]);
+  if (sig === lobbySig) return;
+  lobbySig = sig;
+  document.body.classList.add('net-lobby');
+  document.body.classList.toggle('net-guest', !session.isHost);
+  $('net-entry').classList.add('hidden');
+  $('net-room').classList.remove('hidden');
+  $('net-code-show').textContent = link.code;
+  $('opt-firing').value = 'volley';
+  $('opt-firing').disabled = true;
+  const rows = seats.map((s, k) => `
+    <div class="player-row">
+      <span class="swatch" style="background:${PLAYER_COLORS[k]};width:18px;height:18px"></span>
+      <span>${escapeHtml(s.name)}${s.seat === link.seat ? ' (you)' : ''}</span>
+      <span class="online-tag">${s.seat === 0 ? 'host' : 'online'}</span>
+    </div>`);
+  const cpuRows = setupRows.map((r, i) => (r.type === 'human' ? '' : `
+    <div class="player-row">
+      <span class="swatch" style="background:${PLAYER_COLORS[seats.length + cpus.indexOf(r)]};width:18px;height:18px"></span>
+      ${session.isHost ? `<input data-i="${i}" class="pname" value="${escapeHtml(r.name)}" maxlength="14" />` : `<span>${escapeHtml(r.name)}</span>`}
+      ${session.isHost ? `<select data-i="${i}" class="ptype">
+        ${[['easy', 'CPU · Easy'], ['normal', 'CPU · Normal'], ['hard', 'CPU · Hard']]
+          .map(([v, l]) => `<option value="${v}" ${r.type === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>` : `<span class="online-tag">CPU</span>`}
+    </div>`));
+  $('setup-players').innerHTML = rows.join('') + (session.isHost ? cpuRows.join('') : '');
+  document.querySelectorAll('.pname').forEach((el) => el.addEventListener('input', () => { setupRows[el.dataset.i].name = el.value; }));
+  document.querySelectorAll('.ptype').forEach((el) => el.addEventListener('change', () => { setupRows[el.dataset.i].type = el.value; lobbySig = ''; }));
+  $('add-player').textContent = '+ Add CPU';
+  $('remove-player').textContent = '- Remove CPU';
+  $('add-player').disabled = seats.length + cpus.length >= 6;
+  $('remove-player').disabled = !cpus.length;
+  const n = seats.length + cpus.length;
+  $('start').textContent = `Start online match · ${n} tank${n === 1 ? '' : 's'}`;
+  $('start').disabled = false;
+  $('net-note').textContent = session.isHost
+    ? (seats.length < 2 ? 'Send your friends the invite link, or the code. Everyone in the room plays; CPUs are optional.' : 'Start when everyone is in.')
+    : 'Waiting for the host to start the match.';
+}
+
+// Who the game is waiting on, while it waits.
+function updateNetWait() {
+  const g = session.game;
+  const mineDone = g && (g.phase !== 'shop' || g.localHumans.every((p) => g.shopped.includes(p.id)));
+  const names = mineDone ? session.waitingFor().map((p) => p.name) : [];
+  const el = $('net-wait');
+  el.classList.toggle('hidden', !names.length);
+  if (names.length) {
+    const text = `Waiting for ${names.join(', ')}…`;
+    if (el.textContent !== text) el.textContent = text;
+  }
+}
+
+function leaveRoom() {
+  if (link) link.close();
+  link = null;
+  session = null;
+  $('net-entry').classList.remove('hidden');
+  $('net-room').classList.add('hidden');
+  $('net-wait').classList.add('hidden');
+  $('net-note').textContent = '';
+  $('add-player').textContent = '+ Add tank';
+  $('remove-player').textContent = '- Remove tank';
+  $('start').disabled = false;
+  history.replaceState(null, '', location.pathname);
+}
+
+// The room went away under us: say so, then back to the menu.
+function netEnded(text) {
+  if (!session) return;
+  const inMatch = !!session.game;
+  leaveRoom();
+  if (!inMatch) { $('net-note').textContent = text; renderSetup(); return; }
+  $('net-ended-text').textContent = text;
+  $('net-ended').classList.remove('hidden');
+}
+
+$('net-ended-ok').onclick = () => {
+  $('net-ended').classList.add('hidden');
+  for (const id of ['roundover', 'draft', 'shop', 'matchover']) $(id).classList.add('hidden');
+  $('mo-again').onclick();
+};
+$('net-create').onclick = () => goOnline('create');
+$('net-join').onclick = () => goOnline('join');
+$('net-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') goOnline('join'); e.stopPropagation(); });
+$('net-name').addEventListener('keydown', (e) => e.stopPropagation());
+$('net-leave').onclick = () => { leaveRoom(); renderSetup(); };
+$('net-copy').onclick = async () => {
+  const url = `${location.origin}${location.pathname}?room=${link.code}`;
+  try { await navigator.clipboard.writeText(url); $('net-note').textContent = `Copied: ${url}`; } catch { $('net-note').textContent = url; }
+};
+$('net-name').value = localStorage.getItem('craterfall.name') || '';
+{
+  const code = new URLSearchParams(location.search).get('room');
+  if (code) {
+    $('net-code').value = code.toUpperCase().slice(0, 4);
+    $('net-note').textContent = 'You have an invite: type your name and press Join.';
+  }
+}
 
 // ---------------------------------------------------------------- loop
 
@@ -1453,6 +1638,12 @@ function frame() {
 function tick(dt) {
   elapsed += dt;
   let dayGoal = 0.12;
+  if (session) {
+    session.pump();
+    if (!session.game) renderLobby();
+    updateNetWait();
+    if (session.over) netEnded(session.over);
+  }
   if (game) {
     updateKillCam();
     const sdt = dt * timeScale;   // game time: slowed for the kill cam
@@ -1520,6 +1711,7 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },
   get killCam() { return killCam; },
+  get session() { return session; },
   get timeScale() { return timeScale; },
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };

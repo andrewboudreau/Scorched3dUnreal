@@ -11,6 +11,9 @@ export function makeRng(seed) {
   };
   return {
     next,
+    // The generator's whole state, to hand to another copy of the game.
+    state: () => a,
+    setState: (s) => { a = s >>> 0; },
     range: (lo, hi) => lo + (hi - lo) * next(),
     int: (lo, hi) => lo + Math.floor((hi - lo + 1) * next()),
     pick: (arr) => arr[Math.floor(next() * arr.length)],
