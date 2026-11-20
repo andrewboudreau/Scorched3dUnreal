@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BRIDGE } from '../core/scenery.js';
+import { addFogShade } from './terrainMesh.js';
 
 // Draws core/scenery.js: one InstancedMesh per kind of prop, a merged bridge
 // and a water plane. Static props are rewritten only when the scenery's
@@ -182,6 +183,8 @@ vec2 wWave(vec2 p, vec2 d, float k, float speed, float amp) { return d * amp * c
   normal = normalize(normal + (viewMatrix * vec4(rip, 0.0)).xyz);
 }`);
   };
+  addFogShade(material, 'props');
+  addFogShade(water, 'water');
   shared = { geo, tints, material, water, time };
   return shared;
 }

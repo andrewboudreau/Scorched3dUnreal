@@ -36,6 +36,44 @@ export const groundShade = {
   fogOn: { value: 0 },
 };
 
+// Fog of war on anything else (trees, houses, water): the same dimming as the
+// ground, applied to the lit colour. `key` keeps each material's shader apart.
+export function addFogShade(material, key) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    prev?.call(material, shader, renderer);
+    shader.uniforms.uFog = groundShade.fog;
+    shader.uniforms.uFogOn = groundShade.fogOn;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vFogP;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+{
+  vec4 fp = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+    fp = instanceMatrix * fp;
+  #endif
+  vFogP = (modelMatrix * fp).xyz;
+}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vFogP;
+uniform vec3 uFog[${MAX_FOG_SPOTS}];
+uniform float uFogOn;`)
+      .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+if (uFogOn > 0.5) {
+  float d = 1e5;
+  for (int i = 0; i < ${MAX_FOG_SPOTS}; i++) {
+    vec3 c = uFog[i];
+    if (c.z > 0.0) d = min(d, length(vFogP.xz - c.xy) - c.z);
+  }
+  float f = smoothstep(-8.0, 10.0, d);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * 0.32 + vec3(0.04, 0.05, 0.07), f * 0.85);
+}`);
+  };
+  const base = material.customProgramCacheKey.bind(material);
+  material.customProgramCacheKey = () => `${base()}|fog:${key}`;
+}
+
 // World-space value noise breaks up the vertex colours below the 3 m grid
 // so the ground reads as grass and dirt rather than smooth paint. The same
 // noise tilts the shading normal a little, which gives nearby ground a rough,

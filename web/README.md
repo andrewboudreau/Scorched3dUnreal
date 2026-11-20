@@ -83,8 +83,8 @@ each other.
   dive, only turns. One in the starting kit; 90 for two in the shop. On a
   shared screen every human's missile answers the same keys.
 - **Fog of war** (setup option, off by default; works online too). Your tank
-  sees 110 m around itself; the ground beyond is dimmed and enemy tanks out
-  there are hidden. You still have intel on them, drawn as a ring in their
+  sees 110 m around itself; the ground, trees, houses and water beyond are
+  dimmed and enemy tanks out there are hidden. You still have intel on them, drawn as a ring in their
   colour with a "Name?" label: a rough fix (60 m of doubt) from the start of
   the round, a rougher one (35 m) whenever they fire where you cannot see,
   and an exact "last seen here" once they have been in sight. A hidden
