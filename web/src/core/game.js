@@ -9,7 +9,8 @@ import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, p
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
-const START_INVENTORY = { shell: Infinity, breacher: 1, roller: 1, mound: 1, scatter: 0, ranger: 2 };
+const DEG = Math.PI / 180;
+const START_INVENTORY = { shell: Infinity, guided: 1, breacher: 1, roller: 1, mound: 1, scatter: 0, ranger: 2 };
 
 // Money awards.
 // Everyone gets the stipend, so even a tank that was knocked out early has
@@ -67,6 +68,9 @@ export class Game {
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
       shots: [], shotCount: 0,   // aim history, see AIM_HISTORY
+      // Whole-match tallies for the results screen. `hits` counts shots (not
+      // bomblets) that hurt someone else; `longest` is the furthest such hit, in metres.
+      stats: { shots: 0, hits: 0, damage: 0, taken: 0, kills: 0, longest: 0, probes: 0, lastHit: 0 },
     }));
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
@@ -530,6 +534,7 @@ export class Game {
     p.shots.push({ n: shot, yaw: p.yaw, elev: p.elev, power: p.power, weapon: w.id, at: [p.x, p.y, p.z] });
     if (p.shots.length > AIM_HISTORY.keep) p.shots.shift();
     const range = (w.flight || []).find((f) => f.type === 'range');
+    if (range) p.stats.probes++; else p.stats.shots++;
     if (range) {
       // Rangefinder: five probes leave together, each a small change to the aim.
       for (const pb of rangeProbes(p.yaw, p.power, range, TANK.minPower, TANK.maxPower)) {
@@ -550,9 +555,17 @@ export class Game {
     pr.splitDone = false;
     pr.g = this.gravity;
     pr.windK = this.windShare(this.players[owner]);
+    const steer = (WEAPON_BY_ID[weaponId].flight || []).find((f) => f.type === 'steer');
+    if (steer) pr.steer = { rate: steer.rate, fuel: steer.fuel, input: 0 };
     this.projectiles.push(pr);
     this.emit({ type: 'projectile', id: pr.id, weapon: weaponId, owner, shot });
     return pr;
+  }
+
+  // Turn a tank's guided missiles in flight: -1 left, +1 right (as seen from
+  // behind), 0 straight. Holds until changed; burns steering fuel while turning.
+  steer(owner, dir) {
+    for (const pr of this.projectiles) if (pr.owner === owner && pr.steer) pr.steer.input = Math.max(-1, Math.min(1, dir));
   }
 
   // ---------- simulation ----------
@@ -610,6 +623,14 @@ export class Game {
       if (pr.dead) continue;
       if (pr.roller) { this.stepRolling(pr, spheres, dt); continue; }
       const vyBefore = pr.vel[1];
+      if (pr.steer && pr.steer.input && pr.steer.fuel > 0) {
+        // Swing the horizontal velocity; speed and climb are untouched.
+        const a = pr.steer.rate * DEG * dt * pr.steer.input;
+        const [vx, , vz] = pr.vel, c = Math.cos(a), sn = Math.sin(a);
+        pr.vel[0] = vx * c - vz * sn;
+        pr.vel[2] = vz * c + vx * sn;
+        pr.steer.fuel = Math.max(0, pr.steer.fuel - dt);
+      }
       stepProjectile(pr, this.wind, dt);
       const w = WEAPON_BY_ID[pr.weapon];
       // Apex split.
@@ -662,7 +683,7 @@ export class Game {
     }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
-    for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit);
+    for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit, pr.shot);
     if (pr.weapon === 'shell' && !directHit) this.throwShrapnel(pr, point);
   }
 
@@ -698,7 +719,7 @@ export class Game {
     if (end || sunk) this.detonate(pr, ground, null);
   }
 
-  applyEffect(fx, owner, directHit) {
+  applyEffect(fx, owner, directHit, shot = 0) {
     const t = this.terrain;
     if (fx.type === 'mound') {
       const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
@@ -721,30 +742,38 @@ export class Game {
         const s = hitSphere(p);
         const dist = p === directHit ? 0 : Math.max(0, Math.hypot(s.x - bx, s.y - by, s.z - bz) - TANK.hitRadius * 0.5);
         const dmg = blastDamage(dist, radius, damage);
-        if (dmg > 0) this.damage(p, dmg, owner);
+        if (dmg > 0) this.damage(p, dmg, owner, shot);
       }
     }
   }
 
-  damage(p, amount, from) {
+  damage(p, amount, from, shot = 0) {
     let rest = amount;
+    const before = p.hp + p.armor;
     if (p.armor > 0) {
       const soak = Math.min(p.armor, rest);
       p.armor -= soak;
       rest -= soak;
     }
     p.hp = Math.max(0, p.hp - rest);
+    const dealt = before - p.hp - p.armor;   // what it really took off, for the match stats
     const attacker = from != null ? this.players[from] : null;
     const payK = this.modifier.pay || 1;
     if (attacker && attacker !== p) {
       attacker.money += Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK);
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
+      const st = attacker.stats;
+      st.damage += dealt;
+      if (dealt > 0 && shot && shot !== st.lastHit) { st.hits++; st.lastHit = shot; }
+      const origin = attacker.shots.find((s) => s.n === shot)?.at || [attacker.x, attacker.y, attacker.z];
+      st.longest = Math.max(st.longest, Math.hypot(p.x - origin[0], p.z - origin[2]));
     }
+    p.stats.taken += dealt;
     this.emit({ type: 'damage', player: p.id, amount, hp: p.hp, by: attacker ? attacker.id : null });
     if (p.hp <= 0 && p.alive) {
       p.alive = false;
-      if (attacker && attacker !== p) attacker.money += PAY.kill * payK;
+      if (attacker && attacker !== p) { attacker.money += PAY.kill * payK; attacker.stats.kills++; }
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
       // The wreck cooks off: a small crater of its own.
       this.carve(p.x, p.y, p.z, 7, 0.4);

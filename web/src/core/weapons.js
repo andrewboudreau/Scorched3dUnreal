@@ -9,11 +9,19 @@
 //   mound  { radius, height }           heap dirt instead of removing it
 //   range  { turn, power }              leave the barrel as five harmless probes:
 //                                       as aimed, turret -/+turn, power -/+power
+//   steer  { rate, fuel }               the shooter can turn it left or right in
+//                                       flight, `rate` deg/s, for `fuel` seconds
 
 export const WEAPONS = [
   {
     id: 'shell', name: 'Shell', price: 0, bundle: 0, infinite: true,
     desc: 'Standard round. Always in stock.',
+    impact: [{ type: 'blast', radius: 11, damage: 38, depth: 0.6 }],
+  },
+  {
+    id: 'guided', name: 'Guided Missile', price: 90, bundle: 2,
+    desc: 'Steer it in flight with A / D for a few seconds. Shell-sized blast.',
+    flight: [{ type: 'steer', rate: 34, fuel: 3 }],
     impact: [{ type: 'blast', radius: 11, damage: 38, depth: 0.6 }],
   },
   {

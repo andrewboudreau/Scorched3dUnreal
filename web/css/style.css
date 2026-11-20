@@ -198,3 +198,27 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 #rc-read { font-size: 12px; color: #dfe6ee; }
 #rc-est { font-size: 12px; font-weight: 700; color: #ffd36a; margin-top: 3px; }
 #rc-est small { display: block; font-weight: 500; color: var(--muted); font-size: 11px; }
+
+/* Guided missile: steering fuel while it flies. */
+#steer-hint { bottom: 175px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; color: #dfe6ee; }
+#steer-hint .bar { width: 90px; margin: 0; }
+#steer-fuel { background: linear-gradient(90deg, #6fe3ff, #b8f3ff); transition: none; }
+#steer-hint.empty { opacity: .5; }
+
+/* Kill cam: letterbox bars and a caption while the deciding shot lands. */
+body::before, body::after { content: ''; position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 5;
+  pointer-events: none; transition: height .35s ease; }
+body::before { top: 0; }
+body::after { bottom: 0; }
+body.killcam::before, body.killcam::after { height: 10vh; }
+#killcam-cap { position: fixed; left: 0; right: 0; bottom: 3vh; z-index: 6; text-align: center; color: #fff; font-size: 18px;
+  font-weight: 700; letter-spacing: .04em; opacity: 0; transition: opacity .3s; pointer-events: none; text-shadow: 0 2px 6px #000; }
+body.killcam #killcam-cap { opacity: 1; }
+body.killcam :is(#weapon-bar, #help, #player-card, #range-card, #steer-hint, #wind, #scoreboard, .locator) { opacity: 0; transition: opacity .3s; }
+
+/* Match results: awards and the full numbers. */
+#mo-awards { margin: 12px 0 8px; font-size: 14px; line-height: 1.6; }
+table.stats { font-size: 12px; }
+table.stats th { font-size: 10px; }
+table.stats td, table.stats th { padding: 3px 6px; text-align: right; }
+table.stats td:nth-child(2), table.stats th:nth-child(2) { text-align: left; }

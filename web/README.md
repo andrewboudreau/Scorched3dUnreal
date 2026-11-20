@@ -21,7 +21,7 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
 
 | Key | Action |
 | --- | --- |
-| A / D | turret |
+| A / D | turret (while a Guided Missile flies: steer it left / right) |
 | W / S | elevation |
 | Q / E | power |
 | Shift | fine adjust |
@@ -73,6 +73,19 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
   the landings.
   Two come in the starting kit; more are 60 for three in the shop. Shells are
   drawn as small finned missiles; Roller rounds are still balls.
+- **Guided Missile.** A shell-sized blast you can steer: while it flies,
+  A / D (or ← / →) swing it left or right at 34°/s for up to three seconds
+  of steering fuel, shown in a bar above the weapons. It does not climb or
+  dive, only turns. One in the starting kit; 90 for two in the shop. On a
+  shared screen every human's missile answers the same keys.
+- **Kill cam.** When a shot in the air is about to end the round (its blast
+  would leave at most one tank standing), time slows to about a quarter, the
+  screen letterboxes, the HUD steps aside and the camera swings round to
+  watch it land from the side, then speeds back up.
+- **Match results.** Besides wins and funds, the end screen lists each
+  tank's hits out of shots and accuracy (rangefinder probes apart), damage
+  dealt (overkill not counted), kills and longest hit, plus a few awards:
+  sharpshooter (at least three shots), longest hit, most damage, most kills.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last
   shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
   It is cleared at the start of a round and when the tank ends up more than

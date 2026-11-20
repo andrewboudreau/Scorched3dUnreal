@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS } from './core/game.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS } from './core/weapons.js';
-import { TANK, muzzleOrigin } from './core/tank.js';
-import { ROLL, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
+import { TANK, muzzleOrigin, hitSphere } from './core/tank.js';
+import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
@@ -210,6 +210,9 @@ function handleEvents() {
         pips.forEach(dropPip);
         pips.length = 0;
         ranges.clear();
+        killCam = null;
+        timeScale = 1;
+        document.body.classList.remove('killcam');
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
@@ -679,6 +682,119 @@ function updateRangeCard() {
 }
 
 
+// ---------------------------------------------------------------- steering
+
+// A / D (or the side arrows) turn every human's guided missile while it flies.
+// On a shared screen they all answer the same keys; with one human, only yours.
+function applySteering() {
+  if (!game || game.phase !== 'flight') { $('steer-hint').classList.add('hidden'); return; }
+  const dir = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
+  let fuel = -1;
+  for (const p of game.humans) {
+    game.steer(p.id, dir);
+    for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) fuel = Math.max(fuel, pr.steer.fuel);
+  }
+  $('steer-hint').classList.toggle('hidden', fuel < 0);
+  if (fuel >= 0) {
+    $('steer-fuel').style.width = `${(fuel / WEAPON_BY_ID.guided.flight[0].fuel) * 100}%`;
+    $('steer-hint').classList.toggle('empty', fuel <= 0);
+  }
+}
+
+// ---------------------------------------------------------------- kill cam
+
+// When a shell in the air is about to end the round (its blast would leave at
+// most one tank standing), time slows, the frame letterboxes and the camera
+// swings round to watch it land from the side.
+let killCam = null;             // { id, victim, side: [x, z], end }
+let timeScale = 1;
+const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
+
+// Where a projectile comes down within `horizon` seconds if nothing changes.
+function forecast(pr, horizon) {
+  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK };
+  const t = game.terrain;
+  const step = 1 / 30;
+  for (let s = step; s <= horizon; s += step) {
+    stepProjectile(c, game.wind, step);
+    if (!t.inBounds(c.pos[0], c.pos[2])) return null;
+    for (const p of game.players) {
+      if (!p.alive || (p.id === pr.owner && pr.time + s < 0.5)) continue;   // the shooter's grace, as in the game
+      const h = hitSphere(p);
+      if ((c.pos[0] - h.x) ** 2 + (c.pos[1] - h.y) ** 2 + (c.pos[2] - h.z) ** 2 <= h.r * h.r) return { t: s, pos: [...c.pos], direct: p };
+    }
+    const g = groundContact(c, t);
+    if (g) return { t: s, pos: g, direct: null };
+  }
+  return null;
+}
+
+// The shell that will decide the round, if one is about to.
+function decidingShot() {
+  const alive = game.players.filter((p) => p.alive);
+  if (alive.length < 2) return null;
+  const dying = new Set();
+  let pick = null;
+  for (const pr of game.projectiles) {
+    if (pr.dead || pr.probe || pr.roller) continue;
+    const w = WEAPON_BY_ID[pr.weapon];
+    const blast = w.impact?.find((i) => i.type === 'blast');
+    if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split'))) continue;
+    const hit = forecast(pr, KILLCAM.lead);
+    if (!hit) continue;
+    const o = game.players[pr.owner];
+    const radius = blast.radius * (1 + perkSum(o, 'blastRadius'));
+    const damage = blast.damage * (1 + perkSum(o, 'blastDamage'));
+    for (const p of alive) {
+      const h = hitSphere(p);
+      const d = p === hit.direct ? 0 : Math.max(0, Math.hypot(h.x - hit.pos[0], h.y - hit.pos[1], h.z - hit.pos[2]) - TANK.hitRadius * 0.5);
+      if (blastDamage(d, radius, damage) < p.hp + p.armor) continue;
+      dying.add(p.id);
+      if (!pick || hit.t < pick.t) pick = { id: pr.id, victim: p.id, t: hit.t, from: pr.owner };
+    }
+  }
+  return pick && alive.length - dying.size <= 1 ? pick : null;
+}
+
+function updateKillCam() {
+  const now = performance.now();
+  if (!killCam && game && game.phase === 'flight' && followShell && !overview && !pinned) {
+    const k = decidingShot();
+    if (k) {
+      const pr = game.projectiles.find((q) => q.id === k.id);
+      const v = game.players[k.victim];
+      // Watch from the side of the incoming line, on the side the camera is already on.
+      let dx = v.x - pr.pos[0], dz = v.z - pr.pos[2];
+      const n = Math.hypot(dx, dz) || 1;
+      dx /= n; dz /= n;
+      let side = [-dz, dx];
+      if ((camera.position.x - v.x) * side[0] + (camera.position.z - v.z) * side[1] < 0) side = [dz, -dx];
+      killCam = { id: k.id, victim: k.victim, side, dir: [dx, dz], end: null };
+      const by = game.players[k.from];
+      $('killcam-cap').textContent = by.id === v.id ? `${v.name}…` : `${by.name} → ${v.name}`;
+      document.body.classList.add('killcam');
+    }
+  }
+  if (killCam) {
+    if (killCam.end == null && !game.projectiles.some((q) => q.id === killCam.id)) killCam.end = now + KILLCAM.after * 1000;
+    if (killCam.end != null && now > killCam.end) { killCam = null; document.body.classList.remove('killcam'); }
+  }
+  const goal = killCam && killCam.end == null ? KILLCAM.slow : killCam ? 0.55 : 1;
+  timeScale += (goal - timeScale) * Math.min(1, 0.25);
+}
+
+// Camera for the kill cam: off to the side, low, looking at the target with
+// the shell coming in.
+function killCamView() {
+  const v = game.players[killCam.victim];
+  const pr = game.projectiles.find((q) => q.id === killCam.id);
+  camTarget.set(v.x, v.y + 3, v.z);
+  if (pr) camTarget.lerp(_v.set(pr.pos[0], pr.pos[1], pr.pos[2]), 0.3);
+  const [sx, sz] = killCam.side, [dx, dz] = killCam.dir;
+  // camGoal is an offset from the target.
+  camGoal = new THREE.Vector3(sx * 40 - dx * 16 + (v.x - camTarget.x), 24, sz * 40 - dz * 16 + (v.z - camTarget.z));
+}
+
 // ---------------------------------------------------------------- inset
 
 // While shells fly and the camera is away from your tank, a small view in
@@ -689,7 +805,7 @@ let insetFor = null;            // player id shown in the inset this frame
 const _back = new THREE.Vector3();
 
 function insetPlayer() {
-  if (!game || overview || !followShell || pinned) return null;
+  if (!game || overview || !followShell || pinned || killCam) return null;
   if (game.phase !== 'flight' && game.phase !== 'settle') return null;
   const hs = game.humans;
   if (hs.length !== 1) return null;
@@ -766,6 +882,8 @@ function updateCamera(dt) {
   if (game) {
     if (pinned) {
       // Debug camera: hold still.
+    } else if (killCam) {
+      killCamView();
     } else if (overview) {
       camTarget.set(0, 10, 0);
     } else if (heroId != null && game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
@@ -1150,6 +1268,34 @@ function standingsTable(sorted) {
     <td>${p.wins}</td><td>$${p.money}</td></tr>`).join('');
 }
 
+// Whole-match numbers per tank. Accuracy counts shots that hurt someone else;
+// rangefinder probes are listed apart.
+function statsTable(sorted) {
+  const pct = (st) => (st.shots ? `${Math.round((st.hits / st.shots) * 100)}%` : '–');
+  return `<tr><th></th><th>Tank</th><th>Hits</th><th>Accuracy</th><th>Damage</th><th>Kills</th><th>Longest hit</th><th>Probes</th></tr>` + sorted.map((p) => {
+    const st = p.stats;
+    return `<tr><td><span class="swatch" style="background:${p.color}"></span></td><td>${escapeHtml(p.name)}</td>
+      <td>${st.hits} / ${st.shots}</td><td>${pct(st)}</td><td>${Math.round(st.damage)}</td><td>${st.kills}</td>
+      <td>${st.longest ? `${Math.round(st.longest)} m` : '–'}</td><td>${st.probes || '–'}</td></tr>`;
+  }).join('');
+}
+
+// A few lines worth reading out at the end.
+function awards(players) {
+  const best = (score, ok) => players.filter(ok).reduce((a, b) => (!a || score(b) > score(a) ? b : a), null);
+  const name = (p) => `<b style="color:${p.color}">${escapeHtml(p.name)}</b>`;
+  const out = [];
+  const sharp = best((p) => p.stats.hits / p.stats.shots, (p) => p.stats.shots >= 3 && p.stats.hits > 0);
+  if (sharp) out.push(`Sharpshooter: ${name(sharp)}, ${sharp.stats.hits} of ${sharp.stats.shots} shots hit`);
+  const far = best((p) => p.stats.longest, (p) => p.stats.longest > 0);
+  if (far) out.push(`Longest hit: ${name(far)}, ${Math.round(far.stats.longest)} m`);
+  const dmg = best((p) => p.stats.damage, (p) => p.stats.damage > 0);
+  if (dmg) out.push(`Most damage: ${name(dmg)}, ${Math.round(dmg.stats.damage)}`);
+  const kills = best((p) => p.stats.kills, (p) => p.stats.kills > 0);
+  if (kills) out.push(`Most kills: ${name(kills)}, ${kills.stats.kills}`);
+  return out.map((t) => `<div>${t}</div>`).join('');
+}
+
 function showRoundResult(kind) {
   if (!game) return;
   const w = game.lastRoundResult.winner != null ? game.players[game.lastRoundResult.winner] : null;
@@ -1157,6 +1303,8 @@ function showRoundResult(kind) {
     const sorted = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
     $('mo-title').textContent = `Match winner: ${sorted[0].name}`;
     $('mo-table').innerHTML = standingsTable(sorted);
+    $('mo-stats').innerHTML = statsTable(sorted);
+    $('mo-awards').innerHTML = awards(game.players);
     $('matchover').classList.remove('hidden');
     return;
   }
@@ -1306,10 +1454,13 @@ function tick(dt) {
   elapsed += dt;
   let dayGoal = 0.12;
   if (game) {
+    updateKillCam();
+    const sdt = dt * timeScale;   // game time: slowed for the kill cam
     applyHeldKeys(dt);
-    game.update(dt);
+    applySteering();
+    game.update(sdt);
     handleEvents();
-    game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, dt));
+    game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, sdt));
     tankSmoke(dt);
     for (const pr of game.projectiles) {
       shells.get(pr.id)?.push(pr.pos);
@@ -1339,7 +1490,7 @@ function tick(dt) {
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   birds.update(dt);
   soundScape(dt);
-  effects.update(dt);
+  effects.update(dt * timeScale);
   updateCamera(dt);
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   renderer.render(scene, camera);
@@ -1368,5 +1519,7 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },
+  get killCam() { return killCam; },
+  get timeScale() { return timeScale; },
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };
