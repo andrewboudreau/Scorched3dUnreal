@@ -62,8 +62,15 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
   with the damage when something lands on it (one human only).
 - **Rangefinder.** No damage: five small probes leave together, one as aimed,
   two with the turret 2° either side and two with power 5 lower and higher.
-  Each landing keeps a labelled marker ("as aimed", "turret 269.4°",
-  "power 65.0") until you fire again, so you can read off which way to adjust.
+  Each landing keeps a labelled marker and a tall beam (white as aimed, amber
+  turret, cyan power) until you fire again. A card under your aim card plots
+  the five landings from above, downrange up, around the enemy nearest them
+  (with your weapon's blast circle), says how far off the aimed probe was
+  ("30 m short, 18 m right of Rook") and estimates the turret and power to hit
+  it from how far the probes spread. It is a straight-line estimate: good near
+  the probes, rougher the further off, and it says so if you have moved,
+  changed elevation or the wind has shifted since. Click the card to look at
+  the landings.
   Two come in the starting kit; more are 60 for three in the shop. Shells are
   drawn as small finned missiles; Roller rounds are still balls.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last

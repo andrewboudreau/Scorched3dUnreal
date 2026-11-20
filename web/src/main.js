@@ -6,6 +6,7 @@ import { TANK, muzzleOrigin } from './core/tank.js';
 import { ROLL, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
+import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { TankMesh, makeWreck } from './render/tankMesh.js';
@@ -76,6 +77,7 @@ let handoffOpen = false;        // volley planning: waiting for the next human t
 // the screen; then the camera stands back to frame every shell instead.
 let heroId = null;
 const pips = [];
+const ranges = new Map();       // tank id -> its last rangefinder shot: { probes, elev, at, wind }
 let locators = [];              // per tank: edge arrow pointing at it when off screen
 let peek = null;                // { id, until }: a quick look at another tank while planning
 let followShell = true;
@@ -205,8 +207,9 @@ function handleEvents() {
         wrecks.forEach((w) => scene.remove(w));
         wrecks = [];
         clearTrails();
-        pips.forEach((q) => q.el.remove());
+        pips.forEach(dropPip);
         pips.length = 0;
+        ranges.clear();
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
@@ -250,6 +253,10 @@ function handleEvents() {
       case 'fire': {
         // Its next shot retires a tank's rangefinder marks.
         pips.forEach((q) => { if (q.sticky && q.owner === e.player) { q.sticky = false; q.until = performance.now() + 600; } });
+        if (e.weapon === 'ranger') {
+          const p = game.players[e.player];
+          ranges.set(e.player, { probes: {}, elev: p.elev, at: [p.x, p.z], wind: [...game.wind] });
+        } else ranges.delete(e.player);
         // A volley's shots leave together; their flash and crack are spread a touch.
         const go = () => {
           if (!game || !tanks[e.player]) return;
@@ -283,7 +290,12 @@ function handleEvents() {
         const v = shells.get(e.id);
         const owner = v?.owner;
         if (v?.probe) {
-          if (e.type === 'impact') { addProbePip(owner, e.pos, v.probe); sound.ping(camDist(e.pos)); }
+          if (e.type === 'impact') {
+            addProbePip(owner, e.pos, v.probe);
+            sound.ping(camDist(e.pos));
+            const r = ranges.get(owner);
+            if (r) r.probes[v.probe.key] = { ...v.probe, pos: [...e.pos] };
+          }
         } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
         if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner('Out of the arena', '', 900);
@@ -391,19 +403,37 @@ function addPip(owner, pos, { label, color, sticky = false } = {}) {
   el.style.setProperty('--c', color || p.color);
   el.innerHTML = `<i></i><span>${escapeHtml(label || p.name)}</span>`;
   $('labels').appendChild(el);
-  pips.push({ owner, pos: [...pos], el, born: now, until: 0, sticky });
+  const q = { owner, pos: [...pos], el, born: now, until: 0, sticky };
+  pips.push(q);
+  return q;
 }
+
+function dropPip(q) {
+  q.el.remove();
+  if (q.beam) { scene.remove(q.beam); q.beam.material.dispose(); }
+}
+
+// Rangefinder colours: the aimed probe white, turret pair amber, power pair cyan.
+const PROBE_COLORS = { aim: '#ffffff', turn: '#ffc35a', power: '#6fe3ff' };
+const probeColor = (key) => PROBE_COLORS[key.replace(/[+-]$/, '')];
+const BEAM_GEO = new THREE.CylinderGeometry(0.8, 0.8, 50, 8, 1, true).translate(0, 25, 0);
 
 function addProbePip(owner, pos, pb) {
   const label = pb.key === 'aim' ? 'as aimed'
     : pb.key.startsWith('turn') ? `turret ${pb.yaw.toFixed(1)}°` : `power ${pb.power.toFixed(1)}`;
-  addPip(owner, pos, { label, color: '#9fe8ff', sticky: true });
+  const color = probeColor(pb.key);
+  const q = addPip(owner, pos, { label, color, sticky: true });
+  // A tall thin beam, so the spread reads from across the map.
+  q.beam = new THREE.Mesh(BEAM_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }));
+  q.beam.position.set(pos[0], pos[1], pos[2]);
+  scene.add(q.beam);
 }
 
 // Where a world point sits on screen. One that is off screen (or behind the
 // camera) is pulled onto an edge, in far enough for a name to fit and clear of
 // the HUD panels; `angle` then points from there toward it.
 const _pipV = new THREE.Vector3();
+const HUD_PANELS = ['player-card', 'range-card', 'scoreboard'];
 function screenSpot(x, y, z) {
   const W = window.innerWidth, H = window.innerHeight;
   const v = _pipV.set(x, y, z).project(camera);
@@ -416,8 +446,11 @@ function screenSpot(x, y, z) {
   const sx = Math.min(r, Math.max(l, (nx * 0.5 + 0.5) * W));
   let sy = Math.min(b, Math.max(t, (-ny * 0.5 + 0.5) * H));
   if (off) {
-    if (sx < 250 && sy < 265) sy = 265;            // under the aim card
-    if (sx > W - 235 && sy < 135) sy = 135;        // under the scoreboard
+    // Keep clear of the HUD panels: slide down below any that it lands on.
+    for (const id of HUD_PANELS) {
+      const box = $(id).getBoundingClientRect();
+      if (box.width && sx > box.left - 30 && sx < box.right + 30 && sy > box.top - 30 && sy < box.bottom + 25) sy = Math.min(b, box.bottom + 25);
+    }
   }
   return { sx, sy, off, angle: Math.atan2(-ny, nx), l, r, t, b };
 }
@@ -446,9 +479,15 @@ function updatePips() {
     const q = pips[i];
     if (!q.until && !q.sticky && game.phase === 'aim') q.until = now + 4000;
     const left = q.until ? (q.until - now) / 1000 : Infinity;
-    if (left <= 0) { q.el.remove(); pips.splice(i, 1); continue; }
+    if (left <= 0) { dropPip(q); pips.splice(i, 1); continue; }
     const hide = handoffOpen || (q.sticky && game.phase === 'aim' && game.current && game.current.id !== q.owner);
     q.el.style.display = hide ? 'none' : '';
+    if (q.beam) {
+      // Fade a beam the camera is right beside: up close it is a wall, not a marker.
+      const near = Math.min(1, Math.max(0.12, (Math.hypot(camera.position.x - q.pos[0], camera.position.z - q.pos[2]) - 25) / 90));
+      q.beam.visible = !hide;
+      q.beam.material.opacity = 0.5 * near * Math.min(1, left / 1.2);
+    }
     if (hide) continue;
     q.el.style.opacity = Math.min(1, left / 1.2);
     const s = screenSpot(q.pos[0], q.pos[1] + 1, q.pos[2]);
@@ -489,6 +528,14 @@ function peekAt(p) {
   overview = false;
 }
 
+// A three-second look at a spot on the ground (the rangefinder card's click).
+function peekSpot(pos) {
+  if (!game || game.phase !== 'aim') return;
+  peek = { id: null, x: pos[0], y: pos[1], z: pos[2], until: performance.now() + 3000 };
+  camGoal = null;
+  overview = false;
+}
+
 // F: look at the next opponent, nearest first.
 function peekNext() {
   const me = game.current;
@@ -499,6 +546,138 @@ function peekNext() {
   const at = peek && performance.now() < peek.until ? foes.findIndex((p) => p.id === peek.id) : -1;
   peekAt(foes[(at + 1) % foes.length]);
 }
+
+// ---------------------------------------------------------------- rangefinder card
+
+// A top-down plot of your last rangefinder shot, turned so downrange is up:
+// the five landings, the enemy nearest them with the blast circle of your
+// weapon around it, how far off the aimed probe was, and the turret and
+// power the probes say would land on it.
+
+// Whose card to show: the planner's while planning, your own while shells fly.
+function rangeOwner() {
+  if (!game || handoffOpen) return null;
+  if (game.phase === 'aim') return game.current && !game.current.ai ? game.current : null;
+  if (heroId != null) return game.players[heroId];
+  return game.humans.length === 1 ? game.humans[0] : null;
+}
+
+let rcSpot = null;              // where a click on the card looks
+$('range-card').addEventListener('click', () => rcSpot && peekSpot(rcSpot));
+
+const signed = (v, digits = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
+
+function updateRangeCard() {
+  const me = rangeOwner();
+  const r = me && ranges.get(me.id);
+  const a = r?.probes.aim;
+  $('range-card').classList.toggle('hidden', !a);
+  if (!a) { rcSpot = null; return; }
+  rcSpot = a.pos;
+
+  const ax = rangeAxes(a.yaw);
+  const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
+  const foe = game.players.filter((p) => p.alive && p !== me)
+    .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
+  const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
+  const w = WEAPON_BY_ID[me.weapon];
+  const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
+
+  // ---- plot
+  const cv = $('rc-plot');
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g2 = cv.getContext('2d');
+  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g2.clearRect(0, 0, W, H);
+  // Fit the probes; take in the enemy too unless it is far off, then pin it to the edge.
+  const spread = Math.max(...pts.map((q) => Math.hypot(q.side, q.along)), 0);
+  const base = Math.max(20, spread * 1.35);
+  const tDist = t ? Math.hypot(t.side, t.along) : 0;
+  const ext = Math.min(base * 3, Math.max(base, tDist * 1.2 + blast * 0.5));
+  const k = (Math.min(W, H) / 2 - 12) / ext;
+  const cx = W / 2, cy = H / 2;
+  const X = (side) => cx + side * k, Y = (along) => cy - along * k;
+
+  // Range rings round the aimed landing, a sensible step apart.
+  const step = [5, 10, 25, 50, 100, 200, 500].find((s) => ext / s <= 3.2) || 1000;
+  g2.strokeStyle = 'rgba(255,255,255,0.10)';
+  g2.lineWidth = 1;
+  g2.beginPath(); g2.moveTo(0, cy); g2.lineTo(W, cy); g2.moveTo(cx, 0); g2.lineTo(cx, H); g2.stroke();
+  for (let d = step; d <= ext * 1.5; d += step) { g2.beginPath(); g2.arc(cx, cy, d * k, 0, Math.PI * 2); g2.stroke(); }
+  g2.font = '10px system-ui, sans-serif';
+  g2.fillStyle = 'rgba(255,255,255,0.4)';
+  g2.textAlign = 'left';
+  g2.fillText(`${step} m`, cx + step * k * 0.71 + 2, cy - step * k * 0.71 - 2);
+  g2.fillText('▲ downrange', 2, 11);
+  g2.textAlign = 'center';
+  g2.fillText('you', cx, H - 3);
+
+  // The enemy, its blast circle, and a line from the aimed landing to it.
+  if (t) {
+    const edge = tDist * k > Math.min(W, H) / 2 - 12;
+    const s = edge ? (Math.min(W, H) / 2 - 12) / (tDist * k) : 1;
+    const ex = X(t.side * s), ey = Y(t.along * s);
+    g2.setLineDash([3, 3]);
+    g2.strokeStyle = 'rgba(255,255,255,0.35)';
+    g2.beginPath(); g2.moveTo(cx, cy); g2.lineTo(ex, ey); g2.stroke();
+    g2.setLineDash([]);
+    if (!edge) {
+      g2.fillStyle = 'rgba(255,90,70,0.12)';
+      g2.strokeStyle = 'rgba(255,110,90,0.55)';
+      g2.beginPath(); g2.arc(ex, ey, blast * k, 0, Math.PI * 2); g2.fill(); g2.stroke();
+    }
+    g2.fillStyle = foe.color;
+    g2.strokeStyle = '#000';
+    if (edge) {
+      // A triangle on the rim, pointing out toward it.
+      const ang = Math.atan2(ey - cy, ex - cx);
+      g2.beginPath();
+      g2.moveTo(ex + Math.cos(ang) * 7, ey + Math.sin(ang) * 7);
+      g2.lineTo(ex + Math.cos(ang + 2.4) * 6, ey + Math.sin(ang + 2.4) * 6);
+      g2.lineTo(ex + Math.cos(ang - 2.4) * 6, ey + Math.sin(ang - 2.4) * 6);
+      g2.closePath(); g2.fill(); g2.stroke();
+    } else { g2.fillRect(ex - 5, ey - 4, 10, 8); g2.strokeRect(ex - 5, ey - 4, 10, 8); }
+    g2.font = 'bold 11px system-ui, sans-serif';
+    g2.textAlign = ex > W - 50 ? 'right' : ex < 50 ? 'left' : 'center';
+    g2.fillText(edge ? `${foe.name} ${Math.round(tDist)} m` : foe.name, ex, ey > 24 ? ey - 9 : ey + 18);
+  }
+
+  // The probes, labelled with how each differs from the aim.
+  g2.font = '10px system-ui, sans-serif';
+  for (const q of pts) {
+    const x = X(q.side), y = Y(q.along);
+    g2.fillStyle = probeColor(q.key);
+    g2.beginPath(); g2.arc(x, y, q.key === 'aim' ? 4.5 : 3.5, 0, Math.PI * 2); g2.fill();
+    // Aim above its dot, the turret pair outward to either side, power to the right.
+    if (q.key === 'aim') { g2.textAlign = 'center'; g2.fillText('aim', x, y - 8); }
+    else if (q.key.startsWith('turn')) {
+      g2.textAlign = q.side < 0 ? 'right' : 'left';
+      g2.fillText(`${signed(((q.pb.yaw - a.yaw + 540) % 360) - 180, 0)}°`, x + (q.side < 0 ? -7 : 7), y + 4);
+    } else { g2.textAlign = 'left'; g2.fillText(signed(q.pb.power - a.power, 0), x + 7, y + 4); }
+  }
+
+  // ---- words
+  if (!t) { $('rc-read').textContent = 'No enemy left to range on.'; $('rc-est').textContent = ''; return; }
+  const off = Math.hypot(t.side, t.along);
+  $('rc-read').textContent = off <= blast * 0.8 ? `As aimed: on ${foe.name}`
+    : `As aimed: ${Math.round(Math.abs(t.along))} m ${t.along > 0 ? 'short' : 'long'}, ${Math.round(Math.abs(t.side))} m ${t.side > 0 ? 'left' : 'right'} of ${foe.name}`;
+  const est = solveAim(r.probes, [foe.x, foe.y, foe.z]);
+  const notes = [];
+  if (Math.hypot(me.x - r.at[0], me.z - r.at[1]) > 4) notes.push('you have moved');
+  if (Math.abs(me.elev - r.elev) > 0.05) notes.push(`probed at ${r.elev.toFixed(1)}° elevation`);
+  if (Math.hypot(game.wind[0] - r.wind[0], game.wind[1] - r.wind[1]) > 0.6) notes.push('the wind has shifted');
+  const note = notes.length ? `<small>Rough: ${notes.join(', ')}.</small>` : '';
+  if (!est || Math.abs(est.dYaw) > 25 || Math.abs(est.dPower) > 35) {
+    $('rc-est').innerHTML = `Too far off to estimate: aim again and probe.${note}`;
+  } else if (est.power > TANK.maxPower || est.power < TANK.minPower) {
+    $('rc-est').innerHTML = `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
+  } else {
+    $('rc-est').innerHTML = `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
+  }
+}
+
 
 // ---------------------------------------------------------------- inset
 
@@ -615,7 +794,7 @@ function updateCamera(dt) {
       c.divideScalar(game.projectiles.length);
       camTarget.copy(c);
     } else if (game.phase === 'aim' && game.current) {
-      const look = peek && performance.now() < peek.until ? game.players[peek.id] : null;
+      const look = peek && performance.now() < peek.until ? (peek.id != null ? game.players[peek.id] : peek) : null;
       if (!look) peek = null;
       const p = look || game.current;
       camTarget.set(p.x, p.y + 4, p.z);
@@ -1143,6 +1322,7 @@ function tick(dt) {
     updateLabels();
     updatePips();
     updateLocators();
+    updateRangeCard();
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;

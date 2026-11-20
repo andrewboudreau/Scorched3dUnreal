@@ -189,3 +189,12 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 #inset.hit #inset-dmg { animation: inset-dmg 1.6s ease-out; }
 @keyframes inset-hit { from { border-color: #ff5b4b; box-shadow: 0 0 0 4px rgba(255, 91, 75, .6), 0 6px 24px rgba(0, 0, 0, .45); } }
 @keyframes inset-dmg { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Rangefinder card: a top-down plot of the probes around the target. */
+#range-card { top: 280px; left: 14px; width: 230px; pointer-events: auto; cursor: pointer; }
+.rc-head { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: flex; }
+.rc-head span { margin-left: auto; text-transform: none; letter-spacing: 0; opacity: .7; }
+#rc-plot { display: block; width: 100%; height: 170px; margin: 6px 0 4px; }
+#rc-read { font-size: 12px; color: #dfe6ee; }
+#rc-est { font-size: 12px; font-weight: 700; color: #ffd36a; margin-top: 3px; }
+#rc-est small { display: block; font-weight: 500; color: var(--muted); font-size: 11px; }
