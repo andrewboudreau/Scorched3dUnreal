@@ -13,21 +13,29 @@
 //   close  once everyone has shopped, the host's state again: the next round
 //          starts the same everywhere
 //   cpu    the host hands a player who left to the computer
+//   say    a chat line; shown as it arrives, outside the game's order
 // and from the server itself, join and gone (a screen stopped polling).
 //
 // A message that is about a later point than this screen has reached waits at
 // the head of the queue until the game catches up.
+//
+// A screen that reloads comes back to its seat (`resume`): it reads the whole
+// log, jumps to the host's latest state (the last snap or close) and carries on
+// from there. Its own plans and shopping from before the reload count as made.
 
 const keyOrder = (k) => { const [r, t] = String(k).split('.').map(Number); return r * 10000 + t; };
 
 export class Session {
   // `send(msg)` appends to the room's log. `onStart(config)` builds the game
   // (with `config.local` set) and returns it.
-  constructor({ seat, send, onStart }) {
+  constructor({ seat, send, onStart, onSay = () => {}, resume = false }) {
     this.seat = seat;
     this.isHost = seat === 0;
     this.send = send;
     this.onStart = onStart;
+    this.onSay = onSay;
+    this.resume = resume;       // still reading the log back after a reload
+    this.echo = new Set();      // log entries from this seat before the reload
     this.inbox = [];
     this.seats = [];            // { seat, name, gone } in joining order
     this.game = null;
@@ -38,7 +46,56 @@ export class Session {
   }
 
   // One log entry: { n, seat, msg }.
-  receive(entry) { this.inbox.push(entry); }
+  receive(entry) {
+    if (entry.msg.t === 'say') { if (!this.resume) this.onSay(entry); return; }
+    this.inbox.push(entry);
+  }
+
+  // After a reload: the log has been read back to its end. Jump to the host's
+  // latest state and queue what came after it.
+  caughtUp() {
+    if (!this.resume) return;
+    this.resume = false;
+    const all = this.inbox;
+    this.inbox = [];
+    let last = -1;
+    all.forEach((e, i) => { if (e.msg.t === 'snap' || e.msg.t === 'close') last = i; });
+    const send = this.send;
+    this.send = () => {};       // all of this was said the first time round
+    all.forEach((e, i) => {
+      const t = e.msg.t;
+      if (t === 'join' || t === 'gone' || t === 'start' || t === 'cpu') { this.apply(e); return; }
+      if (i < last) { if (t === 'snap') this.snapped.add(e.msg.key); return; }
+      if (i === last) { this.settle(e.msg); return; }
+      if (e.seat === this.seat) this.echo.add(e.n);
+      this.inbox.push(e);
+    });
+    this.send = send;
+    // A host coming back hands over anyone who went while it was away.
+    if (this.isHost && this.game) {
+      for (const s of this.seats) {
+        if (!s.gone) continue;
+        for (const id of this.playersOf(s.seat)) if (!this.game.players[id].ai) this.send({ t: 'cpu', id });
+      }
+    }
+  }
+
+  // Take on one of the host's states, as the game would have from the live message.
+  settle(msg) {
+    const g = this.game;
+    if (!g) return;
+    if (msg.t === 'snap') {
+      this.snapped.add(msg.key);
+      g.phase = 'wait';
+      g.restore(msg.state);
+      g.startVolleyBeat();
+    } else {
+      g.phase = 'shop';
+      g.draft = {};
+      g.restore(msg.state);
+      g.closeShop();
+    }
+  }
 
   // The host starts the match: every seat still here plays, then the CPUs.
   start(config, cpus = []) {
@@ -57,11 +114,13 @@ export class Session {
     if (!g || g.phase !== 'shop' || g.shopped.includes(id)) return;
     const p = g.players[id];
     g.shopped.push(id);
+    if (this.echoed('shop', (m) => m.round === g.round && m.id === id)) return;   // done before a reload
     this.send({ t: 'shop', round: g.round, id, perk: p.picked || null, buys: [...(p.bought || [])] });
   }
 
   // Call once a frame, after game.update.
   pump() {
+    if (this.resume) return;
     while (this.inbox.length && this.apply(this.inbox[0])) this.inbox.shift();
     const g = this.game;
     if (!g) return;
@@ -72,6 +131,7 @@ export class Session {
         const k = `${g.volleyKey}:${id}`;
         if (!g.isLocal(p) || this.sent.has(k)) continue;
         this.sent.add(k);
+        if (this.echoed('plan', (m) => m.key === g.volleyKey && m.id === id)) continue;   // sent before a reload
         this.send({ t: 'plan', key: g.volleyKey, id, plan: g.volley.plans[id] || null,
           tank: { x: p.x, y: p.y, z: p.z, hull: p.hull, fuel: p.fuel } });
       }
@@ -89,6 +149,9 @@ export class Session {
     }
   }
 
+  // Is a message of ours from before a reload still waiting in the queue?
+  echoed(t, match) { return this.inbox.some((e) => this.echo.has(e.n) && e.msg.t === t && match(e.msg)); }
+
   // The humans this screen is waiting for, by name.
   waitingFor() {
     const g = this.game;
@@ -101,8 +164,9 @@ export class Session {
   playersOf(seat) { return this.seatOf.map((s, id) => (s === seat ? id : -1)).filter((id) => id >= 0); }
 
   // Take one message on. False: not yet, try again next frame.
-  apply({ msg }) {
+  apply({ msg, n }) {
     const g = this.game;
+    const echo = this.echo.has(n);
     switch (msg.t) {
       case 'join':
         if (!this.seats.some((s) => s.seat === msg.seat)) this.seats.push({ seat: msg.seat, name: msg.name, gone: false });
@@ -131,10 +195,16 @@ export class Session {
         return true;
       }
       case 'plan': {
-        if (!g || g.isLocal(g.players[msg.id])) return true;
+        if (!g || (g.isLocal(g.players[msg.id]) && !echo)) return true;
         if (keyOrder(msg.key) < keyOrder(g.volleyKey)) return true;   // long past
         if (!(g.volley && g.volleyKey === msg.key && (g.phase === 'aim' || g.phase === 'wait'))) return false;
+        if (g.volley.done.includes(msg.id)) return true;
         g.remotePlan(msg.id, msg.plan, msg.tank);
+        if (echo) {
+          // Planned before the reload: that stands, and is not sent again.
+          this.sent.add(`${msg.key}:${msg.id}`);
+          if (g.phase === 'aim' && g.current?.id === msg.id) g.nextPlanner();
+        }
         return true;
       }
       case 'snap': {
@@ -146,9 +216,10 @@ export class Session {
         return true;
       }
       case 'shop': {
-        if (!g || g.isLocal(g.players[msg.id])) return true;
+        if (!g || (g.isLocal(g.players[msg.id]) && !echo)) return true;
         if (msg.round < g.round) return true;
         if (!(g.phase === 'shop' && g.round === msg.round)) return false;
+        if (g.shopped.includes(msg.id)) return true;
         if (msg.perk) g.pickPerk(msg.id, msg.perk);
         for (const id of msg.buys) g.buy(msg.id, id);
         if (!g.shopped.includes(msg.id)) g.shopped.push(msg.id);

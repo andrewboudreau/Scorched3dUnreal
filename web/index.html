@@ -51,7 +51,7 @@
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
       &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> <span id="help-fire">fire</span><br />
-      <b>A/D</b> in flight: steer a Guided Missile &nbsp; <b>F</b> find enemy &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; drag to orbit, wheel to zoom
+      <b>A/D</b> in flight: steer a Guided Missile &nbsp; <b>F</b> find enemy &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; <b>Enter</b> chat (online) &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>
     <div id="labels"></div>
@@ -165,6 +165,9 @@
 
   <div id="killcam-cap"></div>
   <div id="net-wait" class="panel small hidden"></div>
+  <div id="net-clock" class="panel small hidden"></div>
+  <div id="chat-log"></div>
+  <input id="chat-input" class="hidden" maxlength="120" placeholder="Say something · Enter to send, Esc to close" />
   <div id="loading" class="screen"><div class="card">Loading…</div></div>
 
   <script type="module" src="src/main.js"></script>

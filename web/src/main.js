@@ -96,6 +96,7 @@ const _sGoal = new THREE.Spherical();
 const _off = new THREE.Vector3();
 const camTarget = new THREE.Vector3(0, 20, 0);
 let shopQueue = [];
+let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
 let dayLock = null;             // debug: hold the sun still at this time of day
 let bannerHold = 0;             // a round banner keeps the turn banner waiting until then
@@ -970,6 +971,7 @@ renderer.domElement.addEventListener('wheel', () => { camGoal = null; userCam = 
 const held = new Set();
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (session && e.key === 'Enter' && !handoffOpen) { e.preventDefault(); openChat(); return; }
   const k = e.key.toLowerCase();
   if (k === 'tab' || k.startsWith('arrow')) e.preventDefault();
   held.add(k);
@@ -1348,7 +1350,7 @@ function showRoundResult(kind) {
 
 $('ro-continue').onclick = () => {
   $('roundover').classList.add('hidden');
-  shopQueue = game.players.filter((p) => !p.ai).map((p) => p.id);
+  shopQueue = game.localHumans.map((p) => p.id);
   game.openShop();
   if (game.phase === 'shop') nextShopper();
 };
@@ -1362,6 +1364,7 @@ const hotseatStep = (p, doing) => {
 // Each human in turn: pick a perk (if one is on offer), then shop.
 function nextShopper() {
   const pid = shopQueue.shift();
+  shopPid = pid ?? null;
   $('draft').classList.add('hidden');
   $('shop').classList.add('hidden');
   if (pid == null) {
@@ -1487,6 +1490,8 @@ const lobbySeats = () => (session ? session.seats.filter((s) => !s.gone) : []);
 const lobbyCpus = () => setupRows.filter((r) => r.type !== 'human');
 const netName = () => ($('net-name').value.trim() || setupRows.find((r) => r.type === 'human')?.name || 'Player').slice(0, 14);
 
+const ROOM_KEY = 'craterfall.room';   // this tab's seat, so a reload can take it back
+
 async function goOnline(how) {
   sound.ensure();
   if (link) return;
@@ -1503,6 +1508,12 @@ async function goOnline(how) {
     $('net-note').textContent = err.message === 'Failed to fetch' ? 'Could not reach the server.' : err.message;
     return;
   }
+  enterRoom(false);
+}
+
+// `resume`: this tab had the seat before a reload; read the room back and carry on.
+function enterRoom(resume) {
+  sessionStorage.setItem(ROOM_KEY, JSON.stringify({ code: link.code, seat: link.seat, token: link.token }));
   session = new Session({
     seat: link.seat,
     send: (msg) => link.send(msg),
@@ -1511,13 +1522,107 @@ async function goOnline(how) {
       startMatch(config);
       return game;
     },
+    onSay: showSay,
+    resume,
   });
   link.onEntry = (e) => session.receive(e);
+  link.onCaughtUp = () => session.caughtUp();
   link.onLost = () => netEnded('The connection to the room was lost (it may have expired, or the server restarted).');
   history.replaceState(null, '', `?room=${link.code}`);
   lobbySig = '';
   renderLobby();
 }
+
+// Online, the draft and armory screens follow the room: close them when the
+// round has moved on, or when this tank's shopping is already in (from before a reload).
+function syncNetScreens() {
+  const g = session.game;
+  if (!g || ($('draft').classList.contains('hidden') && $('shop').classList.contains('hidden'))) return;
+  if (g.phase !== 'shop') {
+    $('draft').classList.add('hidden');
+    $('shop').classList.add('hidden');
+    shopQueue = [];
+    shopPid = null;
+  } else if (shopPid != null && g.shopped.includes(shopPid)) nextShopper();
+}
+
+// Online, nobody holds the room up for long: a minute to plan a shot (then it
+// goes as aimed), a minute and a half in the armory.
+const NET_CLOCK = { aim: 60, shop: 90, show: 20 };
+let clockKey = null;
+let clockStart = 0;
+
+function updateNetClock() {
+  const g = session.game;
+  let key = null;
+  let limit = 0;
+  if (g && g.phase === 'aim' && g.current && !g.current.ai && g.isLocal(g.current)) { key = `aim ${g.volleyKey} ${g.current.id}`; limit = NET_CLOCK.aim; }
+  else if (g && g.phase === 'shop' && shopPid != null) { key = `shop ${g.round} ${shopPid}`; limit = NET_CLOCK.shop; }
+  const now = performance.now() / 1000;
+  if (key !== clockKey && !(clockKey && clockKey.startsWith(`${key} `))) { clockKey = key; clockStart = now; }
+  const left = key && clockKey === key ? limit - (now - clockStart) : Infinity;
+  const el = $('net-clock');
+  el.classList.toggle('hidden', !(left <= NET_CLOCK.show));
+  if (left <= NET_CLOCK.show) {
+    const text = `${Math.max(0, Math.ceil(left))}s to ${key.startsWith('aim') ? 'lock in your shot' : 'finish shopping'}`;
+    if (el.textContent !== text) el.textContent = text;
+    el.classList.toggle('urgent', left <= 5);
+  }
+  if (!(left <= 0)) return;
+  clockKey = `${key} out`;          // once
+  if (key.startsWith('aim')) { game.fire(); return; }
+  if (!$('draft').classList.contains('hidden')) $('draft-items').querySelector('button')?.click();
+  if (!$('shop').classList.contains('hidden')) $('shop-done').click();
+}
+
+// Back after being away too long: a CPU has this screen's tank.
+function noteTakenOver() {
+  const g = session.game;
+  if (!g || session.notedTakeover || g.localHumans.length || !session.playersOf(session.seat).length) return;
+  session.notedTakeover = true;
+  banner('A CPU has your tank', 'You were away too long. You can watch the rest of the match.', 4500);
+}
+
+// ---- chat: Enter to talk, in the lobby or the match
+function showSay(e) {
+  const g = session?.game;
+  const seat = session?.seats.find((q) => q.seat === e.seat);
+  const pid = session?.playersOf(e.seat)[0];
+  const color = g && pid != null ? g.players[pid].color : PLAYER_COLORS[e.seat % PLAYER_COLORS.length];
+  const line = document.createElement('div');
+  line.className = 'chat-line';
+  line.innerHTML = `<b style="color:${color}">${escapeHtml(seat ? seat.name : '?')}</b> ${escapeHtml(String(e.msg.text ?? '').slice(0, 120))}`;
+  $('chat-log').appendChild(line);
+  while ($('chat-log').children.length > 6) $('chat-log').firstChild.remove();
+  setTimeout(() => line.classList.add('fade'), 14000);
+  setTimeout(() => line.remove(), 15000);
+  sound.click();
+}
+
+function openChat() {
+  const el = $('chat-input');
+  el.classList.remove('hidden');
+  el.focus();
+  held.clear();
+}
+
+function closeChat() {
+  const el = $('chat-input');
+  if (el.classList.contains('hidden')) return;
+  el.value = '';
+  el.classList.add('hidden');
+  el.blur();
+}
+
+$('chat-input').addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    const text = e.target.value.trim().slice(0, 120);
+    if (text && link) link.send({ t: 'say', text });
+    closeChat();
+  } else if (e.key === 'Escape') closeChat();
+});
+$('chat-input').addEventListener('blur', closeChat);
 
 // The setup card while in a room: its people, then the host's CPU tanks.
 function renderLobby() {
@@ -1559,8 +1664,8 @@ function renderLobby() {
   $('start').textContent = `Start online match · ${n} tank${n === 1 ? '' : 's'}`;
   $('start').disabled = false;
   $('net-note').textContent = session.isHost
-    ? (seats.length < 2 ? 'Send your friends the invite link, or the code. Everyone in the room plays; CPUs are optional.' : 'Start when everyone is in.')
-    : 'Waiting for the host to start the match.';
+    ? (seats.length < 2 ? 'Send your friends the invite link, or the code. Everyone in the room plays; CPUs are optional.' : 'Start when everyone is in. Press Enter to chat.')
+    : 'Waiting for the host to start the match. Press Enter to chat.';
 }
 
 // Who the game is waiting on, while it waits.
@@ -1577,6 +1682,9 @@ function updateNetWait() {
 }
 
 function leaveRoom() {
+  sessionStorage.removeItem(ROOM_KEY);
+  closeChat();
+  $('net-clock').classList.add('hidden');
   if (link) link.close();
   link = null;
   session = null;
@@ -1617,7 +1725,13 @@ $('net-copy').onclick = async () => {
 $('net-name').value = localStorage.getItem('craterfall.name') || '';
 {
   const code = new URLSearchParams(location.search).get('room');
-  if (code) {
+  const saved = JSON.parse(sessionStorage.getItem(ROOM_KEY) || 'null');
+  if (code && saved && saved.code === code.toUpperCase()) {
+    // This tab was in the room before a reload: take the seat back.
+    link = new RoomLink();
+    link.resume(saved);
+    enterRoom(true);
+  } else if (code) {
     $('net-code').value = code.toUpperCase().slice(0, 4);
     $('net-note').textContent = 'You have an invite: type your name and press Join.';
   }
@@ -1635,15 +1749,18 @@ function frame() {
 }
 
 // One frame of everything, `dt` seconds long.
-function tick(dt) {
+function tick(dt, draw = true) {
   elapsed += dt;
   let dayGoal = 0.12;
   if (session) {
     session.pump();
     if (!session.game) renderLobby();
     updateNetWait();
-    if (session.over) netEnded(session.over);
+    syncNetScreens();
+    updateNetClock();
+    noteTakenOver();
   }
+  if (session?.over) netEnded(session.over);
   if (game) {
     updateKillCam();
     const sdt = dt * timeScale;   // game time: slowed for the kill cam
@@ -1684,9 +1801,21 @@ function tick(dt) {
   effects.update(dt * timeScale);
   updateCamera(dt);
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
+  if (!draw) return;
   renderer.render(scene, camera);
   renderInset();
 }
+
+// A hidden tab gets no animation frames. Online that would hold up the whole
+// room, so the match keeps running (without drawing) on a timer instead.
+let bgLast = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  const span = Math.min(60, (now - bgLast) / 1000);
+  bgLast = now;
+  if (!session || !document.hidden) return;
+  for (let t = 0; t < span; t += 0.1) tick(0.1, false);
+}, 1000);
 
 // A backdrop field for the menu; dropped once a real match starts.
 const menuField = new Game({ players: [{ name: 'a' }, { name: 'b' }], seed: 4242 });
@@ -1712,6 +1841,7 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   release() { pinned = false; },
   get killCam() { return killCam; },
   get session() { return session; },
+  netClock: NET_CLOCK,
   get timeScale() { return timeScale; },
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };

@@ -14,18 +14,21 @@ function makeRoom() {
 const WEAPON_CYCLE = ['shell', 'ranger', 'mound', 'roller', 'breacher', 'shell'];
 
 // One screen: its own frame rate, and a bot at the controls of its human.
-function makeClient(room, seat, name) {
-  const dice = makeRng(1000 + seat);
+// `resume`: the same seat coming back after a reload, reading the log from the top.
+function makeClient(room, seat, name, { resume = false } = {}) {
+  const dice = makeRng(1000 + seat + (resume ? 50 : 0));
   const c = { seat, name, cursor: 0, alive: true, dice, shots: 0 };
   c.session = new Session({
     seat,
     send: (msg) => room.append(seat, msg),
     onStart: (cfg) => { const g = new Game(cfg); g.start(); return g; },
+    resume,
   });
-  room.append(-1, { t: 'join', seat, name });
+  if (!resume) room.append(-1, { t: 'join', seat, name });
   c.frame = () => {
     if (!c.alive) return;
     while (c.cursor < room.log.length) c.session.receive(room.log[c.cursor++]);
+    c.session.caughtUp();
     const s = c.session;
     const g = s.game;
     if (g) {
@@ -153,4 +156,50 @@ test('netplay: the host leaving ends the session for everyone else', () => {
   room.append(-1, { t: 'gone', seat: 0 });
   play(clients, 2, () => false);
   assert.match(clients[1].session.over, /host/);
+});
+
+// Reload one screen the nth time its game is in `phase` (or at a frame), and play the match out.
+function reloadAt(seat, frame, phase = null, nth = 1) {
+  const room = makeRoom();
+  const names = ['Ana', 'Bo', 'Cy'];
+  const clients = names.map((n, i) => makeClient(room, i, n));
+  play(clients, 3, () => false);
+  clients[0].session.start(CONFIG, [{ name: 'Rook', ai: 'normal' }]);
+  let hits = 0;
+  let last = null;
+  const at = play(clients, phase ? 40000 : frame, () => {
+    const ph = clients[seat].session.game.phase;
+    const hit = phase && ph === phase && last !== phase;
+    last = ph;
+    return hit && ++hits === nth;
+  });
+  if (phase) assert.ok(at >= 0, `seat ${seat} never reached ${phase} #${nth}`);
+  const before = clients[seat].session.game;
+  clients[seat] = makeClient(room, seat, names[seat], { resume: true });
+  const done = play(clients, 40000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
+  const games = clients.map((c) => c.session.game);
+  const where = `reload of seat ${seat} at ${phase ? `${phase} #${nth}` : `frame ${frame}`} (${before.phase} r${before.round}.${before.turnsThisRound})`;
+  assert.ok(done > 0, `${where}: match finished (${games.map((g) => `${g?.phase} r${g?.round}.${g?.turnsThisRound}`).join(', ')})`);
+  assert.equal(summary(games[1]), summary(games[0]), where);
+  assert.equal(summary(games[2]), summary(games[0]), where);
+  assert.ok(games[seat].players.filter((p) => !p.ai).length === 3, `${where}: nobody was handed to the CPU`);
+  // Nothing from before the reload went out twice.
+  const plans = room.log.filter((e) => e.msg.t === 'plan').map((e) => `${e.msg.key}:${e.msg.id}`);
+  assert.equal(new Set(plans).size, plans.length, `${where}: a plan was sent twice`);
+  const shops = room.log.filter((e) => e.msg.t === 'shop').map((e) => `${e.msg.round}:${e.msg.id}`);
+  assert.equal(new Set(shops).size, shops.length, `${where}: shopping was sent twice`);
+  return before.phase;
+}
+
+test('netplay: a screen that reloads mid-match takes its seat back', () => {
+  for (const frame of [5, 40, 90, 160, 260, 400, 550, 700]) reloadAt(1, frame);
+  // While planning, while waiting on the others, mid-volley, and in the armory.
+  for (const [phase, nth] of [['aim', 2], ['wait', 1], ['wait', 3], ['volley', 2], ['flight', 4], ['roundOver', 1], ['shop', 1]]) {
+    assert.equal(reloadAt(1, 0, phase, nth), phase);
+  }
+});
+
+test('netplay: the host can reload too', () => {
+  for (const frame of [30, 220, 500]) reloadAt(0, frame);
+  for (const [phase, nth] of [['wait', 2], ['flight', 3], ['roundOver', 1]]) reloadAt(0, 0, phase, nth);
 });

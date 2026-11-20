@@ -98,8 +98,13 @@ each other.
   together once everyone has locked in. Between rounds each player drafts
   and shops on their own screen, and the next round starts when all are
   done. The Guided Missile is left out online, since its steering is live.
-  If a player stops answering for about 45 seconds, a CPU takes over their
-  tank. If the host goes, the match ends.
+  Online there is a clock: a minute to plan each shot (it then goes as
+  aimed) and a minute and a half in the armory; the countdown shows for the
+  last 20 seconds. A tab in the background keeps playing, so switching
+  away does not hold the room up. Reloading the page puts you back in your
+  seat. If a player stops answering for about 45 seconds, a CPU takes over
+  their tank. If the host goes, the match ends. Press Enter to chat, in the
+  lobby or in the match.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last
   shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
   It is cleared at the start of a round and when the tank ends up more than
@@ -187,8 +192,9 @@ each other.
   `Game` and reads the same ordered message log (plans, shop choices). At
   each volley, and again before each round, the host sends its full state
   (`Game.snapshot`) and the others take it, so small floating-point drift
-  never adds up. `src/net.js` is the browser's link to the room (long
-  polling, sends kept in order).
+  never adds up. A reloaded tab reads the log back, jumps to the host's
+  latest state and counts its own earlier plans as made. `src/net.js` is
+  the browser's link to the room (long polling, sends kept in order).
 - `src/main.js` holds the scene, camera rig, input, HUD and menus. It turns `Game`
   events into visuals and sound.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
@@ -196,8 +202,8 @@ each other.
   difficulty walks its shots in, scenery placement and bombardment, perks, the
   draft, modifiers, driving and fuel (`twists.test.js`), road routing (`paths.test.js`),
   aim history and both firing modes (`volley.test.js`), whole CPU-only matches, and
-  online matches between several simulated screens with deliberate drift
-  (`netplay.test.js`).
+  online matches between several simulated screens with deliberate drift,
+  including screens reloading at every stage of a match (`netplay.test.js`).
 
 The ballistics, crater falloff and AI solver follow the Unreal project's
 `CraterMath`, `TankAiming` and the legacy aim-guesser loop. The AI aims with

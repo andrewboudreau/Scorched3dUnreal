@@ -12,8 +12,10 @@ export class RoomLink {
     this.token = null;
     this.after = 0;
     this.closed = false;
+    this.caught = false;        // has read the log to its end once
     this.chain = Promise.resolve();
     this.onEntry = () => {};
+    this.onCaughtUp = () => {};
     this.onLost = () => {};     // the room is gone (server restarted, or it expired)
   }
 
@@ -26,6 +28,9 @@ export class RoomLink {
 
   async create(name) { return this.attach(await this.post('', { name })); }
   async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name })); }
+
+  // Back into a seat this tab had before it reloaded: { code, seat, token }.
+  resume(saved) { return this.attach(saved); }
 
   attach(r) {
     Object.assign(this, { code: r.code, seat: r.seat, token: r.token });
@@ -60,6 +65,7 @@ export class RoomLink {
           this.after = e.n;
           this.onEntry(e);
         }
+        if (!this.caught && entries.length < 500) { this.caught = true; this.onCaughtUp(); }
       } catch {
         await sleep(Math.min(8000, 500 * 2 ** fails++));
       }

@@ -249,7 +249,7 @@ export class Game {
     const v = this.volley;
     while (v.queue.length) {
       const p = this.players[v.queue.shift()];
-      if (!p.alive) continue;
+      if (!p.alive || v.done.includes(p.id)) continue;   // online, a plan can be in before its turn comes
       if (!p.ai) {
         if (this.isLocal(p)) { this.beginTurn(p.id); return; }
         continue;   // plans on another screen
