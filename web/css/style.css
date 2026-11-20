@@ -47,12 +47,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 .weapon span { font-weight: 700; font-size: 15px; }
 .ammo { color: var(--muted); font-weight: 500 !important; margin-left: 6px; font-size: 13px !important; }
 
-#wind { top: 14px; left: 50%; transform: translateX(-50%); text-align: center; width: 96px; }
-.wind-title { font-size: 10px; color: var(--muted); letter-spacing: .15em; }
-#wind-dial { width: 48px; height: 48px; margin: 4px auto; border-radius: 50%; border: 1px solid var(--edge);
-  display: grid; place-items: center; }
-#wind-arrow { font-size: 24px; color: #9fd3ff; transition: transform .3s; }
-#wind-speed { font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Wind, in the aim card: an arrow from behind your turret (up = downrange) and what it does to the shot. */
+.pc-wind { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.pc-wind label { font-size: 10px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; width: 34px; }
+#wind-dial { width: 28px; height: 28px; flex: none; border-radius: 50%; border: 1px solid var(--edge); display: grid; place-items: center; }
+#wind-arrow { font-size: 15px; line-height: 1; color: #9fd3ff; transition: transform .3s; }
+#wind-speed { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 22px; }
+#wind-aim { font-size: 11px; color: #9aa6b2; line-height: 1.25; }
 
 #scoreboard { top: 14px; right: 14px; width: 210px; }
 .sb-row { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 7px; margin: 4px 0; font-size: 13px; }
@@ -214,7 +215,7 @@ body.killcam::before, body.killcam::after { height: 10vh; }
 #killcam-cap { position: fixed; left: 0; right: 0; bottom: 3vh; z-index: 6; text-align: center; color: #fff; font-size: 18px;
   font-weight: 700; letter-spacing: .04em; opacity: 0; transition: opacity .3s; pointer-events: none; text-shadow: 0 2px 6px #000; }
 body.killcam #killcam-cap { opacity: 1; }
-body.killcam :is(#weapon-bar, #help, #player-card, #range-card, #steer-hint, #wind, #scoreboard, .locator) { opacity: 0; transition: opacity .3s; }
+body.killcam :is(#weapon-bar, #help, #player-card, #range-card, #steer-hint, #scoreboard, .locator) { opacity: 0; transition: opacity .3s; }
 
 /* Match results: awards and the full numbers. */
 #mo-awards { margin: 12px 0 8px; font-size: 14px; line-height: 1.6; }

@@ -1215,14 +1215,25 @@ function updateHud() {
     $('ro-ammo').textContent = ammoText(p.inventory[w.id]);
     updateWeaponBar(p);
   }
-  // Wind, drawn relative to where the camera is looking.
+  // Wind, drawn from behind the turret of the tank on the card (up is the way
+  // it aims, so the arrow holds still while the camera orbits), and split into
+  // what it does to that shot: sideways, and longer or shorter.
   const [wx, wz] = game.wind;
   const mag = Math.hypot(wx, wz);
-  const fwd = new THREE.Vector3().subVectors(controls.target, camera.position);
-  const rel = Math.atan2(wz, wx) - Math.atan2(fwd.z, fwd.x);
-  $('wind-arrow').style.transform = `rotate(${rel / DEG - 90}deg)`;
+  const wp = game.current || game.localHumans?.[0] || game.players[0];
+  const yaw = (wp ? wp.yaw : 0) * DEG;
+  const along = (wx * Math.cos(yaw) + wz * Math.sin(yaw)) * 10;
+  const side = (-wx * Math.sin(yaw) + wz * Math.cos(yaw)) * 10;
+  const rel = Math.atan2(side, along);
+  const arrow = `rotate(${Math.round((rel / DEG - 90) * 2) / 2}deg)`;
+  if ($('wind-arrow').style.transform !== arrow) $('wind-arrow').style.transform = arrow;
   $('wind-arrow').style.opacity = mag < 0.05 ? 0.2 : 1;
   $('wind-speed').textContent = mag < 0.05 ? 'calm' : (mag * 10).toFixed(0);
+  const parts = [];
+  if (Math.abs(side) >= 0.5) parts.push(`${Math.abs(side).toFixed(0)} ${side > 0 ? 'right' : 'left'}`);
+  if (Math.abs(along) >= 0.5) parts.push(`${Math.abs(along).toFixed(0)} ${along > 0 ? 'longer' : 'shorter'}`);
+  const aimText = mag < 0.05 ? '' : parts.join(' · ');
+  if ($('wind-aim').textContent !== aimText) $('wind-aim').textContent = aimText;
   for (const q of game.players) {
     const row = $(`sb-${q.id}`);
     if (!row) continue;

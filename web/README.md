@@ -42,6 +42,11 @@ each other.
 
 ## How it plays
 
+- **Wind** sits in the aim card, under Power. Its arrow is drawn from behind
+  your turret (up is the way you aim), so it holds still while you orbit
+  the camera, and the line beside it splits it for this shot: how far it
+  pushes the shell right or left, and whether it carries it longer or
+  shorter.
 - **Firing: together or in turns.** The setup screen has a Firing option.
   - *Together (volley)*, the default: nobody shoots alone. Each living human
     plans in turn (drive, aim, pick a weapon, Space to lock it in), then every

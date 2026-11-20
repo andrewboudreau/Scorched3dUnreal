@@ -26,6 +26,12 @@
         <div><label>Power</label><span id="ro-power">0</span><small id="last-power" class="last"></small></div>
       </div>
       <div class="bar power"><div id="pc-power" class="fill pw"></div></div>
+      <div class="pc-wind" title="Wind, drawn from behind your turret: up is the way you are aiming">
+        <label>Wind</label>
+        <span id="wind-dial"><span id="wind-arrow">&#x27A4;</span></span>
+        <span id="wind-speed">0</span>
+        <small id="wind-aim"></small>
+      </div>
       <div class="weapon"><label>Weapon</label><span id="ro-weapon">Shell</span><span id="ro-ammo" class="ammo"></span></div>
       <div id="pc-perks" class="perks"></div>
     </div>
@@ -34,12 +40,6 @@
       <canvas id="rc-plot"></canvas>
       <div id="rc-read"></div>
       <div id="rc-est"></div>
-    </div>
-
-    <div id="wind" class="panel">
-      <div class="wind-title">WIND</div>
-      <div id="wind-dial"><div id="wind-arrow">&#x27A4;</div></div>
-      <div id="wind-speed">0</div>
     </div>
 
     <div id="scoreboard" class="panel"></div>
