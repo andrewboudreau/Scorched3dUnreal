@@ -51,13 +51,10 @@ a module use a hard reload (Ctrl+Shift+R) or keep DevTools open with
     every shell in view, and launch sounds are staggered and capped so a
     six-tank volley does not turn into a wall of noise.
   - *Take turns*: the classic game, one tank aims and fires at a time.
-- **Onion skin.** While you aim you see your own last three shots: their
-  trails, fading with age, a ring where each came down, and a see-through
-  barrel at the last shot's aim. Under Turret, Elevation and Power the card
-  shows the last value and how far you are from it ("last 52.1°" with "+2.3" beneath).
-  Only the tank that is aiming sees its own; they are cleared at the start of
-  a round and when the tank ends up more than 4 m from where it fired (the
-  old aim would no longer mean anything).
+- **Last shot.** Under Turret, Elevation and Power the card shows your last
+  shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
+  It is cleared at the start of a round and when the tank ends up more than
+  4 m from where it fired (the old aim would no longer mean anything).
 - **Roads and paths.** Gravel roads join the hamlets, a track runs from each
   hamlet down to the nearest water or the bridge, and a short path leads from
   each door to the middle of its hamlet. They are routed over the heightfield

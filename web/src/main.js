@@ -68,12 +68,7 @@ let smoke = [];                 // per tank: seconds until its next puff
 let labels = [];
 let wrecks = [];
 const shells = new Map();       // projectile id -> ShellVisual
-// Onion skin. Player id -> [{ shot, line, ring }]: the trails of that tank's
-// last few shots and a ring where each came down. The core decides which shots
-// still count (Game.checkAimHistory); these only follow `player.shots`.
-const ghosts = new Map();
-const GHOST_FADE = [0.6, 0.3, 0.15];   // newest shot first
-const ringShape = new THREE.RingGeometry(1.7, 2.3, 28).rotateX(-Math.PI / 2);
+const fadingTrails = [];        // finished shells' trails, fading out
 let handoffOpen = false;        // volley planning: waiting for the next human to sit down
 // A volley with one human in it: the camera rides that human's shell and every
 // other tank's landing gets a pip (see addPip). Null when several humans share
@@ -110,45 +105,24 @@ tracer.frustumCulled = false;
 tracer.visible = false;
 scene.add(tracer);
 
-function dropGhost(g) {
-  scene.remove(g.line);
-  g.line.geometry.dispose();
-  g.line.material.dispose();
-  if (g.ring) { scene.remove(g.ring); g.ring.material.dispose(); }
+// A shell's trail lingers a moment after it lands, then fades away.
+function fadeTrails(dt) {
+  for (let i = fadingTrails.length - 1; i >= 0; i--) {
+    const line = fadingTrails[i];
+    line.material.opacity -= dt * 0.25;
+    if (line.material.opacity <= 0) { dropTrail(line); fadingTrails.splice(i, 1); }
+  }
 }
 
-function clearGhosts() {
-  ghosts.forEach((arr) => arr.forEach(dropGhost));
-  ghosts.clear();
+function dropTrail(line) {
+  scene.remove(line);
+  line.geometry.dispose();
+  line.material.dispose();
 }
 
-// Show the planning tank's own earlier shots, faded by age, and nobody else's.
-function updateGhosts() {
-  const me = game.phase === 'aim' && game.current && !game.current.ai && !handoffOpen ? game.current : null;
-  ghosts.forEach((arr, pid) => {
-    const shots = game.players[pid].shots;
-    const newest = shots.length ? shots[shots.length - 1].n : 0;
-    for (let i = arr.length - 1; i >= 0; i--) {
-      const g = arr[i];
-      if (!shots.some((s) => s.n === g.shot)) { dropGhost(g); arr.splice(i, 1); continue; }
-      const on = !!me && me.id === pid;
-      g.line.visible = on;
-      if (g.ring) g.ring.visible = on;
-      if (!on) continue;
-      const fade = GHOST_FADE[Math.min(GHOST_FADE.length - 1, newest - g.shot)];
-      g.line.material.opacity = fade;
-      if (g.ring) {
-        g.ring.material.opacity = fade;
-        g.ring.position.y = game.terrain.heightAt(g.ring.position.x, g.ring.position.z) + 0.35;
-        g.ring.scale.setScalar(Math.min(6, Math.max(1, camDist(g.ring.position.toArray()) / 70)));   // readable from across the field
-      }
-    }
-  });
-  game.players.forEach((p, i) => {
-    const last = p === me ? p.shots[p.shots.length - 1] : null;
-    const moved = last && (Math.abs(((p.yaw - last.yaw + 540) % 360) - 180) > 0.3 || Math.abs(p.elev - last.elev) > 0.3);
-    tanks[i].setGhost(moved ? last : null);
-  });
+function clearTrails() {
+  fadingTrails.forEach(dropTrail);
+  fadingTrails.length = 0;
 }
 
 function disposeMatch() {
@@ -158,7 +132,7 @@ function disposeMatch() {
   wrecks.forEach((w) => scene.remove(w));
   shells.forEach((s) => { scene.remove(s.mesh, s.line); });
   shells.clear();
-  clearGhosts();
+  clearTrails();
   closeHandoff();
   effects.clear();
   tanks = []; wrecks = []; labels = [];
@@ -216,7 +190,7 @@ function handleEvents() {
       case 'roundStart':
         wrecks.forEach((w) => scene.remove(w));
         wrecks = [];
-        clearGhosts();
+        clearTrails();
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
@@ -352,21 +326,8 @@ function retireShell(id, at) {
   const v = shells.get(id);
   if (!v) return;
   if (at) v.push(at);
-  const line = v.finish();
+  fadingTrails.push(v.finish());
   shells.delete(id);
-  if (v.owner == null) { scene.remove(line); return; }
-  // Where it came down (not where a cluster shell split in the air).
-  let ring = null;
-  if (at) {
-    ring = new THREE.Mesh(ringShape, new THREE.MeshBasicMaterial({ color: game.players[v.owner].color, transparent: true, depthTest: false, depthWrite: false }));
-    ring.position.set(at[0], at[1], at[2]);
-    ring.renderOrder = 2;
-    ring.visible = false;
-    scene.add(ring);
-  }
-  line.visible = false;
-  if (!ghosts.has(v.owner)) ghosts.set(v.owner, []);
-  ghosts.get(v.owner).push({ shot: v.shot, line, ring });
 }
 
 // ---------------------------------------------------------------- volley hand-off
@@ -1017,7 +978,7 @@ function tick(dt) {
       shells.get(pr.id)?.push(pr.pos);
       if (!pr.roller) birds.scare(pr.pos, 28);
     }
-    updateGhosts();
+    fadeTrails(dt);
     updateTracer();
     sceneryMesh.sync(elapsed);
     updateHud();

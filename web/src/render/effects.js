@@ -188,7 +188,7 @@ export class ShellVisual {
     this.line.geometry.attributes.position.needsUpdate = true;
   }
 
-  // Detach the trail so it can linger as the "last shot" ghost.
+  // Detach the trail so it can linger and fade after the shell is gone.
   finish() {
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
