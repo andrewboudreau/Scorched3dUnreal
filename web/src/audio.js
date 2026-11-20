@@ -4,7 +4,9 @@
 // so the volume slider and M reach all of it.
 
 const VOLUME_KEY = 'craterfall.volume';
-const SOUND_SPEED = 340;   // m/s, for the delay on a distant blast
+// Real sound speed (340 m/s) put far blasts a second behind their flash, which
+// read as lag. Distance still muffles and quiets a sound; it only arrives a touch late.
+const MAX_TRAVEL = 0.08;   // s, the most a distant sound trails its flash
 const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are dropped past this
 
 export class Sound {
@@ -177,12 +179,12 @@ export class Sound {
     }
   }
 
-  // How a sound `dist` metres from the camera arrives: quieter, duller, later.
+  // How a sound `dist` metres from the camera arrives: quieter, duller, a hair later.
   far(dist = 0) {
     return {
       k: 1 / (1 + dist / 260),
       cutoff: dist > 40 ? Math.max(260, 9000 * Math.exp(-dist / 260)) : 0,
-      delay: Math.min(1.3, dist / SOUND_SPEED),
+      delay: Math.min(MAX_TRAVEL, dist / 5000),
     };
   }
 
