@@ -36,9 +36,11 @@
     <div id="scoreboard" class="panel"></div>
     <div id="round-label" class="panel small"></div>
 
+    <div id="weapon-bar"></div>
+
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
-      &nbsp; <b>Tab</b> weapon &nbsp; <b>Space</b> fire &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview
+      &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> fire &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview
       &nbsp; <b>M</b> mute &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>
@@ -74,10 +76,16 @@
   </div>
 
   <div id="shop" class="screen hidden">
-    <div class="card wide">
-      <h2>Armory: <span id="shop-player"></span></h2>
-      <p class="sub">Funds: $<span id="shop-money"></span></p>
-      <div id="shop-items"></div>
+    <div id="shop-card" class="card shop-card">
+      <div class="shop-head">
+        <div>
+          <div id="shop-step" class="shop-step"></div>
+          <h2><span id="shop-swatch" class="swatch"></span><span id="shop-player"></span></h2>
+        </div>
+        <div class="shop-funds"><label>Funds left</label><div id="shop-money">$0</div></div>
+      </div>
+      <div id="shop-items" class="shop-grid"></div>
+      <div id="shop-note" class="shop-note"></div>
       <button id="shop-done" class="primary">Done</button>
     </div>
   </div>

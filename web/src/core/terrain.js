@@ -21,6 +21,7 @@ export class Heightfield {
     this.bedrock = bedrock;
     this.heights = new Float32Array(this.n * this.n);
     this.scorch = new Float32Array(this.n * this.n); // 0..1, darkens blasted ground
+    this.waterLevel = -Infinity;      // set by Scenery; ground below it shows as water
   }
 
   index(i, j) { return j * this.n + i; }
@@ -30,6 +31,7 @@ export class Heightfield {
   vz(j) { return -this.half + j * this.cell; }
 
   generate({ seed = 7, amplitude = 45, frequency = 0.0035, octaves = 4, edgeFalloff = true } = {}) {
+    this.waterLevel = -Infinity;
     const noise = makePerlin(seed);
     const ridge = makePerlin(seed * 31 + 5);
     for (let j = 0; j < this.n; j++) {

@@ -1,16 +1,19 @@
 import { makeRng } from './rng.js';
 import { Heightfield } from './terrain.js';
-import { makeProjectile, stepProjectile, groundContact, launchVelocity, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, blastDamage, splitVelocities } from './weapons.js';
+import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities } from './weapons.js';
 import { TANK, muzzleOrigin, hitSphere, clampAim } from './tank.js';
-import { solveShot, chooseTarget, chooseWeapon } from './ai.js';
+import { planShot, chooseTarget, chooseWeapon } from './ai.js';
+import { Scenery } from './scenery.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
 const START_INVENTORY = { shell: Infinity, breacher: 1, roller: 1, mound: 1, scatter: 0 };
 
 // Money awards.
-const PAY = { perDamage: 2, kill: 150, survive: 80, roundWin: 300 };
+// Everyone gets the stipend, so even a tank that was knocked out early has
+// something to spend in the shop.
+export const PAY = { perDamage: 2, kill: 150, survive: 80, roundWin: 300, stipend: 150 };
 
 export class Game {
   constructor({
@@ -39,9 +42,11 @@ export class Game {
       x: 0, y: 0, z: 0, yaw: 0, elev: 45, power: 60,
       hp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
+      aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
     }));
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
+    this.scenery = new Scenery(this.terrain);
     this.events = [];
     this.projectiles = [];
     this.wind = [0, 0];
@@ -72,7 +77,10 @@ export class Game {
     const t = this.terrain;
     t.generate({ seed: this.cfg.seed + this.round * 7919, amplitude: this.cfg.hills });
     this.placeTanks();
+    this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });
     for (const p of this.players) {
+      p.y = t.heightAt(p.x, p.z);
+      p.aim = {};
       p.hp = TANK.maxHp;
       p.armor = p.pendingArmor;
       p.pendingArmor = 0;
@@ -151,13 +159,14 @@ export class Game {
   planAi(p) {
     const target = chooseTarget(p, this.players, p.ai, this.rng);
     if (!target) return;
-    const sol = solveShot({
+    const sol = planShot({
       shooter: p,
-      target: [target.x, target.y + 1, target.z],
+      target,
       wind: this.wind,
       terrain: this.terrain,
       rng: this.rng,
       difficulty: p.ai,
+      memory: p.aim,
     });
     this.aiPlan = { ...sol, weapon: chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
   }
@@ -180,6 +189,7 @@ export class Game {
     let winner = null;
     if (alive.length === 1) winner = alive[0];
     else if (alive.length > 1) winner = alive.reduce((a, b) => (b.hp > a.hp ? b : a));
+    for (const p of this.players) p.money += PAY.stipend;
     for (const p of alive) p.money += PAY.survive;
     if (winner) { winner.wins++; winner.money += PAY.roundWin; winner.score += 1; }
     this.lastRoundResult = { round: this.round, winner: winner ? winner.id : null };
@@ -271,6 +281,7 @@ export class Game {
 
   update(dt) {
     this.phaseTime += dt;
+    this.scenery.update(dt, this.players);
     if (this.phase === 'aim' && this.current && !this.current.alive) { this.nextTurn(); return; }
     if (this.phase === 'aim') this.updateAim(dt);
     if (this.phase === 'flight' || this.phase === 'settle') {
@@ -324,6 +335,7 @@ export class Game {
     const spheres = this.players.filter((p) => p.alive).map(hitSphere);
     for (const pr of this.projectiles) {
       if (pr.dead) continue;
+      if (pr.roller) { this.stepRolling(pr, spheres, dt); continue; }
       const vyBefore = pr.vel[1];
       stepProjectile(pr, this.wind, dt);
       const w = WEAPON_BY_ID[pr.weapon];
@@ -367,30 +379,51 @@ export class Game {
   }
 
   detonate(pr, point, directHit) {
+    const w = WEAPON_BY_ID[pr.weapon];
+    // A rolling weapon that lands on open ground starts its run instead.
+    if (rollPart(w) && !directHit && !pr.roller) {
+      pr.roller = makeRoller(point, pr.vel, this.terrain);
+      pr.pos = pr.roller.pos;
+      this.emit({ type: 'rollStart', id: pr.id, pos: point });
+      return;
+    }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
-    const w = WEAPON_BY_ID[pr.weapon];
-    for (const fx of impactEffects(w, point, this.terrain)) this.applyEffect(fx, pr.owner, directHit);
+    for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit);
+  }
+
+  // A roller on the ground: follow the surface until it stops, runs out of
+  // road or bumps into a tank (its owner included).
+  stepRolling(pr, spheres, dt) {
+    const end = stepRoller(pr.roller, this.terrain, dt);
+    const [x, y, z] = pr.pos;
+    const ground = [x, y - ROLL.radius, z];
+    for (const s of spheres) {
+      if ((x - s.x) ** 2 + (y - s.y) ** 2 + (z - s.z) ** 2 <= (s.r + ROLL.radius) ** 2) {
+        this.detonate(pr, ground, s.tank);
+        return;
+      }
+    }
+    // A roller that sinks into a lake goes off there instead of crawling along the bed.
+    const sunk = y < this.terrain.waterLevel - 0.5;
+    if (end || sunk) this.detonate(pr, ground, null);
   }
 
   applyEffect(fx, owner, directHit) {
     const t = this.terrain;
-    if (fx.type === 'roll') {
-      this.emit({ type: 'roll', from: fx.from, to: fx.to });
-      return;
-    }
     if (fx.type === 'mound') {
       const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
       this.emit({ type: 'terrain', region });
       this.emit({ type: 'mound', pos: fx.point, radius: fx.radius });
       this.liftBuried();
+      this.scenery.afterMound(fx.point[0], fx.point[2], fx.radius);
+      this.relayScenery();
       return;
     }
     if (fx.type === 'blast') {
       const [bx, by, bz] = fx.point;
-      const region = t.carveCrater(bx, by, bz, fx.radius, fx.depth);
       this.emit({ type: 'explosion', pos: fx.point, radius: fx.radius });
-      this.emit({ type: 'terrain', region });
+      this.carve(bx, by, bz, fx.radius, fx.depth);
       for (const p of this.players) {
         if (!p.alive) continue;
         const s = hitSphere(p);
@@ -420,9 +453,20 @@ export class Game {
       if (attacker && attacker !== p) attacker.money += PAY.kill;
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
       // The wreck cooks off: a small crater of its own.
-      const region = this.terrain.carveCrater(p.x, p.y, p.z, 7, 0.4);
-      this.emit({ type: 'terrain', region });
+      this.carve(p.x, p.y, p.z, 7, 0.4);
     }
+  }
+
+  // Dig a crater and let the scenery react to it.
+  carve(x, y, z, radius, depth) {
+    const region = this.terrain.carveCrater(x, y, z, radius, depth);
+    this.emit({ type: 'terrain', region });
+    this.scenery.afterBlast(x, z, radius);
+    this.relayScenery();
+  }
+
+  relayScenery() {
+    for (const e of this.scenery.drainEvents()) this.emit(e);
   }
 
   liftBuried() {

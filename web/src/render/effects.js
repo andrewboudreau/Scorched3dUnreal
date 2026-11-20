@@ -147,9 +147,9 @@ export class Effects {
 
 // A projectile: a hot glowing slug plus a fading trail.
 export class ShellVisual {
-  constructor(scene, color) {
+  constructor(scene, color, radius = 0.55) {
     this.scene = scene;
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 8), new THREE.MeshBasicMaterial({ color: '#fff2c4' }));
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), new THREE.MeshBasicMaterial({ color: '#fff2c4' }));
     this.max = 400;
     this.points = new Float32Array(this.max * 3);
     this.count = 0;

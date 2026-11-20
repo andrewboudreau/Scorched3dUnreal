@@ -1,5 +1,3 @@
-import { rollDownhill } from './ballistics.js';
-
 // Weapons are data, composed from a few reusable parts (the composable design
 // the Unreal roadmap keeps from the legacy accessory tree, without the class
 // explosion). `flight` parts fire while the shell is in the air; `impact`
@@ -7,7 +5,7 @@ import { rollDownhill } from './ballistics.js';
 //
 //   blast  { radius, damage, depth }    carve a crater and hurt tanks nearby
 //   split  { count, spread, child }     at the apex, become `count` child shells
-//   roll   { then: [...parts] }         roll downhill first, then run `then`
+//   roll   { then: [...parts] }         roll along the ground first, then run `then`
 //   mound  { radius, height }           heap dirt instead of removing it
 
 export const WEAPONS = [
@@ -33,7 +31,7 @@ export const WEAPONS = [
   },
   {
     id: 'roller', name: 'Roller', price: 130, bundle: 3,
-    desc: 'Lands, rolls downhill into low ground, then detonates.',
+    desc: 'Lands, rolls downhill and blows up where it stops or on the first tank it touches.',
     impact: [{ type: 'roll', then: [{ type: 'blast', radius: 14, damage: 55, depth: 0.6 }] }],
   },
   {
@@ -56,22 +54,24 @@ export function blastDamage(dist, radius, damage) {
   return damage * (1 - dist / reach);
 }
 
-// Expand a weapon's impact parts at a point into concrete effects. `roll` is
-// resolved here against the terrain, so the result is a flat list.
-export function impactEffects(weapon, point, terrain) {
+// The roll part of a weapon, if it has one. The game rolls the shell along the
+// ground (ballistics.stepRoller) before running the part's `then` list.
+export function rollPart(weapon) {
+  return (weapon.impact || []).find((p) => p.type === 'roll') || null;
+}
+
+// Expand a weapon's impact parts at a point into concrete effects. For a
+// rolling weapon, `point` is where the roll ended.
+export function impactEffects(weapon, point) {
   const out = [];
-  const run = (parts, at) => {
+  const run = (parts) => {
     for (const part of parts) {
-      if (part.type === 'blast') out.push({ type: 'blast', point: at, radius: part.radius, damage: part.damage, depth: part.depth });
-      else if (part.type === 'mound') out.push({ type: 'mound', point: at, radius: part.radius, height: part.height });
-      else if (part.type === 'roll') {
-        const end = rollDownhill(terrain, at);
-        out.push({ type: 'roll', from: at, to: end });
-        run(part.then, end);
-      }
+      if (part.type === 'blast') out.push({ type: 'blast', point, radius: part.radius, damage: part.damage, depth: part.depth });
+      else if (part.type === 'mound') out.push({ type: 'mound', point, radius: part.radius, height: part.height });
+      else if (part.type === 'roll') run(part.then);
     }
   };
-  run(weapon.impact || [], point);
+  run(weapon.impact || []);
   return out;
 }
 

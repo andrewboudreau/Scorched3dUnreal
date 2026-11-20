@@ -84,6 +84,44 @@ input, select { background: #0f141a; color: var(--text); border: 1px solid var(-
 table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 td, th { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--edge); }
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
-.shop-item { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--edge); }
-.shop-item .desc { color: var(--muted); font-size: 12px; }
-.shop-item .owned { color: var(--muted); font-size: 12px; text-align: right; min-width: 70px; }
+
+/* Armory */
+.shop-card { width: min(760px, 94vw); border-top: 4px solid var(--accent); }
+.shop-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; }
+.shop-head h2 { margin: 2px 0 0; display: flex; align-items: center; gap: 9px; font-size: 24px; }
+.shop-head .swatch { width: 16px; height: 16px; }
+.shop-step { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.shop-funds { text-align: right; background: rgba(255, 181, 71, .1); border: 1px solid rgba(255, 181, 71, .35); border-radius: 10px; padding: 6px 14px; }
+.shop-funds label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+#shop-money { color: var(--accent); font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+#shop-money.pulse { animation: pulse .45s ease-out; }
+@keyframes pulse { 0% { transform: scale(1.25); color: #fff; } 100% { transform: scale(1); } }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.shop-item { display: flex; flex-direction: column; gap: 6px; background: rgba(255, 255, 255, .04); border: 1px solid var(--edge);
+  border-radius: 10px; padding: 12px; }
+.shop-item.cant { opacity: .62; }
+.shop-item.bought { animation: bought .7s ease-out; }
+@keyframes bought { 0% { background: rgba(110, 220, 130, .35); border-color: #7be08f; } 100% { background: rgba(255, 255, 255, .04); } }
+.si-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.si-head b { font-size: 16px; }
+.si-own { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.si-own.has { color: #9be36b; font-weight: 700; }
+.shop-item .desc { color: var(--muted); font-size: 12px; flex: 1; }
+.si-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.si-gives { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.si-short { display: block; color: #e0a458; font-weight: 500; margin-top: 2px; }
+button.buy { background: #2f7d46; border-color: #4aa765; font-weight: 700; padding: 8px 12px; white-space: nowrap; }
+button.buy:hover { background: #399655; }
+button.buy:disabled { background: #26303c; border-color: var(--edge); font-weight: 500; opacity: 1; color: var(--muted); }
+.shop-note { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.shop-note.good { color: #9be36b; font-weight: 600; }
+
+/* Weapons carried by the tank whose turn it is */
+#weapon-bar { position: fixed; z-index: 2; bottom: 52px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
+  justify-content: center; max-width: 94vw; }
+.wb-item { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+  padding: 6px 10px; font-weight: 600; backdrop-filter: blur(6px); }
+.wb-item.on { border-color: var(--accent); background: rgba(255, 181, 71, .22); }
+.wb-item:disabled { opacity: .75; }
+.wb-key { font-size: 11px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; }
+.wb-n { color: var(--muted); font-weight: 500; font-size: 13px; }

@@ -81,31 +81,80 @@ export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], r
   return { kind: 'lost', point: [...p.pos], time: p.time, path };
 }
 
-// Roll a ball downhill from a point until it settles or times out.
-// Used by the Roller weapon. Returns the resting point.
-export function rollDownhill(terrain, start, { maxTime = 6, friction = 0.6, dt = 1 / 60 } = {}) {
-  let x = start[0];
-  let z = start[2];
-  let vx = 0;
-  let vz = 0;
-  let still = 0;
-  for (let t = 0; t < maxTime; t += dt) {
-    const [nx, ny, nz] = terrain.normalAt(x, z);
-    // Gravity component along the slope.
-    vx += nx * GRAVITY * dt * 2.5;
-    vz += nz * GRAVITY * dt * 2.5;
-    vx *= 1 - friction * dt;
-    vz *= 1 - friction * dt;
-    x += vx * dt;
-    z += vz * dt;
-    if (!terrain.inBounds(x, z)) {
-      x = Math.max(-terrain.half, Math.min(terrain.half, x));
-      z = Math.max(-terrain.half, Math.min(terrain.half, z));
-      break;
-    }
-    if (Math.hypot(vx, vz) < 0.4 && 1 - ny < 0.02) {
-      if (++still > 20) break;
-    } else still = 0;
+// ---- rolling (the Roller weapon) ----
+//
+// After landing, a roller keeps part of its horizontal speed and then runs along
+// the surface: gravity pulls it down the slope, rolling friction and drag slow
+// it. It stops when it can no longer move, has gone ROLL.maxDistance, runs out
+// of time or reaches the arena edge. The game steps it live so the roll is seen.
+
+export const ROLL = {
+  radius: 0.9,        // ball radius; its centre rides this far above the ground
+  keep: 0.25,         // share of the landing speed carried into the roll
+  friction: 0.12,     // rolling resistance (holds on slopes under about 7 degrees)
+  drag: 0.15,         // 1/s, caps the speed on long slopes
+  maxDistance: 160,   // metres of travel before it detonates anyway
+  maxTime: 10,        // seconds
+  stopSpeed: 0.5,     // m/s
+  stopAfter: 0.2,     // seconds below stopSpeed before it counts as stopped
+};
+
+export function makeRoller(point, vel, terrain) {
+  const x = point[0];
+  const z = point[2];
+  return {
+    pos: [x, terrain.heightAt(x, z) + ROLL.radius, z],
+    vel: [(vel ? vel[0] : 0) * ROLL.keep, (vel ? vel[2] : 0) * ROLL.keep], // horizontal x/z
+    dist: 0, time: 0, still: 0,
+  };
+}
+
+// Advance one step. Returns null while rolling, or why it ended:
+// 'stopped' | 'distance' | 'timeout' | 'edge'.
+export function stepRoller(r, terrain, dt = SIM_DT) {
+  const [nx, ny, nz] = terrain.normalAt(r.pos[0], r.pos[2]);
+  // Gravity along the slope, horizontal part.
+  const ax = GRAVITY * nx * ny;
+  const az = GRAVITY * nz * ny;
+  const grip = ROLL.friction * GRAVITY * ny;
+  let [vx, vz] = r.vel;
+  vx += ax * dt;
+  vz += az * dt;
+  const speed = Math.hypot(vx, vz);
+  const slowed = Math.max(0, speed - grip * dt) * (1 - ROLL.drag * dt);
+  const k = speed > 1e-9 ? slowed / speed : 0;
+  vx *= k;
+  vz *= k;
+  r.vel[0] = vx;
+  r.vel[1] = vz;
+  const x = r.pos[0] + vx * dt;
+  const z = r.pos[2] + vz * dt;
+  r.time += dt;
+  if (!terrain.inBounds(x, z)) {
+    r.pos[0] = Math.max(-terrain.half, Math.min(terrain.half, x));
+    r.pos[2] = Math.max(-terrain.half, Math.min(terrain.half, z));
+    r.pos[1] = terrain.heightAt(r.pos[0], r.pos[2]) + ROLL.radius;
+    return 'edge';
   }
-  return [x, terrain.heightAt(x, z), z];
+  r.dist += slowed * dt;
+  r.pos[0] = x;
+  r.pos[2] = z;
+  r.pos[1] = terrain.heightAt(x, z) + ROLL.radius;
+  // Slow, and on ground too gentle to set it moving again.
+  if (slowed < ROLL.stopSpeed && Math.hypot(ax, az) <= grip) {
+    r.still += dt;
+    if (r.still >= ROLL.stopAfter) return 'stopped';
+  } else r.still = 0;
+  if (r.dist >= ROLL.maxDistance) return 'distance';
+  if (r.time >= ROLL.maxTime) return 'timeout';
+  return null;
+}
+
+// Run a whole roll at once (tests, predictions). Returns the resting ground
+// point, the distance travelled and why it ended.
+export function rollDownhill(terrain, start, vel = null) {
+  const r = makeRoller(start, vel, terrain);
+  let end = null;
+  while (!end) end = stepRoller(r, terrain);
+  return { point: [r.pos[0], r.pos[1] - ROLL.radius, r.pos[2]], dist: r.dist, time: r.time, end };
 }

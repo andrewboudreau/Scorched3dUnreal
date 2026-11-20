@@ -3,7 +3,10 @@ import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS } from './core/weapons.js';
 import { TANK, muzzleOrigin } from './core/tank.js';
+import { ROLL } from './core/ballistics.js';
+import { rollPart } from './core/weapons.js';
 import { TerrainMesh } from './render/terrainMesh.js';
+import { SceneryMesh } from './render/sceneryMesh.js';
 import { TankMesh, makeWreck } from './render/tankMesh.js';
 import { Effects, ShellVisual } from './render/effects.js';
 import { Sound } from './audio.js';
@@ -83,6 +86,47 @@ floor.rotation.x = -Math.PI / 2;
 floor.position.y = -140;
 scene.add(floor);
 
+// A few slow clouds, drifting with the wind.
+const clouds = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({ map, transparent: true, opacity: 0.7, depthWrite: false, fog: false });
+  const SPAN = 1700;
+  const list = [];
+  for (let i = 0; i < 12; i++) {
+    const cloud = new THREE.Group();
+    const size = 170 + Math.random() * 160;
+    for (let k = 0; k < 4; k++) {
+      const puff = new THREE.Sprite(material);
+      puff.position.set((k - 1.5) * size * 0.42 + (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 26, (Math.random() - 0.5) * 60);
+      puff.scale.set(size * (0.8 + Math.random() * 0.5), size * (0.3 + Math.random() * 0.14), 1);
+      cloud.add(puff);
+    }
+    cloud.position.set((Math.random() * 2 - 1) * SPAN, 190 + Math.random() * 190, (Math.random() * 2 - 1) * SPAN);
+    scene.add(cloud);
+    list.push(cloud);
+  }
+  return {
+    update(dt, wind) {
+      for (const cloud of list) {
+        cloud.position.x += (4 + wind[0] * 9) * dt;
+        cloud.position.z += (1.5 + wind[1] * 9) * dt;
+        if (cloud.position.x > SPAN) cloud.position.x -= SPAN * 2; else if (cloud.position.x < -SPAN) cloud.position.x += SPAN * 2;
+        if (cloud.position.z > SPAN) cloud.position.z -= SPAN * 2; else if (cloud.position.z < -SPAN) cloud.position.z += SPAN * 2;
+      }
+    },
+  };
+})();
+
 const effects = new Effects(scene);
 const sound = new Sound();
 
@@ -96,6 +140,7 @@ window.addEventListener('resize', () => {
 
 let game = null;
 let terrainMesh = null;
+let sceneryMesh = null;
 let tanks = [];
 let hullYaw = [];
 let labels = [];
@@ -118,6 +163,7 @@ let shopQueue = [];
 
 function disposeMatch() {
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.geometry.dispose(); terrainMesh.skirtGeometry.dispose(); }
+  if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   wrecks.forEach((w) => scene.remove(w));
   shells.forEach((s) => { scene.remove(s.mesh, s.line); });
@@ -131,10 +177,11 @@ function disposeMatch() {
 
 function startMatch(config) {
   disposeMatch();
-  scene.remove(menuMesh.group);
+  scene.remove(menuMesh.group, menuScenery.group);
   game = new Game(config);
   terrainMesh = new TerrainMesh(game.terrain);
-  scene.add(terrainMesh.group);
+  sceneryMesh = new SceneryMesh(game.scenery);
+  scene.add(terrainMesh.group, sceneryMesh.group);
   effects.groundAt = (x, z) => game.terrain.heightAt(x, z);
   tanks = game.players.map((p) => {
     const m = new TankMesh(p.color);
@@ -181,7 +228,7 @@ function handleEvents() {
         banner(`Round ${e.round}`, `of ${game.cfg.rounds}`, 1800);
         break;
       case 'terrain':
-        if (e.full) terrainMesh.rebuild(); else terrainMesh.updateRegion(e.region);
+        if (e.full) { terrainMesh.rebuild(); sceneryMesh.rebuild(); } else terrainMesh.updateRegion(e.region);
         break;
       case 'turn': {
         const p = game.players[e.player];
@@ -201,7 +248,7 @@ function handleEvents() {
       case 'projectile': {
         const pr = game.projectiles.find((p) => p.id === e.id);
         const owner = pr ? game.players[pr.owner] : null;
-        const v = new ShellVisual(scene, owner ? owner.color : '#ffffff');
+        const v = new ShellVisual(scene, owner ? owner.color : '#ffffff', rollPart(WEAPON_BY_ID[e.weapon]) ? ROLL.radius : undefined);
         v.owner = owner ? owner.id : null;
         if (pr) v.push(pr.pos);
         shells.set(e.id, v);
@@ -226,8 +273,14 @@ function handleEvents() {
         effects.dust(e.pos, e.radius);
         sound.thud();
         break;
-      case 'roll':
-        drawRollPath(e.from, e.to);
+      case 'rollStart':
+        // The shell is on the ground now; its visual keeps following it.
+        effects.dust(e.pos, 4);
+        sound.thud();
+        break;
+      case 'prop':
+        if (e.kind === 'house') { effects.dust(e.pos, 7); sound.thud(); }
+        else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(); }
         break;
       case 'damage':
         popDamage(e.player, e.amount);
@@ -269,14 +322,6 @@ function retireShell(id, at) {
     ghosts.set(v.owner, arr);
   } else scene.remove(line);
   shells.delete(id);
-}
-
-function drawRollPath(from, to) {
-  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...from), new THREE.Vector3(to[0], to[1] + 0.5, to[2])]);
-  const l = new THREE.Line(g, new THREE.LineDashedMaterial({ color: '#ffd27a', dashSize: 2, gapSize: 1.5 }));
-  l.computeLineDistances();
-  scene.add(l);
-  setTimeout(() => scene.remove(l), 2500);
 }
 
 function popDamage(pid, amount) {
@@ -368,12 +413,32 @@ window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 
+const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
+const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
+
 function selectWeaponSlot(i) {
   const p = game.current;
   if (!p || p.ai || game.phase !== 'aim') return;
-  const list = WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
+  const list = ownedWeapons(p);
   if (list[i]) { p.weapon = list[i].id; sound.click(); }
 }
+
+// The row of weapons the current tank carries. Rebuilt only when it changes.
+let weaponBarKey = '';
+function updateWeaponBar(p) {
+  const list = ownedWeapons(p);
+  const key = `${p.id}|${p.weapon}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${p.inventory[w.id]}`).join(',')}`;
+  if (key === weaponBarKey) return;
+  weaponBarKey = key;
+  $('weapon-bar').innerHTML = list.map((w, i) => `
+    <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(w.desc)}" ${p.ai ? 'disabled' : ''}>
+      <span class="wb-key">${i + 1}</span>${w.name}<span class="wb-n">${ammoText(p.inventory[w.id])}</span>
+    </button>`).join('');
+}
+$('weapon-bar').addEventListener('click', (e) => {
+  const b = e.target.closest('.wb-item');
+  if (b && game) selectWeaponSlot(Number(b.dataset.i));
+});
 
 function applyHeldKeys(dt) {
   if (!game || game.phase !== 'aim' || !game.current || game.current.ai) return;
@@ -414,8 +479,8 @@ function updateHud() {
     $('pc-power').style.width = `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`;
     const w = WEAPON_BY_ID[p.weapon];
     $('ro-weapon').textContent = w.name;
-    const n = p.inventory[w.id];
-    $('ro-ammo').textContent = n === Infinity ? '∞' : `×${n}`;
+    $('ro-ammo').textContent = ammoText(p.inventory[w.id]);
+    updateWeaponBar(p);
   }
   // Wind, drawn relative to where the camera is looking.
   const [wx, wz] = game.wind;
@@ -511,7 +576,8 @@ function showRoundResult(kind) {
     $('matchover').classList.remove('hidden');
     return;
   }
-  $('ro-title').textContent = w ? `Round ${game.round}: ${w.name}` : `Round ${game.round} is a draw`;
+  $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
+  $('ro-continue').textContent = game.humans.length ? 'Continue to the armory' : `Start round ${game.round + 1}`;
   $('ro-table').innerHTML = standingsTable([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
 }
@@ -523,26 +589,60 @@ $('ro-continue').onclick = () => {
   if (game.phase === 'shop') openShopFor(shopQueue.shift());
 };
 
+// The armory, one human at a time. Each item is a card that says what it is,
+// what one purchase gives, what the shopper already holds, and has one button.
+const SHOP_ITEMS = [...WEAPONS.filter((w) => !w.hidden && !w.infinite), ...ITEMS];
+const SHOP_HINT = 'Shells are free and never run out. Everything here is extra.';
+
 function openShopFor(pid) {
   if (pid == null) { $('shop').classList.add('hidden'); game.closeShop(); return; }
   const p = game.players[pid];
+  const humans = game.humans;
+  const next = shopQueue.length ? game.players[shopQueue[0]] : null;
   $('shop').classList.remove('hidden');
-  $('shop-player').textContent = p.name;
-  const render = () => {
-    $('shop-money').textContent = p.money;
-    const rows = [...WEAPONS.filter((w) => !w.hidden && !w.infinite), ...ITEMS].map((it) => {
+  $('shop-card').style.borderTopColor = p.color;
+  $('shop-swatch').style.background = p.color;
+  $('shop-player').textContent = /^you$/i.test(p.name.trim()) ? 'Your armory' : `${p.name}'s armory`;
+  $('shop-step').textContent = humans.length > 1
+    ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · shopping for round ${game.round + 1}`
+    : `Shopping for round ${game.round + 1}`;
+  $('shop-done').textContent = next ? `Done · pass to ${next.name}` : `Done · start round ${game.round + 1}`;
+  const note = (text, good = false) => {
+    $('shop-note').textContent = text;
+    $('shop-note').classList.toggle('good', good);
+  };
+  const render = (justBought) => {
+    $('shop-money').textContent = `$${p.money}`;
+    $('shop-items').innerHTML = SHOP_ITEMS.map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
-      const owned = isW ? `${p.inventory[it.id] || 0} owned` : p.pendingArmor ? `+${p.pendingArmor} ready` : '';
-      return `<div class="shop-item">
-        <div><b>${it.name}</b>${isW ? ` <span class="desc">×${it.bundle}</span>` : ''}<div class="desc">${it.desc}</div></div>
-        <div class="owned">${owned}</div>
-        <button data-id="${it.id}" ${p.money < it.price ? 'disabled' : ''}>$${it.price}</button>
+      const have = isW ? p.inventory[it.id] || 0 : p.pendingArmor;
+      const owned = isW ? `You have ${have}` : have ? `+${have} fitted` : 'None fitted';
+      const gives = isW ? `${it.bundle} per purchase` : '+30 armor';
+      const short = it.price - p.money;
+      return `<div class="shop-item${short > 0 ? ' cant' : ''}${it.id === justBought ? ' bought' : ''}">
+        <div class="si-head"><b>${it.name}</b><span class="si-own${have ? ' has' : ''}">${owned}</span></div>
+        <div class="desc">${it.desc}</div>
+        <div class="si-foot">
+          <span class="si-gives">${gives}${short > 0 ? `<span class="si-short">need $${short} more</span>` : ''}</span>
+          <button class="buy" data-id="${it.id}" ${short > 0 ? 'disabled' : ''}>${short > 0 ? `$${it.price}` : `Buy for $${it.price}`}</button>
+        </div>
       </div>`;
-    });
-    $('shop-items').innerHTML = rows.join('');
-    $('shop-items').querySelectorAll('button').forEach((b) => b.onclick = () => { if (game.buy(pid, b.dataset.id)) { sound.click(); render(); } });
+    }).join('');
+  };
+  $('shop-items').onclick = (e) => {
+    const b = e.target.closest('button.buy');
+    if (!b || b.disabled || !game.buy(pid, b.dataset.id)) return;
+    const it = SHOP_ITEMS.find((x) => x.id === b.dataset.id);
+    sound.click();
+    render(it.id);
+    note(`Bought ${it.bundle ? `${it.bundle} × ${it.name}` : it.name} for $${it.price}. $${p.money} left.`, true);
+    const funds = $('shop-money');
+    funds.classList.remove('pulse');
+    void funds.offsetWidth;   // restart the animation
+    funds.classList.add('pulse');
   };
   render();
+  note(SHOP_ITEMS.some((it) => it.price <= p.money) ? SHOP_HINT : `Nothing in reach this time. ${SHOP_HINT}`);
   $('shop-done').onclick = () => openShopFor(shopQueue.shift());
 }
 
@@ -551,7 +651,7 @@ $('mo-again').onclick = () => {
   showHud(false);
   disposeMatch();
   game = null;
-  scene.add(menuMesh.group);
+  scene.add(menuMesh.group, menuScenery.group);
   $('setup').classList.remove('hidden');
   renderSetup();
 };
@@ -570,14 +670,18 @@ function frame() {
     for (const pr of game.projectiles) shells.get(pr.id)?.push(pr.pos);
     // Only the current player's last shot is shown as a ghost.
     ghosts.forEach((arr, pid) => arr.forEach((l) => { l.visible = game.current?.id === pid && game.phase === 'aim'; }));
+    sceneryMesh.sync(clock.elapsedTime);
     updateHud();
     updateLabels();
   } else {
     // Idle orbit behind the menu.
+    menuField.scenery.update(dt);
+    menuScenery.sync(clock.elapsedTime);
     const t = performance.now() * 0.00005;
     camTarget.set(0, 0, 0);
     camGoal = new THREE.Vector3(Math.cos(t) * 600, 300, Math.sin(t) * 600);
   }
+  clouds.update(dt, game ? game.wind : [0.4, 0.2]);
   effects.update(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
@@ -586,9 +690,12 @@ function frame() {
 // A backdrop field for the menu; dropped once a real match starts.
 const menuField = new Game({ players: [{ name: 'a' }, { name: 'b' }], seed: 4242 });
 menuField.terrain.generate({ seed: 4242, amplitude: 45 });
+menuField.scenery.generate({ seed: 4242 });
 const menuMesh = new TerrainMesh(menuField.terrain);
 menuMesh.rebuild();
-scene.add(menuMesh.group);
+const menuScenery = new SceneryMesh(menuField.scenery);
+menuScenery.rebuild();
+scene.add(menuMesh.group, menuScenery.group);
 
 renderSetup();
 $('loading').classList.add('hidden');
