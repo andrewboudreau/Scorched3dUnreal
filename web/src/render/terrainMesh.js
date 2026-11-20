@@ -100,27 +100,44 @@ uniform vec3 uFog[${MAX_FOG_SPOTS}];
 uniform float uFogOn;
 uniform sampler2D uPath;
 uniform float uPathScale;
-float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// A sine-free hash (no banding at large coordinates) and value noise with a
+// quintic fade, so the cell edges do not show up in the bump shading.
+float gHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 float gNoise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
   return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), f.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
-float gRough(vec2 p) { return gNoise(p * 0.45) * 0.65 + gNoise(p * 1.9) * 0.35; }`)
+// Each layer turned to its own angle, at odd scale steps, so no two grids line
+// up; a slow warp bends the lattice so rows of bumps never run straight.
+const mat2 gR1 = mat2(0.80, 0.60, -0.60, 0.80);
+const mat2 gR2 = mat2(-0.39, 0.92, -0.92, -0.39);
+const mat2 gR3 = mat2(0.26, -0.97, 0.97, 0.26);
+vec2 gWarp(vec2 p) { return p + (vec2(gNoise(p * 0.05 + 3.7), gNoise(gR2 * p * 0.05 + 9.1)) - 0.5) * 4.0; }
+float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * w * 1.13 + 5.9) * 0.3 + gNoise(gR3 * w * 2.71 + 8.2) * 0.2; }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 {
   float fade = 1.0 - smoothstep(50.0, 420.0, length(vViewPosition));
   if (fade > 0.0) {
-    vec2 q = vGroundP.xz;
+    vec2 q = gWarp(vGroundP.xz);
     float h0 = gRough(q);
-    vec3 tilt = vec3(h0 - gRough(q + vec2(0.4, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.4))) * (1.5 * fade);
+    vec3 tilt = vec3(h0 - gRough(q + vec2(0.35, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.35))) * (1.3 * fade);
     normal = normalize(normal + (viewMatrix * vec4(tilt, 0.0)).xyz);
   }
 }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   vec2 q = vGroundP.xz;
-  float n = gNoise(q * 0.08) * 0.5 + gNoise(q * 0.31) * 0.3 + gNoise(q * 1.7) * 0.2;
+  vec2 qw = gWarp(q);
+  float n = gNoise(gR1 * qw * 0.083 + 2.1) * 0.5 + gNoise(gR2 * qw * 0.29 + 6.3) * 0.3 + gNoise(gR3 * qw * 1.63 + 4.4) * 0.2;
   diffuseColor.rgb *= 0.84 + 0.32 * n;
+  // Broad patches, tens of metres across: drier, yellower grass in some,
+  // lusher and cooler in others, so a wide field is never one even tone.
+  float m = smoothstep(0.25, 0.75, gNoise(gR3 * q * 0.012 + 7.0) * 0.7 + gNoise(gR1 * q * 0.031 + 1.0) * 0.3);
+  diffuseColor.rgb *= mix(vec3(0.97, 1.0, 1.02), vec3(1.035, 1.01, 0.93), m);
   // Gravel where the path mask says so, with a ragged edge and a little grit.
   float pm = texture2D(uPath, q * uPathScale + 0.5).r;
   if (pm > 0.02) {
