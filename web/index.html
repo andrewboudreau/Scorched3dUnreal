@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Craterfall: 3D artillery</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="player-card" class="panel">
+      <div class="pc-name"><span id="pc-swatch" class="swatch"></span><span id="pc-name">-</span><span id="pc-tag" class="tag"></span></div>
+      <div class="bar"><div id="pc-hp" class="fill hp"></div><div id="pc-armor" class="fill armor"></div></div>
+      <div class="pc-money">$<span id="pc-money">0</span></div>
+      <div class="readout">
+        <div><label>Turret</label><span id="ro-yaw">0°</span></div>
+        <div><label>Elevation</label><span id="ro-elev">0°</span></div>
+        <div><label>Power</label><span id="ro-power">0</span></div>
+      </div>
+      <div class="bar power"><div id="pc-power" class="fill pw"></div></div>
+      <div class="weapon"><label>Weapon</label><span id="ro-weapon">Shell</span><span id="ro-ammo" class="ammo"></span></div>
+    </div>
+
+    <div id="wind" class="panel">
+      <div class="wind-title">WIND</div>
+      <div id="wind-dial"><div id="wind-arrow">&#x27A4;</div></div>
+      <div id="wind-speed">0</div>
+    </div>
+
+    <div id="scoreboard" class="panel"></div>
+    <div id="round-label" class="panel small"></div>
+
+    <div id="help" class="panel small">
+      <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
+      &nbsp; <b>Tab</b> weapon &nbsp; <b>Space</b> fire &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview
+      &nbsp; <b>M</b> mute &nbsp; drag to orbit, wheel to zoom
+    </div>
+    <div id="banner"></div>
+    <div id="labels"></div>
+  </div>
+
+  <!-- Setup screen -->
+  <div id="setup" class="screen">
+    <div class="card wide">
+      <h1>CRATERFALL</h1>
+      <p class="sub">Turn-based 3D artillery on ground you can blow apart.</p>
+      <div id="setup-players"></div>
+      <div class="row-buttons">
+        <button id="add-player">+ Add tank</button>
+        <button id="remove-player">- Remove tank</button>
+      </div>
+      <div class="options">
+        <label>Rounds <select id="opt-rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select></label>
+        <label>Wind <select id="opt-wind"><option value="0">Calm</option><option value="0.8">Breezy</option><option value="1.5" selected>Gusty</option><option value="2.5">Gale</option></select></label>
+        <label>Terrain <select id="opt-hills"><option value="20">Rolling</option><option value="45" selected>Hilly</option><option value="80">Mountains</option></select></label>
+      </div>
+      <button id="start" class="primary">Start match</button>
+    </div>
+  </div>
+
+  <!-- Between rounds -->
+  <div id="roundover" class="screen hidden">
+    <div class="card">
+      <h2 id="ro-title">Round over</h2>
+      <table id="ro-table"></table>
+      <button id="ro-continue" class="primary">Continue</button>
+    </div>
+  </div>
+
+  <div id="shop" class="screen hidden">
+    <div class="card wide">
+      <h2>Armory: <span id="shop-player"></span></h2>
+      <p class="sub">Funds: $<span id="shop-money"></span></p>
+      <div id="shop-items"></div>
+      <button id="shop-done" class="primary">Done</button>
+    </div>
+  </div>
+
+  <div id="matchover" class="screen hidden">
+    <div class="card">
+      <h2 id="mo-title">Match over</h2>
+      <table id="mo-table"></table>
+      <button id="mo-again" class="primary">New match</button>
+    </div>
+  </div>
+
+  <div id="loading" class="screen"><div class="card">Loading…</div></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

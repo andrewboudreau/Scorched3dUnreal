@@ -1,0 +1,10 @@
+{
+  "name": "craterfall-web",
+  "private": true,
+  "type": "module",
+  "description": "Craterfall: the WebGL/three.js edition of the Scorched3dUnreal artillery project.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python -m http.server 8080"
+  }
+}

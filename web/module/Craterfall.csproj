@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Craterfall as a SharedTools.Web module drop. The game itself lives one folder up (web/);
+    it is linked in as wwwroot so there is a single copy. Deploy with ./deploy.ps1.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Craterfall</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- Compile against the contract; the module host supplies SharedTools.Web at runtime. -->
+    <PackageReference Include="SharedTools.Web" Version="3.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\index.html" Link="wwwroot\index.html" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\css\**" Link="wwwroot\css\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\src\**" Link="wwwroot\src\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\vendor\**" Link="wwwroot\vendor\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

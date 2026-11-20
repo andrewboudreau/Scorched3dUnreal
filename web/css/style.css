@@ -1,0 +1,89 @@
+:root {
+  --panel: rgba(14, 18, 24, 0.72);
+  --edge: rgba(255, 255, 255, 0.12);
+  --text: #eef1f4;
+  --muted: #9aa6b2;
+  --accent: #ffb547;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; color: var(--text);
+  font: 14px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#app { position: fixed; inset: 0; }
+#app canvas { display: block; }
+.hidden { display: none !important; }
+
+.panel { position: fixed; z-index: 2; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px;
+  padding: 10px 12px; backdrop-filter: blur(6px); pointer-events: none; }
+.panel.small { font-size: 12px; color: var(--muted); padding: 6px 10px; }
+
+#player-card { top: 14px; left: 14px; width: 230px; }
+.pc-name { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.tag { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: auto; text-transform: uppercase; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.4); }
+.bar { position: relative; height: 8px; background: rgba(255,255,255,.08); border-radius: 4px; margin: 7px 0; overflow: hidden; }
+.bar .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; transition: width .25s; }
+.fill.hp { background: linear-gradient(90deg, #47c46f, #9be36b); }
+.fill.armor { background: rgba(120, 180, 255, .85); height: 3px; top: auto; }
+.fill.pw { background: linear-gradient(90deg, #ffd166, #ff7b39); transition: none; }
+.pc-money { color: var(--accent); font-weight: 600; }
+.readout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; text-align: center; }
+.readout label, .weapon label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.readout span { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 700; }
+.weapon { margin-top: 6px; }
+.weapon span { font-weight: 700; font-size: 15px; }
+.ammo { color: var(--muted); font-weight: 500 !important; margin-left: 6px; font-size: 13px !important; }
+
+#wind { top: 14px; left: 50%; transform: translateX(-50%); text-align: center; width: 96px; }
+.wind-title { font-size: 10px; color: var(--muted); letter-spacing: .15em; }
+#wind-dial { width: 48px; height: 48px; margin: 4px auto; border-radius: 50%; border: 1px solid var(--edge);
+  display: grid; place-items: center; }
+#wind-arrow { font-size: 24px; color: #9fd3ff; transition: transform .3s; }
+#wind-speed { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+#scoreboard { top: 14px; right: 14px; width: 210px; }
+.sb-row { display: flex; align-items: center; gap: 7px; margin: 4px 0; font-size: 13px; }
+.sb-row.dead { opacity: .4; text-decoration: line-through; }
+.sb-row.active { font-weight: 700; }
+.sb-row .bar { flex: 1; height: 6px; margin: 0; }
+.sb-row .wins { color: var(--accent); width: 26px; text-align: right; font-size: 12px; }
+
+#round-label { bottom: 14px; right: 14px; }
+#help { bottom: 14px; left: 14px; }
+
+#banner { position: fixed; top: 26%; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 800;
+  letter-spacing: .03em; text-shadow: 0 3px 18px rgba(0,0,0,.7); opacity: 0; transition: opacity .3s; pointer-events: none; }
+#banner.show { opacity: 1; }
+#banner small { display: block; font-size: 16px; font-weight: 600; color: var(--muted); }
+
+#labels { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+.tank-label { position: absolute; transform: translate(-50%, -100%); text-align: center; font-size: 12px; font-weight: 700;
+  text-shadow: 0 1px 4px #000; white-space: nowrap; }
+.tank-label .bar { width: 54px; height: 4px; margin: 3px auto 0; }
+.dmg-pop { position: absolute; transform: translate(-50%, -50%); font-weight: 800; color: #ff6b5b; font-size: 18px;
+  text-shadow: 0 2px 6px #000; animation: pop 1.3s ease-out forwards; }
+@keyframes pop { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
+
+.screen { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(6, 9, 13, .55); backdrop-filter: blur(3px); }
+.card { background: rgba(18, 23, 30, .94); border: 1px solid var(--edge); border-radius: 14px; padding: 24px 28px; min-width: 340px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5); max-height: 92vh; overflow: auto; }
+.card.wide { width: min(640px, 94vw); }
+h1 { margin: 0; font-size: 42px; letter-spacing: .12em; background: linear-gradient(90deg, #ffb547, #ff5f3c);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+h2 { margin: 0 0 12px; }
+.sub { color: var(--muted); margin: 4px 0 16px; }
+button { background: #26303c; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 14px;
+  font: inherit; cursor: pointer; }
+button:hover { background: #313d4b; }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: linear-gradient(90deg, #ff9a3c, #ff5f3c); border: none; font-weight: 700; padding: 10px 22px; margin-top: 16px; width: 100%; }
+input, select { background: #0f141a; color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.player-row { display: grid; grid-template-columns: 18px 1fr 150px; gap: 10px; align-items: center; margin: 6px 0; }
+.row-buttons { display: flex; gap: 8px; margin: 8px 0 14px; }
+.options { display: flex; gap: 14px; flex-wrap: wrap; }
+.options label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+td, th { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--edge); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.shop-item { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--edge); }
+.shop-item .desc { color: var(--muted); font-size: 12px; }
+.shop-item .owned { color: var(--muted); font-size: 12px; text-align: right; min-width: 70px; }
