@@ -175,6 +175,22 @@ export class Effects {
     }
   }
 
+  // Bits of a building thrown about as it breaks: a short, low spray.
+  rubble(pos, n, spread) {
+    n = Math.min(n, DEBRIS_MAX - this.chunks.length);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = spread * (0.3 + Math.random() * 0.7);
+      this.chunks.push({
+        p: new THREE.Vector3(pos[0] + Math.cos(a) * 2, pos[1] + 2 + Math.random() * 3, pos[2] + Math.sin(a) * 2),
+        v: new THREE.Vector3(Math.cos(a) * s, 3 + Math.random() * spread, Math.sin(a) * s),
+        rx: 0, ry: 0, sx: Math.random() * 6, sy: Math.random() * 6,
+        scale: 0.35 + Math.random() * 0.55,
+        life: 0, max: 2 + Math.random(),
+      });
+    }
+  }
+
   dust(pos, radius) {
     for (let i = 0; i < 8; i++) {
       const sm = this.sprite(this.smokeTex, '#a08463');

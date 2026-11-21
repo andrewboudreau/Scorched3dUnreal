@@ -4,7 +4,7 @@ import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoll
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon } from './ai.js';
-import { Scenery } from './scenery.js';
+import { Scenery, standing } from './scenery.js';
 import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
@@ -483,9 +483,9 @@ export class Game {
 
   // ---------- driving ----------
 
-  // Things a tank cannot drive through: the other tanks and standing houses.
+  // Things a tank cannot drive through: the other tanks and standing buildings.
   obstacles() {
-    return [...this.players, ...this.scenery.props.filter((q) => q.kind === 'house' && q.state === 'ok')];
+    return [...this.players, ...this.scenery.props.filter(standing)];
   }
 
   driveTank(p, dir, dt) {

@@ -11,6 +11,7 @@ import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
+import { BUILDINGS } from './core/scenery.js';
 import { TankMesh } from './render/tankMesh.js';
 import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual } from './render/effects.js';
@@ -438,7 +439,12 @@ function handleEvents() {
         sound.thud(camDist(e.pos));
         break;
       case 'prop':
-        if (e.kind === 'house') { effects.dust(e.pos, 7); sound.thud(camDist(e.pos)); }
+        if (BUILDINGS[e.kind]) {
+          const big = e.how === 'ruin' ? 1 : e.how === 'hit' ? 0.6 : 0.4;
+          effects.dust(e.pos, 7 * big);
+          effects.rubble(e.pos, Math.round(18 * big), 6 * big);
+          sound.thud(camDist(e.pos));
+        }
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage': {

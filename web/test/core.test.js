@@ -5,6 +5,7 @@ import { muzzleDirection, launchVelocity, simulateShot, GRAVITY, rollDownhill, m
 import { solveShot, planShot } from '../src/core/ai.js';
 import { makeRng } from '../src/core/rng.js';
 import { Game, PAY } from '../src/core/game.js';
+import { BUILDINGS, isBuilding } from '../src/core/scenery.js';
 import { WEAPON_BY_ID, impactEffects, rollPart, splitVelocities } from '../src/core/weapons.js';
 import { TANK, muzzleOrigin, hitSphere } from '../src/core/tank.js';
 
@@ -293,13 +294,14 @@ test('scenery: modest counts, seated, dry, and clear of the tanks', () => {
     const sc = g.scenery;
     const count = (k) => sc.props.filter((p) => p.kind === k).length;
     assert.ok(count('pine') + count('oak') > 80 && sc.props.length < 800, `${sc.props.length} props`);
-    assert.ok(count('house') >= 2 && count('house') <= 18, `${count('house')} houses`);
+    const buildings = sc.props.filter(isBuilding);
+    assert.ok(count('house') >= 2 && buildings.length <= 36, `${count('house')} houses, ${buildings.length} buildings`);
     assert.ok(sc.walkers.length <= 40);
     seated(g);
     for (const p of sc.props) {
       for (const k of g.players) {
         const d = Math.hypot(p.x - k.x, p.z - k.z);
-        assert.ok(d >= (p.kind === 'house' ? 30 : 18), `${p.kind} ${d.toFixed(1)} m from a tank`);
+        assert.ok(d >= (isBuilding(p) ? 22 : 18), `${p.kind} ${d.toFixed(1)} m from a tank`);
       }
     }
     for (const k of g.players) assert.ok(k.y > g.terrain.waterLevel + 3, 'tanks start on dry ground');
@@ -317,7 +319,7 @@ test('scenery: craters clear, topple and re-seat props; nothing floats or is bur
   const house = sc.props.find((p) => p.kind === 'house');
   g.applyEffect({ type: 'blast', point: [tree.x, tree.y, tree.z], radius: 11, damage: 0, depth: 0.6 }, 0, null);
   assert.equal(tree.state, 'gone', 'a tree at ground zero is gone');
-  g.applyEffect({ type: 'blast', point: [house.x + 9, house.y, house.z], radius: 11, damage: 0, depth: 0.6 }, 0, null);
+  g.applyEffect({ type: 'blast', point: [house.x + 6, house.y, house.z], radius: 11, damage: 0, depth: 0.6 }, 0, null);
   assert.equal(house.state, 'ruin', 'a house beside a blast is wrecked');
   assert.ok(g.drainEvents().some((e) => e.type === 'prop' && e.kind === 'house' && e.how === 'ruin'));
   seated(g);
@@ -432,4 +434,50 @@ test('everyone is paid a stipend at the end of a round, so nobody shops empty-ha
   assert.equal(g.players[1].money, PAY.stipend);
   assert.equal(g.players[0].money, PAY.stipend + PAY.survive + PAY.roundWin);
   assert.ok(g.buy(1, 'roller'), 'the loser can still afford something');
+});
+
+test('scenery: most tanks have a settlement around them, some near, some further off', () => {
+  let tanks = 0, near = 0;
+  const dists = [];
+  for (const seed of [3, 4, 5, 6, 7, 8]) {
+    const g = new Game({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }], rounds: 1, seed, resolution: 128 });
+    g.start();
+    const bs = g.scenery.props.filter(isBuilding);
+    for (const k of g.players) {
+      tanks++;
+      const d = Math.min(...bs.map((b) => Math.hypot(b.x - k.x, b.z - k.z)));
+      dists.push(d);
+      if (d < 130) near++;
+    }
+    assert.ok(bs.some((b) => b.kind !== 'house') || seed < 5, 'farms, towers and windmills turn up');
+  }
+  assert.ok(near >= tanks * 0.7, `${near} of ${tanks} tanks have buildings within 130 m`);
+  assert.ok(dists.some((d) => d < 45) && dists.some((d) => d > 60), `varied: ${dists.map((d) => d.toFixed(0)).join(' ')}`);
+});
+
+test('scenery: buildings wear down in stages, lean away and show the broken side to the blast', () => {
+  const t = new Heightfield({ size: 400, resolution: 100 });
+  t.heights.fill(10);
+  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 1, seed: 2, resolution: 64 });
+  const sc = g.scenery;
+  sc.terrain = t;
+  sc.clear();
+  const house = { kind: 'house', x: 0, y: 10, z: 0, rot: 0, scale: 1, tint: 0, state: 'ok', hp: 100, reach: BUILDINGS.house.reach };
+  const barn = { kind: 'barn', x: 60, y: 10, z: 0, rot: 0, scale: 1, tint: 0, state: 'ok', hp: 140, reach: BUILDINGS.barn.reach };
+  sc.props.push(house, barn);
+  sc.afterBlast(0, 15, 11);                  // a near miss: scuffed, leaning, still standing
+  assert.equal(house.state, 'ok');
+  assert.ok(house.hp < 100 && house.lean[1] < 0, 'it leans away from the blast');
+  sc.afterBlast(0, 11, 11);
+  assert.equal(house.state, 'hit', 'a second one breaks it open');
+  assert.equal(house.face, 0, 'on the side the first blow came from (+z)');
+  sc.afterBlast(0, 4, 11);
+  assert.equal(house.state, 'ruin');
+  sc.afterBlast(0, 1, 11);
+  assert.equal(house.state, 'gone', 'a ruin hit squarely is cleared');
+  sc.afterBlast(60, 2, 11);                  // the barn is tougher: a direct hit only breaks it
+  assert.equal(barn.state, 'hit');
+  assert.ok(Math.abs(barn.face) < 1e-9 || Math.abs(barn.face - Math.PI) < 1e-9, 'a box of a building shows one of its long sides');
+  const how = sc.drainEvents().filter((e) => e.type === 'prop').map((e) => `${e.kind}:${e.how}`);
+  assert.deepEqual(how, ['house:hit', 'house:ruin', 'house:gone', 'barn:hit']);
 });

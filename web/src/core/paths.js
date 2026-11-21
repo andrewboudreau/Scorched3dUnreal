@@ -94,7 +94,7 @@ export function planPaths({ terrain: t, hamlets = [], houses = [], bridge = null
       toll[k] = 1.4 + 0.9 * wander(x * 0.016, z * 0.016);
       shut[k] = h[k] < water + 0.8
         || tanks.some((p) => Math.hypot(p.x - x, p.z - z) < PATH.keepTank)
-        || houses.some((p) => Math.hypot(p.x - x, p.z - z) < PATH.keepHouse) ? 1 : 0;
+        || houses.some((p) => Math.hypot(p.x - x, p.z - z) < PATH.keepHouse + Math.max(0, (p.reach ?? 4.6) - 4.6)) ? 1 : 0;
     }
   }
 
@@ -241,6 +241,7 @@ export function planPaths({ terrain: t, hamlets = [], houses = [], bridge = null
 
   // Spurs: each door to the middle of its hamlet, if nothing is in the way.
   for (const house of houses) {
+    if (house.kind && house.kind !== 'house') continue;   // barns, silos and towers have no front path
     const m = hamlets.find((q) => Math.hypot(q.x - house.x, q.z - house.z) < 32);
     if (!m) continue;
     const d = Math.hypot(m.x - house.x, m.z - house.z) || 1;

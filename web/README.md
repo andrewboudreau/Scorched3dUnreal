@@ -204,11 +204,25 @@ second column beside the first. On a phone the players box sits top right.
   first shot is a rough guess and the error shrinks with every shot at the same
   target. It grows back when the target or shooter moves or the wind swings.
   Easy stays wild, Normal usually lands on shot 2 to 4, Hard on shot 1 to 2.
-- **Scenery is cosmetic.** Trees, bushes, rocks, hamlets, a bridge, villagers
-  and sheep never block shells (a standing house does stop a driving tank). Blasts flatten trees and bushes, turn
-  houses into ruins, drop the bridge and scatter people and sheep; whatever
-  survives is re-seated on the new ground, and props that end up buried or
-  under water are removed. Ground dug below the water level floods.
+- **Settlements round the tanks.** Most tanks have a settlement somewhere
+  around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
+  its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
+  windmill. A few more hamlets and farms sit out in the open.
+- **Buildings break in stages.** Each building has hit points (a silo is the
+  frailest, a barn the toughest). A blast takes off more the closer it lands,
+  and so does ground dug out from under it. A building leans away from each
+  blast a little more, up to about 8°. Below about two thirds of its hit points
+  it breaks open on the side the first blow came from: walls knocked through,
+  roof fallen in, a windmill's top and sails down, a silo's dome knocked off.
+  At none it falls to a ruin, and a ruin hit squarely is cleared away. A shell
+  ruins a house within about 10 m and breaks it open out to about 16 m. Windmill
+  sails turn until the mill is hit.
+- **Scenery is cosmetic.** Trees, bushes, rocks, buildings, a bridge, villagers
+  and sheep never block shells (a standing building does stop a driving tank).
+  Blasts flatten trees and bushes, wear buildings down, drop the bridge and
+  scatter people and sheep. Whatever survives is re-seated on the new ground,
+  and props that end up buried or under water are removed. Ground dug below the
+  water level floods.
 - **Armory.** Between rounds each human shops in turn (the panel names whose
   turn it is and who is next); CPU tanks buy for themselves. Everyone gets a
   $150 stipend per round on top of damage, kill and win pay.

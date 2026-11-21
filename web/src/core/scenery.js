@@ -3,15 +3,32 @@ import { makePerlin } from './noise.js';
 import { planPaths, distToPaths } from './paths.js';
 
 // Everything that makes the field look lived in: water in the lowest basins,
-// trees, bushes, rocks, a few hamlets, a footbridge, gravel roads and paths
-// (core/paths.js), villagers and sheep.
+// trees, bushes, rocks, hamlets, farms and lone towers and windmills (most
+// tanks have a settlement somewhere around them), a footbridge, gravel roads
+// and paths (core/paths.js), villagers and sheep.
 //
 // Scenery is set dressing. It never blocks a shell and never hurts a tank. It
 // does react to the ground: `afterBlast` and `afterMound` remove, topple or
 // re-seat whatever a crater or mound touched, so nothing is left floating or
-// buried. The renderer redraws when `version` changes.
+// buried. Buildings wear down in stages: a near miss knocks hit points off and
+// leans them away from the blast; below about two thirds they show the damage
+// on the side the blow came from ('hit'), at nothing they fall to a ruin, and a
+// ruin hit squarely is cleared. The renderer redraws when `version` changes.
 
-export const HOUSE = { halfW: 3.6, halfD: 2.8 };   // footprint half extents
+// Buildings: footprint half extents, hit points, the steepest ground they are
+// built on, and whether they are round (any side can face a blow).
+export const BUILDINGS = {
+  house: { halfW: 3.6, halfD: 2.8, hp: 100, slope: 0.09 },
+  barn: { halfW: 5.4, halfD: 3.9, hp: 140, slope: 0.07 },
+  silo: { halfW: 2.2, halfD: 2.2, hp: 80, slope: 0.1, round: true },
+  windmill: { halfW: 2.6, halfD: 2.6, hp: 90, slope: 0.1, round: true },
+  tower: { halfW: 2.4, halfD: 2.4, hp: 130, slope: 0.12, round: true },
+};
+for (const b of Object.values(BUILDINGS)) b.reach = Math.hypot(b.halfW, b.halfD);
+export const HOUSE = BUILDINGS.house;
+export const isBuilding = (p) => p.kind in BUILDINGS;
+export const standing = (p) => isBuilding(p) && (p.state === 'ok' || p.state === 'hit');
+const KEEP_BUILDING = 22;      // no building closer than this to a tank's pad
 export const BRIDGE = { width: 3.4, pierEvery: 9 };
 
 const KEEP_TANK = 18;          // nothing grows this close to a tank pad
@@ -36,9 +53,11 @@ export class Scenery {
   }
 
   clear() {
-    this.props = [];      // { kind, x, y, z, rot, scale, tint, state: 'ok'|'fallen'|'ruin'|'gone', fall }
+    // { kind, x, y, z, rot, scale, tint, state: 'ok'|'fallen'|'hit'|'ruin'|'gone', fall }; buildings also
+    // carry hp, face (the way their broken side turns) and lean ([x, z] radians).
+    this.props = [];
     this.walkers = [];    // villagers and sheep
-    this.hamlets = [];    // { x, z }
+    this.hamlets = [];    // { x, z }: hamlets and farms, where villagers live
     this.bridge = null;   // { a: [x, z], b: [x, z], y, alive }
     this.paths = [];      // roads and footpaths: { kind, width, points: [[x, z], ...] }
     this.events = [];
@@ -51,20 +70,21 @@ export class Scenery {
   slopeAt(x, z) { return 1 - this.terrain.normalAt(x, z)[1]; }
   dry(x, z, margin = 0) { return this.terrain.heightAt(x, z) > this.terrain.waterLevel + margin; }
 
-  // The height a prop rests at. A standing house sits on the lowest point of
-  // its footprint (its foundation covers the rest).
+  // The height a prop rests at. A standing building sits on the lowest point
+  // of its footprint (its foundation covers the rest).
   seat(p) {
     const t = this.terrain;
-    if (p.kind !== 'house' || p.state !== 'ok') return t.heightAt(p.x, p.z);
+    if (!standing(p)) return t.heightAt(p.x, p.z);
     return Math.min(t.heightAt(p.x, p.z), ...this.footprint(p).map(([x, z]) => t.heightAt(x, z)));
   }
 
   footprint(p) {
+    const B = BUILDINGS[p.kind] || HOUSE;
     const c = Math.cos(p.rot);
     const s = Math.sin(p.rot);
     return [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([u, v]) => {
-      const lx = u * HOUSE.halfW;
-      const lz = v * HOUSE.halfD;
+      const lx = u * B.halfW;
+      const lz = v * B.halfD;
       return [p.x + lx * c + lz * s, p.z - lx * s + lz * c];
     });
   }
@@ -87,30 +107,94 @@ export class Scenery {
     for (const h of t.heights) { if (h < lo) lo = h; if (h > hi) hi = h; }
     const band = (h) => (h - lo) / Math.max(1, hi - lo);
 
-    // Hamlets: a handful of houses on flat, dry ground away from the tanks.
-    const houses = [];
-    const wantHamlets = Math.max(1, Math.round(3 * area));
+    // Buildings. Most tanks get a settlement somewhere round them (a hamlet, a
+    // farm, or a lone tower or windmill), near or a fair way off, so shots at
+    // a tank put a roof or two at risk; then a few hamlets out in the open.
+    const houses = [];   // every building, whatever its kind
+    const raise = (kind, x, z, rot, gap = 3) => {
+      const B = BUILDINGS[kind];
+      if (!t.inBounds(x, z) || !this.dry(x, z, 2) || this.slopeAt(x, z) > B.slope) return null;
+      if (nearTank(x, z, KEEP_BUILDING + Math.max(0, B.reach - HOUSE.reach))) return null;
+      if (houses.some((h) => Math.hypot(h.x - x, h.z - z) < h.reach + B.reach + gap)) return null;
+      t.flatten(x, z, B.reach);
+      const p = { kind, x, y: 0, z, rot, scale: rng.range(0.92, 1.1), tint: rng.int(0, 3), state: 'ok', hp: B.hp, reach: B.reach };
+      houses.push(p);
+      return p;
+    };
+    // Houses in a ring, doors to the middle, give or take.
+    const ring = (x, z, want, near, far) => {
+      let n = 0;
+      for (let k = 0; k < 40 && n < want; k++) {
+        const a = rng.range(0, Math.PI * 2);
+        const r = rng.range(near, far);
+        if (raise('house', x + Math.cos(a) * r, z + Math.sin(a) * r, -a - Math.PI / 2 + rng.range(-0.4, 0.4))) n++;
+      }
+      return n;
+    };
+    // Off at the edge of a settlement: a windmill or a watchtower.
+    const lone = (kind, x, z, near, far) => {
+      for (let k = 0; k < 16; k++) {
+        const a = rng.range(0, Math.PI * 2);
+        const r = rng.range(near, far);
+        if (raise(kind, x + Math.cos(a) * r, z + Math.sin(a) * r, rng.range(0, Math.PI * 2))) return true;
+      }
+      return false;
+    };
+    const settle = {
+      hamlet: (x, z) => {
+        if (ring(x, z, rng.int(3, 5), 8, 24) < 2) return false;
+        this.hamlets.push({ x, z });
+        if (rng.next() < 0.35) lone(rng.next() < 0.6 ? 'windmill' : 'tower', x, z, 26, 40);
+        return true;
+      },
+      // A barn with its silo at one gable end, and the farmhouse across the yard.
+      farm: (x, z) => {
+        const rot = rng.range(0, Math.PI * 2);
+        const barn = raise('barn', x, z, rot);
+        if (!barn) return false;
+        const end = rng.next() < 0.5 ? 1 : -1;
+        const L = (BUILDINGS.barn.halfW + BUILDINGS.silo.halfW + 1) * end;
+        raise('silo', x + L * Math.cos(rot), z - L * Math.sin(rot), rng.range(0, Math.PI * 2), -4);
+        const a = -rot + Math.PI / 2 + rng.range(-0.5, 0.5);   // off a long side (local x runs along -rot)
+        const r = rng.range(14, 19);
+        raise('house', x + Math.cos(a) * r, z + Math.sin(a) * r, -a - Math.PI / 2);
+        if (rng.next() < 0.4) lone('windmill', x, z, 24, 34);
+        // The yard between barn and house is the middle: the road comes there.
+        this.hamlets.push({ x: x + Math.cos(a) * 9.5, z: z + Math.sin(a) * 9.5 });
+        return true;
+      },
+      outpost: (x, z) => {
+        if (!raise(rng.next() < 0.5 ? 'tower' : 'windmill', x, z, rng.range(0, Math.PI * 2))) return false;
+        if (rng.next() < 0.6) ring(x, z, 1, 10, 16);
+        return true;
+      },
+    };
+    const clearOf = (x, z, r) => !this.hamlets.some((h) => Math.hypot(h.x - x, h.z - z) < r) && !houses.some((h) => Math.hypot(h.x - x, h.z - z) < 30);
+    for (const k of tanks) {
+      if (rng.next() < 0.12) continue;   // now and then a tank stands out in the open
+      const roll = rng.next();
+      const order = roll < 0.5 ? ['hamlet', 'farm', 'outpost'] : roll < 0.8 ? ['farm', 'hamlet', 'outpost'] : ['outpost', 'farm'];
+      let done = false;
+      for (const kind of order) {
+        const [near, far] = kind === 'hamlet' ? [40, 105] : [30, 85];
+        for (let tries = 0; tries < 50 && !done; tries++) {
+          const a = rng.range(0, Math.PI * 2);
+          const d = rng.range(near, far);
+          const x = k.x + Math.cos(a) * d;
+          const z = k.z + Math.sin(a) * d;
+          if (!t.inBounds(x, z) || !this.dry(x, z, 2.5) || this.slopeAt(x, z) > 0.05) continue;
+          if (tanks.some((o) => o !== k && Math.hypot(o.x - x, o.z - z) < 38) || !clearOf(x, z, 70)) continue;
+          done = settle[kind](x, z);
+        }
+        if (done) break;
+      }
+    }
+    const wantHamlets = this.hamlets.length + Math.max(1, Math.round(2 * area));
     for (let tries = 0; tries < 400 && this.hamlets.length < wantHamlets; tries++) {
       const [x, z] = spot(0.4);
       if (!this.dry(x, z, 2.5) || this.slopeAt(x, z) > 0.035 || band(t.heightAt(x, z)) > 0.65) continue;
-      if (nearTank(x, z, 55) || this.hamlets.some((h) => Math.hypot(h.x - x, h.z - z) < 150)) continue;
-      const hamlet = { x, z };
-      const want = rng.int(3, 6);
-      let built = 0;
-      for (let k = 0; k < 40 && built < want; k++) {
-        const a = rng.range(0, Math.PI * 2);
-        const r = rng.range(9, 28);
-        const hx = x + Math.cos(a) * r;
-        const hz = z + Math.sin(a) * r;
-        if (!t.inBounds(hx, hz) || !this.dry(hx, hz, 2) || this.slopeAt(hx, hz) > 0.09) continue;
-        if (nearTank(hx, hz, 32) || houses.some((h) => Math.hypot(h.x - hx, h.z - hz) < 12.5)) continue;
-        t.flatten(hx, hz, 4.6);
-        // Doors face the middle of the hamlet, give or take.
-        const house = { kind: 'house', x: hx, y: 0, z: hz, rot: -a - Math.PI / 2 + rng.range(-0.4, 0.4), scale: rng.range(0.9, 1.15), tint: rng.int(0, 3), state: 'ok' };
-        houses.push(house);
-        built++;
-      }
-      if (built >= 2) this.hamlets.push(hamlet);
+      if (nearTank(x, z, 55) || !clearOf(x, z, 150)) continue;
+      settle[rng.next() < 0.75 ? 'hamlet' : 'farm'](x, z);
     }
     this.props.push(...houses);
 
@@ -124,7 +208,7 @@ export class Scenery {
     const count = { pine: 0, oak: 0, bush: 0, rock: 0 };
     const cap = { pine: 170 * area, oak: 150 * area, bush: 170 * area, rock: 110 * area };
     const blocked = (x, z) => nearTank(x, z, KEEP_TANK)
-      || houses.some((h) => Math.hypot(h.x - x, h.z - z) < 7.5)
+      || houses.some((h) => Math.hypot(h.x - x, h.z - z) < h.reach + 3)
       || (this.bridge && distToSegment(x, z, this.bridge.a, this.bridge.b) < 6)
       || distToPaths(this.paths, x, z) < 2.5;
     for (let i = 0; i < 3200 * area; i++) {
@@ -242,13 +326,16 @@ export class Scenery {
       if (p.state === 'gone') continue;
       const d = Math.hypot(p.x - cx, p.z - cz);
       if (p.kind === 'rock') continue;             // rocks just drop into the hole
-      if (p.kind === 'house') {
-        if (p.state === 'ruin' && d < radius * 0.6) this.remove(p);
-        else if (p.state === 'ok' && d < radius + 4.5) this.ruin(p);
+      if (isBuilding(p)) {
+        if (p.state === 'ruin') { if (d < radius * 0.6) this.remove(p); continue; }
+        // Full force out to the walls, fading to nothing a little past the blast.
+        const B = BUILDINGS[p.kind];
+        const reach = radius + B.reach + 1.5;
+        if (d < reach) this.damage(p, radius * 11 * Math.min(1, (reach - d) / (reach - B.reach)), cx, cz);
       } else if (d < radius * 0.85) this.remove(p);
       else if (isTree(p) && p.state === 'ok' && d < radius * 1.3) this.topple(p, Math.atan2(p.z - cz, p.x - cx));
     }
-    this.settle(cx, cz, radius + 6);
+    this.settle(cx, cz, radius + 6 + this.terrain.cell);   // a cell more: the ground between grid points moves too
     const b = this.bridge;
     if (b && b.alive && distToSegment(cx, cz, b.a, b.b) < radius + 2) this.dropBridge();
     for (const w of this.walkers) {
@@ -261,7 +348,7 @@ export class Scenery {
 
   // A mound of `radius` was just raised at (cx, cz).
   afterMound(cx, cz, radius) {
-    this.settle(cx, cz, radius + 6);
+    this.settle(cx, cz, radius + 6 + this.terrain.cell);   // a cell more: the ground between grid points moves too
     const b = this.bridge;
     if (b && b.alive && distToSegment(cx, cz, b.a, b.b) < radius) this.dropBridge();
     for (const w of this.walkers) {
@@ -280,16 +367,42 @@ export class Scenery {
       const shift = g - p.y;
       if (shift > 1.2) { this.remove(p, 'buried'); continue; }
       if (p.kind !== 'rock' && t.heightAt(p.x, p.z) < t.waterLevel - 0.4) { this.remove(p, 'drowned'); continue; }
-      if (p.kind === 'house' && p.state === 'ok') {
+      if (standing(p)) {
+        // Ground pulled out from under it, or heaved up against one side:
+        // the worse the slump, the harder it is shaken.
         const uneven = Math.max(...this.footprint(p).map(([x, z]) => t.heightAt(x, z))) - g;
-        if (Math.abs(shift) > 0.5 || uneven > 1.2) { this.ruin(p); g = this.seat(p); }
+        const slump = Math.max(Math.abs(shift) - 1, uneven - 1.8);
+        if (slump > 0) { this.damage(p, BUILDINGS[p.kind].hp * Math.min(0.7, 0.1 + 0.25 * slump), cx, cz); g = this.seat(p); }
       } else if (isTree(p) && p.state === 'ok' && shift < -2.5) this.topple(p, this.rng.range(0, Math.PI * 2));
       p.y = g;
     }
     for (const w of this.walkers) if (w.alive) w.y = t.heightAt(w.x, w.z);
   }
 
-  ruin(p) { p.state = 'ruin'; p.y = this.seat(p); this.note(p, 'ruin'); }
+  // Knock `amount` hit points off a building, the blow coming from (fromX, fromZ).
+  damage(p, amount, fromX, fromZ) {
+    const B = BUILDINGS[p.kind];
+    if (p.hp == null) p.hp = B.hp;
+    p.hp -= amount;
+    const toward = Math.atan2(fromX - p.x, fromZ - p.z);
+    // The broken side (+z in the damaged model) turns toward the first real
+    // blow. A box of a building has two sides it can show; a round one any.
+    if (p.face == null) p.face = B.round ? toward : (Math.cos(toward - p.rot) >= 0 ? p.rot : p.rot + Math.PI);
+    // Lean away from the blast, more for a harder blow, up to about 8°.
+    const d = Math.hypot(p.x - fromX, p.z - fromZ) || 1;
+    const push = 0.05 * Math.min(1, amount / B.hp);
+    const lean = [(p.lean?.[0] || 0) + ((p.x - fromX) / d) * push, (p.lean?.[1] || 0) + ((p.z - fromZ) / d) * push];
+    const m = Math.hypot(lean[0], lean[1]);
+    p.lean = m > 0.14 ? [lean[0] * 0.14 / m, lean[1] * 0.14 / m] : lean;
+    const next = p.hp <= 0 ? 'ruin' : p.hp <= B.hp * 0.65 ? 'hit' : 'ok';
+    if (next !== p.state) {
+      p.state = next;
+      p.y = this.seat(p);
+      this.note(p, next);
+    }
+  }
+
+  ruin(p) { p.hp = 0; p.state = 'ruin'; p.y = this.seat(p); this.note(p, 'ruin'); }
   topple(p, dir) { p.state = 'fallen'; p.fall = dir; this.note(p, 'fallen'); }
 
   dropBridge() {
