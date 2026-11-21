@@ -41,6 +41,10 @@ each other.
 | - / = | volume down / up (also a slider on the setup screen; it is remembered) |
 | Mouse | drag to orbit, wheel to zoom |
 
+On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
+an aim pad and power strip for the right thumb, a drive cross and jump jet for
+the left, and an optional tilt aim. See `docs/mobile.md`.
+
 ## How it plays
 
 - **Wind** sits in the aim card, under Power. Its arrow is drawn from behind

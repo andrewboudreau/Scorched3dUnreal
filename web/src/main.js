@@ -17,6 +17,7 @@ import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
+import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -36,6 +37,7 @@ $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const sky = new Sky(scene);   // sun, sky light, fog, clouds
+if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 6000);
 camera.position.set(0, 420, 520);
@@ -1065,6 +1067,7 @@ function flashInset(amount) {
   box.classList.remove('hit');
   void box.offsetWidth;                                  // restart the animation
   box.classList.add('hit');
+  touch?.buzz([40, 30, 70]);
 }
 
 function popDamage(pid, amount) {
@@ -1222,6 +1225,8 @@ $('opt-volume').addEventListener('input', () => { sound.ensure(); setVolume(Numb
 window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
+// On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
+const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure() }) : null;
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
@@ -1251,7 +1256,10 @@ $('weapon-bar').addEventListener('click', (e) => {
 });
 
 function applyHeldKeys(dt) {
-  if (!game || handoffOpen || game.phase !== 'aim' || !game.current || game.current.ai) return;
+  const live = game && !handoffOpen && game.phase === 'aim' && game.current && !game.current.ai;
+  const pad = touch?.take(dt, live ? game.current : null);   // touch aim pad, power strip and tilt
+  if (!live) return;
+  if (pad) game.adjustAim(pad.yaw, pad.elev, pad.power);
   const fine = held.has('shift') ? 0.2 : 1;
   const ax = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
   const ay = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
@@ -2251,3 +2259,4 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   get timeScale() { return timeScale; },
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };
+if (touch) window.craterfall.touch = touch;
