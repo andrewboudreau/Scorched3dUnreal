@@ -1825,7 +1825,7 @@ function openShopFor(pid) {
         <div class="desc">${it.desc}</div>
         <div class="si-foot">
           <span class="si-gives">${gives}${short > 0 ? `<span class="si-short">need $${short} more</span>` : ''}</span>
-          <button class="buy" data-id="${it.id}" ${short > 0 ? 'disabled' : ''}>${short > 0 ? `$${price}` : `Buy for $${price}`}</button>
+          <button class="buy" data-id="${it.id}" aria-label="Buy ${it.name} for $${price}" ${short > 0 ? 'disabled' : ''}>$${price}</button>
         </div>
       </div>`;
     }).join('');
