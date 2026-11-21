@@ -73,7 +73,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
 the left with ⚙ Settings above Jet, and Fine, Find, View and Chat (online) in
-the middle. Tap the ground or a tank to turn the turret toward it. The weapon
+the middle. SIGHT (above the weapon button) looks down your turret line. The weapon
 button above Fire opens the weapons as a pop-up, and the keyboard hints are
 hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
 landscape. See `docs/mobile.md`.

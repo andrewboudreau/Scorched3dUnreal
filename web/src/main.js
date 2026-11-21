@@ -23,7 +23,6 @@ import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
-import { groundHit, tankHit, bearingTo } from './core/tapaim.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -353,7 +352,7 @@ function handleEvents() {
         setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
           Math.max(50, bannerHold - performance.now()));
         if (touch && !p.ai && !p.shots.length && game.round === 1) {
-          setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('Tap the ground or a tank to turn toward it', 4500); },
+          setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('SIGHT looks down your barrel; drag there to aim', 4500); },
             Math.max(50, bannerHold - performance.now()) + 1800);
         }
         break;
@@ -1340,43 +1339,12 @@ function updateCamera(dt) {
 // Only a real drag or a wheel zoom takes the camera over; a plain click (e.g. to
 // focus the page) must not strand it halfway through a fly-in.
 let dragFrom = null;
-// A tap (one finger, short, hardly moving) aims on a touch screen; see tapAim.
-let tapFrom = null;
-const pointers = new Set();
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  dragFrom = [e.clientX, e.clientY];
-  pointers.add(e.pointerId);
-  tapFrom = pointers.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
-});
+renderer.domElement.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; userCam = true; }
-  if (tapFrom && Math.hypot(e.clientX - tapFrom.x, e.clientY - tapFrom.y) > 10) tapFrom = null;
 });
-renderer.domElement.addEventListener('pointerup', (e) => {
-  if (touch && tapFrom && performance.now() - tapFrom.t < 350) tapAim(e.clientX, e.clientY);
-  tapFrom = null;
-});
-for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => { dragFrom = null; pointers.delete(e.pointerId); });
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, () => { dragFrom = null; });
 
-// Touch: tap the ground or a tank to turn the turret toward it, so the first
-// shot does not start with a long drag round on the pad. Bearing only.
-const tapRay = new THREE.Raycaster(), tapNdc = new THREE.Vector2();
-function tapAim(cx, cy) {
-  const p = game?.current;
-  if (!p || p.ai || handoffOpen || game.phase !== 'aim') return;
-  const r = renderer.domElement.getBoundingClientRect();
-  tapNdc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
-  tapRay.setFromCamera(tapNdc, camera);
-  const o = tapRay.ray.origin.toArray(), d = tapRay.ray.direction.toArray();
-  const tank = tankHit(o, d, game.players.filter((q) => q !== p && q.alive && seen(q)));
-  const t = game.terrain;
-  const spot = tank ? [tank.x, tank.y, tank.z] : groundHit(o, d, (x, z) => t.heightAt(x, z), (x, z) => t.inBounds(x, z));
-  if (!spot || Math.hypot(spot[0] - p.x, spot[2] - p.z) < 15) return;   // the sky, or your own tank
-  game.adjustAim(((bearingTo(p, spot[0], spot[2]) - p.yaw + 540) % 360) - 180, 0, 0);
-  sound.click();
-  touch.buzz(10);
-  touch.note(tank ? `Turret on ${tank.name}` : 'Turret turned there');
-}
 renderer.domElement.addEventListener('wheel', () => { camGoal = null; userCam = true; }, { passive: true });
 
 // ---------------------------------------------------------------- input
@@ -2510,13 +2478,13 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
 if (touch) window.craterfall.touch = touch;
 
 // Resource-pack review (P): where tools/devserver.mjs serves the asset library
-// at api/packs, or with ?packs in the address, from the shareable packs mirrored
-// into the live site (tools/packmirror.py). Otherwise nothing more is loaded.
+// at api/packs, that; elsewhere (the live site) the shareable packs mirrored
+// into it (tools/packmirror.py), fetched only when Settings > Resource packs is
+// first opened, or at once with ?packs in the address.
 const packsHere = () => fetch('api/packs').then((r) => (r.ok ? r.json() : null));
-const packsMirror = () => (new URLSearchParams(location.search).has('packs')
-  ? fetch('packs/index.json').then((r) => (r.ok ? r.json() : null)) : null);
-packsHere().catch(() => null).then((lib) => lib || packsMirror()).then(async (lib) => {
-  if (!lib?.packs?.length) return;
+const packsMirror = () => fetch('packs/index.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+async function makeReview(lib) {
+  if (review) return review;
   const { PackReview } = await import('./review.js');
   review = new PackReview(lib, {
     scene, sky, renderer, camera, controls, sound, banner,
@@ -2524,5 +2492,22 @@ packsHere().catch(() => null).then((lib) => lib || packsMirror()).then(async (li
     groundAt: (x, z) => (game ? game.terrain : menuField.terrain).heightAt(x, z),
   });
   window.craterfall.review = review;
-  settings.add({ id: 'packs', group: 'more', label: 'Resource packs', hint: lib.static ? 'the shareable packs, phone-sized' : touch ? 'the asset library' : 'the asset library · P', run: () => review.toggle(true) });
+  return review;
+}
+packsHere().catch(() => null).then(async (lib) => {
+  if (lib?.packs?.length) {
+    await makeReview(lib);
+    settings.add({ id: 'packs', group: 'more', label: 'Resource packs', hint: touch ? 'the asset library' : 'the asset library · P', run: () => review.toggle(true) });
+    return;
+  }
+  const open = async () => {
+    if (!review) {
+      const mirror = await packsMirror();
+      if (!mirror?.packs?.length) { banner('No resource packs here', '', 1200); return; }
+      await makeReview(mirror);
+    }
+    review.toggle(true);
+  };
+  settings.add({ id: 'packs', group: 'more', label: 'Resource packs', hint: 'the shareable packs, phone-sized', run: open });
+  if (new URLSearchParams(location.search).has('packs')) packsMirror().then((m) => m?.packs?.length && makeReview(m));
 }).catch(() => { /* no pack library here */ });

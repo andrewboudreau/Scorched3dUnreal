@@ -23,7 +23,7 @@ sideways" card over the game (menus can stay portrait-friendly).
 
 | Zone | Control | Feeds |
 | --- | --- | --- |
-| Anywhere | **Tap to aim**: tap the ground or a tank and the turret turns to face it (bearing only; elevation, power and wind stay yours). Round one's first plan says so | `src/core/tapaim.js` |
+| Right thumb | **SIGHT**, above the weapon button: the camera looks down your turret line; then drag anywhere to aim (↔ turret, ↕ elevation, 1:1 with the view) and pinch to zoom. Round one's first plan says so. (Tap-to-aim was taken out: a stray tap swung the turret) | G; `src/gunner.js` |
 | Right thumb | **Aim pad**: drag ↔ turret, ↕ elevation, like a trackpad (relative, with pointer acceleration: slow is precise, a flick turns far) | `game.adjustAim`, as held A/D/W/S do |
 | Right thumb | **Power strip** beside it: drag ↕ | `adjustAim` power, as Q/E do |
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
