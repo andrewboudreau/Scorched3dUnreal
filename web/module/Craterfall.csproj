@@ -26,6 +26,8 @@
     <Content Include="..\manifest.webmanifest" Link="wwwroot\manifest.webmanifest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\img\**" Link="wwwroot\img\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\vendor\**" Link="wwwroot\vendor\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The shareable resource packs for reviewing on a phone (?packs): built by tools/packmirror.py, not in git. -->
+    <Content Include="..\packmirror\**" Link="wwwroot\packs\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

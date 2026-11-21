@@ -374,3 +374,4 @@ body.touch #review-pill { right: auto; bottom: auto; top: 74px; left: 50%; trans
 .rv-drop.on { background: rgba(230, 90, 80, .35) !important; border-color: #e65a50 !important; }
 .rv-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, .12); color: var(--muted); }
 .rv-foot button { margin-left: auto; }
+.rv-copy { margin: 0 12px 6px; height: 70px; font: 11px monospace; color: var(--text); background: rgba(0, 0, 0, .4); }

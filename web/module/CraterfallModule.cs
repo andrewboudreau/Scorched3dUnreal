@@ -15,7 +15,8 @@ public class CraterfallModule : IApplicationPartModule
 {
     public string Name => "Craterfall";
 
-    private static readonly FileExtensionContentTypeProvider ContentTypes = new();
+    // .hdr: the sky HDRIs in the phone pack mirror (packs/, from tools/packmirror.py).
+    private static readonly FileExtensionContentTypeProvider ContentTypes = new() { Mappings = { [".hdr"] = "application/octet-stream" } };
 
     public void Configure(WebApplication app)
     {

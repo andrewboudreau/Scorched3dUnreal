@@ -66,14 +66,14 @@ export class PackReview {
     el.className = 'hidden';
     el.innerHTML = `
       <div class="rv-head">
-        <b>Resource packs</b><small>local review</small>
+        <b>Resource packs</b><small>${this.lib.static ? 'shareable packs, phone-sized' : 'local review'}</small>
         <button class="rv-x" title="Close (P)">&#x2715;</button>
       </div>
       <select class="rv-packs"></select>
       <div class="rv-about"></div>
       <div class="rv-tools"></div>
       <div class="rv-list"></div>
-      <div class="rv-foot"><span class="rv-count"></span><button class="rv-save">Save picks</button></div>`;
+      <div class="rv-foot"><span class="rv-count"></span><button class="rv-save">${this.lib.static ? 'Copy picks' : 'Save picks'}</button></div>`;
     document.body.appendChild(el);
     const $ = (s) => el.querySelector(s);
     this.$ = $;
@@ -220,8 +220,31 @@ export class PackReview {
 
   async save() {
     const body = { picks: summarizePicks(this.votes, this.use) };
+    if (this.lib.static) return this.copyPicks(body.picks);
     const r = await fetch('api/packs/picks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     this.env.banner(r.ok ? 'Picks saved' : 'Save failed', r.ok ? 'docs/pack-picks.json' : `HTTP ${r.status}`, 1400);
+  }
+
+  // The live mirror can't write to the repo: put the picks on the clipboard to
+  // paste to Claude, or failing that in a box to copy by hand.
+  async copyPicks(picks) {
+    const text = `Craterfall pack picks: ${JSON.stringify(picks)}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.env.banner('Picks copied', 'Paste them to Claude', 1800);
+    } catch {
+      let box = this.el.querySelector('.rv-copy');
+      if (!box) {
+        box = document.createElement('textarea');
+        box.className = 'rv-copy';
+        box.readOnly = true;
+        this.el.insertBefore(box, this.$('.rv-foot'));
+      }
+      box.value = text;
+      box.focus();
+      box.select();
+      this.env.banner('Copy the picks', 'Select all in the box and copy', 1800);
+    }
   }
 
   // ---------------------------------------------------------------- sound

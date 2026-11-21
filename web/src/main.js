@@ -2273,9 +2273,13 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   setDay(k) { dayLock = k; } };
 if (touch) window.craterfall.touch = touch;
 
-// Resource-pack review (P): only where tools/devserver.mjs serves the asset
-// library at api/packs. Elsewhere the fetch fails and nothing more is loaded.
-fetch('api/packs').then((r) => (r.ok ? r.json() : null)).then(async (lib) => {
+// Resource-pack review (P): where tools/devserver.mjs serves the asset library
+// at api/packs, or with ?packs in the address, from the shareable packs mirrored
+// into the live site (tools/packmirror.py). Otherwise nothing more is loaded.
+const packsHere = () => fetch('api/packs').then((r) => (r.ok ? r.json() : null));
+const packsMirror = () => (new URLSearchParams(location.search).has('packs')
+  ? fetch('packs/index.json').then((r) => (r.ok ? r.json() : null)) : null);
+packsHere().catch(() => null).then((lib) => lib || packsMirror()).then(async (lib) => {
   if (!lib?.packs?.length) return;
   const { PackReview } = await import('./review.js');
   review = new PackReview(lib, {
