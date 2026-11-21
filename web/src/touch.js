@@ -225,11 +225,11 @@ export class TouchControls {
     if (s.online !== on) { s.online = on; this.el.chat.style.display = on ? '' : 'none'; }
   }
 
-  note(text) {
+  note(text, ms = 2200) {
     this.el.note.textContent = text;
     this.el.note.classList.add('show');
     clearTimeout(this.noteTimer);
-    this.noteTimer = setTimeout(() => this.el.note.classList.remove('show'), 2200);
+    this.noteTimer = setTimeout(() => this.el.note.classList.remove('show'), ms);
   }
 
   buzz(pattern) { vibe(pattern); }

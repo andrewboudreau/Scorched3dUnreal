@@ -56,7 +56,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | A / D | turret (while a Guided Missile flies: steer it left / right) |
 | W / S | elevation |
 | Q / E | power |
-| Shift | fine adjust |
+| Shift | fast aim (3×), for big turns. A short tap of an aim key is a fine step; holding ramps up to full speed |
 | ↑ / ↓ | drive forward / reverse along the hull (uses fuel) |
 | ← / → | turn the hull (free) |
 | J | jump jet: hop about 25 m the way the hull faces (does not use the shot or fuel) |
@@ -73,7 +73,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
 the left with ⚙ Settings above Jet, and Fine, Find, View and Chat (online) in
-the middle. The weapon
+the middle. Tap the ground or a tank to turn the turret toward it. The weapon
 button above Fire opens the weapons as a pop-up, and the keyboard hints are
 hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
 landscape. See `docs/mobile.md`.

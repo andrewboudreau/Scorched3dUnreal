@@ -20,6 +20,7 @@ import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
+import { groundHit, tankHit, bearingTo } from './core/tapaim.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -330,6 +331,10 @@ function handleEvents() {
         if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
         setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
           Math.max(50, bannerHold - performance.now()));
+        if (touch && !p.ai && !p.shots.length && game.round === 1) {
+          setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('Tap the ground or a tank to turn toward it', 4500); },
+            Math.max(50, bannerHold - performance.now()) + 1800);
+        }
         break;
       }
       case 'locked':
@@ -1185,11 +1190,43 @@ function updateCamera(dt) {
 // Only a real drag or a wheel zoom takes the camera over; a plain click (e.g. to
 // focus the page) must not strand it halfway through a fly-in.
 let dragFrom = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
+// A tap (one finger, short, hardly moving) aims on a touch screen; see tapAim.
+let tapFrom = null;
+const pointers = new Set();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  dragFrom = [e.clientX, e.clientY];
+  pointers.add(e.pointerId);
+  tapFrom = pointers.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
+});
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; userCam = true; }
+  if (tapFrom && Math.hypot(e.clientX - tapFrom.x, e.clientY - tapFrom.y) > 10) tapFrom = null;
 });
-window.addEventListener('pointerup', () => { dragFrom = null; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (touch && tapFrom && performance.now() - tapFrom.t < 350) tapAim(e.clientX, e.clientY);
+  tapFrom = null;
+});
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => { dragFrom = null; pointers.delete(e.pointerId); });
+
+// Touch: tap the ground or a tank to turn the turret toward it, so the first
+// shot does not start with a long drag round on the pad. Bearing only.
+const tapRay = new THREE.Raycaster(), tapNdc = new THREE.Vector2();
+function tapAim(cx, cy) {
+  const p = game?.current;
+  if (!p || p.ai || handoffOpen || game.phase !== 'aim') return;
+  const r = renderer.domElement.getBoundingClientRect();
+  tapNdc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  tapRay.setFromCamera(tapNdc, camera);
+  const o = tapRay.ray.origin.toArray(), d = tapRay.ray.direction.toArray();
+  const tank = tankHit(o, d, game.players.filter((q) => q !== p && q.alive && seen(q)));
+  const t = game.terrain;
+  const spot = tank ? [tank.x, tank.y, tank.z] : groundHit(o, d, (x, z) => t.heightAt(x, z), (x, z) => t.inBounds(x, z));
+  if (!spot || Math.hypot(spot[0] - p.x, spot[2] - p.z) < 15) return;   // the sky, or your own tank
+  game.adjustAim(((bearingTo(p, spot[0], spot[2]) - p.yaw + 540) % 360) - 180, 0, 0);
+  sound.click();
+  touch.buzz(10);
+  touch.note(tank ? `Turret on ${tank.name}` : 'Turret turned there');
+}
 renderer.domElement.addEventListener('wheel', () => { camGoal = null; userCam = true; }, { passive: true });
 
 // ---------------------------------------------------------------- input
@@ -1289,16 +1326,25 @@ $('weapon-bar').addEventListener('click', (e) => {
   if (b && game) selectWeaponSlot(Number(b.dataset.i));
 });
 
+const holding = { x: 0, y: 0, p: 0 };   // seconds each aim axis has been held
+function holdRamp(axis, on, dt) {
+  const t = holding[axis] = on ? holding[axis] + dt : 0;
+  return t < 0.12 ? 0.25 : Math.min(1, 0.25 + (t - 0.12) * 3);
+}
+
 function applyHeldKeys(dt) {
   const live = game && !handoffOpen && game.phase === 'aim' && game.current && !game.current.ai;
   const pad = touch?.take(dt, live ? game.current : null);   // touch aim pad and power strip
   if (!live) return;
   if (pad) game.adjustAim(pad.yaw, pad.elev, pad.power);
-  const fine = held.has('shift') ? 0.2 : 1;
   const ax = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
   const ay = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
   const ap = (held.has('e') || held.has('pageup') ? 1 : 0) - (held.has('q') || held.has('pagedown') ? 1 : 0);
-  if (ax || ay || ap) game.adjustAim(ax * TANK.turretSpeed * dt * fine, ay * TANK.elevationSpeed * dt * fine, ap * TANK.powerSpeed * dt * fine);
+  // A short tap moves a little (fine); holding ramps up to full speed in about
+  // a third of a second; Shift is three times as fast, for the big turns.
+  const fast = held.has('shift') ? 3 : 1;
+  const kx = holdRamp('x', ax, dt) * fast, ky = holdRamp('y', ay, dt) * fast, kp = holdRamp('p', ap, dt) * fast;
+  if (ax || ay || ap) game.adjustAim(ax * TANK.turretSpeed * dt * kx, ay * TANK.elevationSpeed * dt * ky, ap * TANK.powerSpeed * dt * kp);
   // The arrow keys drive: up and down along the hull, left and right swing it.
   const go = (held.has('arrowup') ? 1 : 0) - (held.has('arrowdown') ? 1 : 0);
   const turn = (held.has('arrowright') ? 1 : 0) - (held.has('arrowleft') ? 1 : 0);
