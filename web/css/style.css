@@ -30,6 +30,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 .fuel label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .fuel .bar { flex: 1; height: 6px; margin: 0; }
 .fuel span { font-size: 12px; font-variant-numeric: tabular-nums; width: 34px; text-align: right; }
+.fuel.jets { margin-top: 2px; }
+.fuel.jets span { width: auto; font-weight: 700; color: #ffb347; margin-left: auto; }
+.fuel.jets span.none { color: var(--muted); font-weight: 500; }
 .fill.fl { background: linear-gradient(90deg, #d98a3a, #f2c14e); transition: none; }
 #pc-note { min-height: 16px; font-size: 12px; color: #ffb38a; }
 .perks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }

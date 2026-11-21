@@ -2,8 +2,8 @@ import { makeRng } from './rng.js';
 import { Heightfield } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes } from './weapons.js';
-import { TANK, muzzleOrigin, hitSphere, clampAim, driveStep } from './tank.js';
-import { planShot, planDrive, chooseTarget, chooseWeapon } from './ai.js';
+import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon } from './ai.js';
 import { Scenery } from './scenery.js';
 import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
 
@@ -11,6 +11,7 @@ export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06c
 
 const DEG = Math.PI / 180;
 const START_INVENTORY = { shell: Infinity, guided: 1, breacher: 1, roller: 1, mound: 1, scatter: 0, ranger: 2 };
+const START_JETS = 1;   // jump jet charges each tank starts the match with (they carry over between rounds)
 
 // Money awards.
 // Everyone gets the stipend, so even a tank that was knocked out early has
@@ -73,6 +74,7 @@ export class Game {
       score: 0,
       wins: 0,
       inventory: { ...START_INVENTORY, ...(local ? { guided: 0 } : {}) },   // no steering online
+      jets: START_JETS,
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
@@ -231,7 +233,7 @@ export class Game {
     this.refreshIntel();
     if (this.volleyMode) {
       this.volley.shown = { yaw: p.yaw, elev: p.elev, power: p.power };
-      if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
+      if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0, jump: !!go.jump };
     } else if (p.ai) this.planAi(p);
     this.emit({ type: 'turn', player: p.id, plan: this.volleyMode });
   }
@@ -375,14 +377,20 @@ export class Game {
   // from wherever it ends up. Its aim memory sees that it moved and loosens.
   planAi(p) {
     const go = this.aiWantsToDrive(p);
-    if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0 };
+    if (go) this.aiDrive = { heading: go.heading, until: p.fuel - go.budget, time: 0, jump: !!go.jump };
     else this.planAiShot(p);
   }
 
+  // A CPU's move before it shoots: drive out of trouble, and when driving
+  // will not do (no fuel, too steep) hop out with a jet. { heading, budget,
+  // jump } or null.
   aiWantsToDrive(p) {
     return planDrive({
       me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
       tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
+    }) || planJump({
+      me: p, terrain: this.terrain, difficulty: p.ai,
+      tryHop: (heading) => this.previewHop(p, heading),
     });
   }
 
@@ -494,6 +502,34 @@ export class Game {
     return { x: ghost.x, y: ghost.y, z: ghost.z, moved: Math.hypot(ghost.x - p.x, ghost.z - p.z) };
   }
 
+  // Where would a jet hop along `heading` land? Nothing moves.
+  previewHop(p, heading) {
+    return planHop(p, this.terrain, this.obstacles(), heading);
+  }
+
+  // Fire the jump jets: one charge, a hop along the hull. Lands at once, the
+  // way a drive step moves; the screen animates the arc from the event.
+  // Returns 'ok' or why not: 'nojets' | 'edge' | 'water' | 'blocked'.
+  jumpTank(p) {
+    if (!(p.jets > 0)) return 'nojets';
+    const hop = planHop(p, this.terrain, this.obstacles(), p.hull);
+    if (!hop.ok) return hop.why;
+    p.jets--;
+    const from = [p.x, p.y, p.z];
+    p.x = hop.x; p.y = hop.y; p.z = hop.z;
+    p.hitsHere = 0;
+    this.checkAimHistory(p);
+    this.emit({ type: 'jump', player: p.id, from, to: [p.x, p.y, p.z], flight: JET.flight });
+    return 'ok';
+  }
+
+  // The current human uses a jet. Returns what happened, for the HUD.
+  jump() {
+    const p = this.current;
+    if (this.phase !== 'aim' || !p || p.ai || !p.alive) return 'idle';
+    return (this.driveNote = this.jumpTank(p));
+  }
+
   // The current human drives: `dir` +1/-1 along the hull, `turn` +1/-1 swings
   // the hull (free). Returns what happened, for the HUD.
   drive(dir, turn, dt) {
@@ -508,11 +544,18 @@ export class Game {
     const d = this.aiDrive;
     d.time += dt;
     if (d.time < 0.5) return;
-    let done = d.time > 7;   // never let a drive hold the turn up
+    let done = d.time > 7 + (d.jump ? JET.flight : 0);   // never let a drive hold the turn up
     const dh = ((d.heading - p.hull + 540) % 360) - 180;
     const turn = TANK.hullTurnSpeed * dt;
-    if (Math.abs(dh) > 1) p.hull = (((p.hull + Math.max(-turn, Math.min(turn, dh))) % 360) + 360) % 360;
-    else {
+    if (d.landing > 0) {
+      // Mid-hop: wait for the screen's arc to finish before aiming.
+      d.landing -= dt;
+      done = d.landing <= 0;
+    } else if (Math.abs(dh) > 1) p.hull = (((p.hull + Math.max(-turn, Math.min(turn, dh))) % 360) + 360) % 360;
+    else if (d.jump) {
+      if (this.jumpTank(p) === 'ok') d.landing = JET.flight + 0.1;
+      else done = true;
+    } else {
       const r = this.driveTank(p, 1, dt);
       if (r !== 'ok' || p.fuel <= d.until + 0.01) done = true;
     }
@@ -613,11 +656,12 @@ export class Game {
     if (w) p.inventory[id] = (p.inventory[id] || 0) + w.bundle;
     else if (id === 'armor') p.pendingArmor += 30;
     else if (id === 'fuel') p.pendingFuel += TANK.fuelCan;
+    else if (id === 'jet') p.jets += ITEMS.find((x) => x.id === 'jet').bundle;
     return true;
   }
 
   aiShop(p) {
-    const wishlist = ['breacher', 'scatter', 'armor', 'roller', 'fuel', 'breacher'];
+    const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
     for (const id of wishlist) this.buy(p.id, id);
   }
 
@@ -769,7 +813,7 @@ export class Game {
         const split = w.flight.find((f) => f.type === 'split');
         if (split) {
           pr.dead = true;
-          for (const v of splitVelocities(pr.vel, split.count, split.spread)) {
+          for (const v of splitVelocities(pr.vel, split.count, split.spread, split.shape)) {
             const child = this.spawnProjectile(pr.pos, v, split.child, pr.owner, pr.shot);
             child.splitDone = true;
           }
@@ -858,6 +902,19 @@ export class Game {
       this.reveals.push({ owner, x: fx.point[0], z: fx.point[2], r: fx.radius, until: this.turnsThisRound + 1 + (fx.turns - 1) * per });
       this.refreshIntel();
       this.emit({ type: 'scout', pos: fx.point, radius: fx.radius, owner });
+      return;
+    }
+    if (fx.type === 'warp') {
+      // The shooter's tank goes where the shell came down, nudged to the
+      // nearest spot it can stand on. A tank blown up in the same volley stays put.
+      const p = owner != null ? this.players[owner] : null;
+      if (!p || !p.alive) return;
+      const spot = findSpot(p, t, this.obstacles(), fx.point[0], fx.point[2]);
+      if (!spot) return;
+      const from = [p.x, p.y, p.z];
+      p.x = spot.x; p.y = spot.y; p.z = spot.z;
+      p.hitsHere = 0;
+      this.emit({ type: 'warp', player: p.id, from, to: [p.x, p.y, p.z] });
       return;
     }
     if (fx.type === 'mound') {

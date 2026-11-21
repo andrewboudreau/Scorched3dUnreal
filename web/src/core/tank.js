@@ -28,7 +28,81 @@ export const TANK = {
   bodyRadius: 4.5,     // tanks keep two of these apart
 };
 
+// Jump jets: a hop along the hull. The core lands the tank at once (like a
+// drive step, so every copy of a game agrees); the screen animates the arc.
+export const JET = {
+  distance: 25,        // m along the hull
+  apex: 10,            // m above the straight line from take-off to landing
+  tries: [1, 0.8, 0.64, 0.48, 0.32],   // shorter hops to fall back on, as a share of `distance`
+  flight: 1.6,         // s, for the screen's arc and a CPU waiting for it
+  clearance: 0.3,      // m the arc must keep above the ground
+  maxRise: 22,         // m higher than take-off a hop may land (a Breacher crater is 15 m deep), but never a cliff
+};
+
 const DEG = Math.PI / 180;
+
+// Can a tank stand at x/z? Inside the arena, out of the water, and clear of
+// every other tank and standing house (`others`, like driveStep's).
+function standable(tank, terrain, others, x, z) {
+  const edge = terrain.half - 6;
+  if (Math.abs(x) > edge || Math.abs(z) > edge) return 'edge';
+  if (terrain.heightAt(x, z) < terrain.waterLevel + 0.3) return 'water';
+  for (const o of others) {
+    if (o === tank || o.alive === false) continue;
+    if (Math.hypot(o.x - x, o.z - z) < TANK.bodyRadius * 2) return 'blocked';
+  }
+  return null;
+}
+
+// Where would a jet hop along `heading` (degrees) land? { ok: true, x, y, z,
+// dist } or { ok: false, why } with why 'edge' | 'water' | 'blocked'. It tries
+// the full hop, then shorter ones, so a hop is only refused when none will do;
+// `why` is what stopped the full one. The arc is a parabola over the straight
+// line from take-off to landing and must clear the ground on the way.
+export function planHop(tank, terrain, others = [], heading = tank.hull) {
+  const ux = Math.cos(heading * DEG);
+  const uz = Math.sin(heading * DEG);
+  const y0 = terrain.heightAt(tank.x, tank.z);
+  let why = null;
+  for (const share of JET.tries) {
+    const dist = JET.distance * share;
+    const x = tank.x + ux * dist;
+    const z = tank.z + uz * dist;
+    const y1 = terrain.heightAt(x, z);
+    let fail = standable(tank, terrain, others, x, z);
+    if (!fail && y1 - y0 > JET.maxRise) fail = 'blocked';
+    if (!fail) {
+      for (let k = 1; k < 16 && !fail; k++) {
+        const s = k / 16;
+        const arc = y0 + (y1 - y0) * s + 4 * JET.apex * s * (1 - s);
+        if (arc < terrain.heightAt(tank.x + ux * dist * s, tank.z + uz * dist * s) + JET.clearance) fail = 'blocked';
+      }
+    }
+    if (!fail) return { ok: true, x, y: y1, z, dist };
+    why = why || fail;
+  }
+  return { ok: false, why };
+}
+
+// The nearest spot to x/z where a tank can stand (a Teleport's landing): the
+// point itself, else rings of candidates 3 m further out each time. Null if
+// the whole arena is somehow full.
+export function findSpot(tank, terrain, others, x, z) {
+  const edge = terrain.half - 6;
+  x = Math.min(edge, Math.max(-edge, x));
+  z = Math.min(edge, Math.max(-edge, z));
+  if (!standable(tank, terrain, others, x, z)) return { x, y: terrain.heightAt(x, z), z };
+  for (let r = 3; r <= 90; r += 3) {
+    const n = Math.max(8, Math.round((r * Math.PI * 2) / 4));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const cx = x + Math.cos(a) * r;
+      const cz = z + Math.sin(a) * r;
+      if (!standable(tank, terrain, others, cx, cz)) return { x: cx, y: terrain.heightAt(cx, cz), z: cz };
+    }
+  }
+  return null;
+}
 
 // Move a tank one step along its hull (`dir` +1 forward, -1 back). Returns
 // 'ok', or why it did not move: 'empty' | 'edge' | 'water' | 'steep' | 'blocked'.

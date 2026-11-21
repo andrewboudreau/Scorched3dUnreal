@@ -5,7 +5,7 @@
 // Only decisions travel, never frames:
 //   start  the host's settings, seed and seating: everyone builds the same game
 //   plan   one human's volley: their aim (secret until it fires) and where
-//          they drove
+//          they drove or hopped (position, hull, fuel and jump jets left)
 //   snap   once every plan is in, the host's whole game state. Everyone takes
 //          it on before the turrets swing, so any drift between screens (frame
 //          rates, a browser's maths) is gone before each volley
@@ -133,7 +133,7 @@ export class Session {
         this.sent.add(k);
         if (this.echoed('plan', (m) => m.key === g.volleyKey && m.id === id)) continue;   // sent before a reload
         this.send({ t: 'plan', key: g.volleyKey, id, plan: g.volley.plans[id] || null,
-          tank: { x: p.x, y: p.y, z: p.z, hull: p.hull, fuel: p.fuel } });
+          tank: { x: p.x, y: p.y, z: p.z, hull: p.hull, fuel: p.fuel, jets: p.jets } });
       }
     }
     // The host settles each volley once every plan is in.

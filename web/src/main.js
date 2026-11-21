@@ -4,7 +4,7 @@ import { Game, PLAYER_COLORS, FOG } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
-import { TANK, muzzleOrigin, hitSphere } from './core/tank.js';
+import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
 import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
@@ -83,6 +83,7 @@ let handoffOpen = false;        // volley planning: waiting for the next human t
 // the screen; then the camera stands back to frame every shell instead.
 let heroId = null;
 const pips = [];
+const hops = new Map();         // tank id -> the jump jet hop being drawn: { from, to, t, dur, puff }
 const ranges = new Map();       // tank id -> its last rangefinder shot: { probes, elev, at, wind }
 let locators = [];              // per tank: edge arrow pointing at it when off screen
 let peek = null;                // { id, until }: a quick look at another tank while planning
@@ -191,6 +192,7 @@ function disposeMatch() {
   clearTrails();
   closeHandoff();
   effects.clear();
+  hops.clear();
   tanks = []; wrecks = []; labels = [];
   pips.forEach(dropPip);      // takes a rangefinder pip's beam out of the scene too
   pips.length = 0;
@@ -283,6 +285,7 @@ function handleEvents() {
         pips.forEach(dropPip);
         pips.length = 0;
         ranges.clear();
+        hops.clear();
         killCam = null;
         timeScale = 1;
         document.body.classList.remove('killcam');
@@ -296,8 +299,8 @@ function handleEvents() {
         }
         break;
       case 'terrain':
-        if (e.full) { terrainMesh.rebuild(); sceneryMesh.rebuild(); terrainMesh.setPaths(game.scenery.paths); }
-        else { terrainMesh.updateRegion(e.region); terrainMesh.scuffPaths(e.region); }
+        if (e.full) { dirty.length = 0; terrainMesh.rebuild(); sceneryMesh.rebuild(); terrainMesh.setPaths(game.scenery.paths); }
+        else addDirty(e.region);
         break;
       case 'turn': {
         const p = game.players[e.player];
@@ -326,7 +329,21 @@ function handleEvents() {
       case 'aimReset':
         if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
         break;
+      case 'jump':
+        startHop(e);
+        break;
+      case 'warp': {
+        hops.delete(e.player);
+        const q = game.players[e.player];
+        if (seen(q)) {
+          effects.warp(e.from);
+          effects.warp(e.to);
+        }
+        sound.warp(camDist(e.to));
+        break;
+      }
       case 'fire': {
+        hops.delete(e.player);   // it shoots from where it stands, so a hop in the air is over
         // Its next shot retires a tank's rangefinder marks.
         pips.forEach((q) => { if (q.sticky && q.owner === e.player) { q.sticky = false; q.until = performance.now() + 600; } });
         if (e.weapon === 'ranger') {
@@ -433,6 +450,77 @@ function handleEvents() {
         break;
       default:
         break;
+    }
+  }
+  flushDirty();
+}
+
+// Craters of one frame (a Flak burst is fourteen) are merged where they overlap
+// and the mesh is rebuilt once over each merged box, not once per blast. The
+// ground in the core is already final when they are drained, so nothing is lost.
+const dirty = [];
+function addDirty(r) {
+  let box = { ...r };
+  for (let k = dirty.length - 1; k >= 0; k--) {
+    const d = dirty[k];
+    if (d.i0 > box.i1 || d.i1 < box.i0 || d.j0 > box.j1 || d.j1 < box.j0) continue;
+    box = { i0: Math.min(d.i0, box.i0), i1: Math.max(d.i1, box.i1), j0: Math.min(d.j0, box.j0), j1: Math.max(d.j1, box.j1) };
+    dirty.splice(k, 1);
+    k = dirty.length;   // the grown box may now reach ones it missed
+  }
+  dirty.push(box);
+}
+
+function flushDirty() {
+  for (const r of dirty) { terrainMesh.updateRegion(r); terrainMesh.scuffPaths(r); }
+  dirty.length = 0;
+}
+
+// ---------------------------------------------------------------- jump jets
+
+const JUMP_NOTES = { nojets: 'No jump jets left', edge: 'Edge of the arena', water: 'Water ahead', blocked: 'No room to land that way' };
+
+// J: use a charge. The core has already moved the tank; this draws the arc.
+function doJump() {
+  const p = game.current;
+  if (!p || p.ai || game.phase !== 'aim' || hops.has(p.id)) return;
+  const r = game.jump();
+  const why = JUMP_NOTES[r];
+  if (why) driveNote = { text: why, until: performance.now() + 1400 };
+}
+
+function startHop(e) {
+  hops.set(e.player, { from: e.from, to: e.to, t: 0, dur: e.flight || JET.flight, puff: 0 });
+  if (!seen(game.players[e.player])) return;
+  effects.dust(e.from, 5);
+  effects.jetFlame({ x: e.from[0], y: e.from[1] + 0.5, z: e.from[2] });
+  sound.jet(camDist(e.from));
+  addShake(e.from, 0.4);
+}
+
+// Each frame, put the hopping tanks along their arcs (over what `sync` just did).
+function updateHops(dt) {
+  for (const [id, h] of hops) {
+    const t = tanks[id];
+    h.t += dt;
+    const s = Math.min(1, h.t / h.dur);
+    const lerp = (a, b) => a + (b - a) * s;
+    const x = lerp(h.from[0], h.to[0]);
+    const z = lerp(h.from[2], h.to[2]);
+    const y = lerp(h.from[1], h.to[1]) + 4 * JET.apex * s * (1 - s);
+    t.root.position.set(x, y, z);
+    if (s < 0.6 && (h.puff -= dt) <= 0 && seen(game.players[id])) {
+      h.puff = 0.04;
+      effects.jetFlame({ x, y: y + 0.3, z });
+    }
+    if (s >= 1) {
+      hops.delete(id);
+      if (seen(game.players[id])) {
+        effects.dust(h.to, 6);
+        effects.dust(h.to, 9);
+        sound.thud(camDist(h.to));
+        addShake(h.to, 0.7);
+      }
     }
   }
 }
@@ -1088,6 +1176,7 @@ window.addEventListener('keydown', (e) => {
   if (k === ' ') { e.preventDefault(); if (game.current && !game.current.ai && game.fire()) { /* fired */ } }
   else if (k === 'tab') { game.cycleWeapon(e.shiftKey ? -1 : 1); sound.click(); }
   else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
+  else if (k === 'j') doJump();
   else if (k === 'f') peekNext();
   else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
   else if (k === 'v') {
@@ -1146,7 +1235,7 @@ function applyHeldKeys(dt) {
   // The arrow keys drive: up and down along the hull, left and right swing it.
   const go = (held.has('arrowup') ? 1 : 0) - (held.has('arrowdown') ? 1 : 0);
   const turn = (held.has('arrowright') ? 1 : 0) - (held.has('arrowleft') ? 1 : 0);
-  if (go || turn) {
+  if ((go || turn) && !hops.has(game.current.id)) {
     // Driving with the camera far away (or zoomed right out) brings it back to the tank.
     if (!camGoal && !overview && !pinned && camera.position.distanceTo(controls.target) > 260) aimCameraAt(game.current);
     const why = DRIVE_NOTES[game.drive(go, turn, dt)];
@@ -1256,7 +1345,7 @@ function setPerks(el, p, long) {
 // The HUD's fixed elements, looked up once.
 let hudEls = null;
 const HUD_IDS = ['pc-swatch', 'pc-name', 'pc-tag', 'pc-hp', 'pc-armor', 'pc-money', 'pc-fuel', 'ro-fuel', 'pc-note', 'pc-perks', 'ro-yaw', 'ro-elev',
-  'ro-power', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label'];
+  'ro-power', 'ro-jets', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label'];
 
 function updateHud() {
   if (!hudEls) { hudEls = {}; for (const id of HUD_IDS) hudEls[id] = $(id); }
@@ -1272,6 +1361,8 @@ function updateHud() {
     setText(E['pc-money'], String(p.money));
     setStyle(E['pc-fuel'], 'width', `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`);
     setText(E['ro-fuel'], `${Math.floor(p.fuel + 0.05)} m`);
+    setText(E['ro-jets'], `${p.jets > 0 ? 'J ' : ''}×${p.jets}`);
+    if (E['ro-jets'].classList.contains('none') !== !(p.jets > 0)) E['ro-jets'].classList.toggle('none', !(p.jets > 0));
     const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
     setText(E['pc-note'], noting ? driveNote.text : '');
     setPerks(E['pc-perks'], p, true);
@@ -1633,6 +1724,7 @@ const SHOP_HINT = 'Shells are free and never run out. Everything here is extra.'
 const ITEM_INFO = {
   armor: { have: (p) => p.pendingArmor, owned: (n) => `+${n} fitted`, none: 'None fitted', gives: '+30 armor' },
   fuel: { have: (p) => p.pendingFuel, owned: (n) => `+${n} m loaded`, none: 'None loaded', gives: `+${TANK.fuelCan} m of driving` },
+  jet: { have: (p) => p.jets, owned: (n) => `You have ${n}`, none: 'You have none', gives: `${ITEMS.find((i) => i.id === 'jet').bundle} charges per purchase` },
 };
 
 function openShopFor(pid) {
@@ -2052,6 +2144,7 @@ function tick(dt, draw = true) {
     handleEvents();
     terrainMesh.flushPaths?.(renderer);   // upload just the scuffed part of the path mask
     game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, sdt));
+    updateHops(sdt);
     updateFog(dt);
     tankSmoke(dt);
     for (const pr of game.projectiles) {

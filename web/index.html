@@ -12,10 +12,10 @@
   <meta property="og:title" content="Craterfall: 3D artillery" />
   <meta property="og:description" content="Tanks, wind and destructible hills. Fire all together or take turns, against CPUs or friends online. No install." />
   <meta property="og:url" content="https://blogfor.net/Craterfall/" />
-  <meta property="og:image" content="https://blogfor.net/Craterfall/img/og.jpg" />
+  <meta property="og:image" content="https://blogfor.net/Craterfall/img/og.jpg?v=2" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="A red tank on a hilltop at golden hour, a shell bursting on the slope ahead." />
+  <meta property="og:image:alt" content="A red tank tipped on the rim of a fresh crater, a shell bursting ahead and a blue tank on the far hill." />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="stylesheet" href="css/style.css" />
   <script type="importmap">
@@ -32,6 +32,7 @@
       <div class="bar"><div id="pc-hp" class="fill hp"></div><div id="pc-armor" class="fill armor"></div></div>
       <div class="pc-money">$<span id="pc-money">0</span></div>
       <div class="fuel"><label>Fuel</label><div class="bar"><div id="pc-fuel" class="fill fl"></div></div><span id="ro-fuel">0 m</span></div>
+      <div class="fuel jets" title="Jump jets: press J while planning to hop about 25 m the way the hull faces"><label>Jump jets</label><span id="ro-jets">×0</span></div>
       <div id="pc-note"></div>
       <div class="readout">
         <div><label>Turret</label><span id="ro-yaw">0°</span><small id="last-yaw" class="last"></small></div>
@@ -63,7 +64,7 @@
 
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
-      &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> <span id="help-fire">fire</span><br />
+      &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>J</b> jump jet &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> <span id="help-fire">fire</span><br />
       <b>A/D</b> in flight: steer a Guided Missile &nbsp; <b>F</b> find enemy &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; <b>Enter</b> chat (online) &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>

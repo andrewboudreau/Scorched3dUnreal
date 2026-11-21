@@ -31,6 +31,7 @@ each other.
 | Shift | fine adjust |
 | ↑ / ↓ | drive forward / reverse along the hull (uses fuel) |
 | ← / → | turn the hull (free) |
+| J | jump jet: hop about 25 m the way the hull faces (does not use the shot or fuel) |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
 | Space | fire (in a volley: lock in your shot) |
 | F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
@@ -87,6 +88,17 @@ each other.
   of steering fuel, shown in a bar above the weapons. It does not climb or
   dive, only turns. One in the starting kit; 90 for two in the shop. On a
   shared screen every human's missile answers the same keys.
+- **Flak.** Like Scatter, it bursts at the top of its arc, but into 14 small
+  shells spread over a disc about 50 m across instead of a line of five. Each
+  is a shallow 7 m crater worth 10 damage (Scatter's five are 28 each), so the total is the
+  same 140 and the cover is much wider: it chews up an area and wounds
+  everything in it, where Scatter punishes a direct hit. 220 for two. CPU
+  tanks use it, and shop for it.
+- **Teleport.** No damage. Your tank moves to where the shell lands, snapped to
+  the ground and nudged clear of water, houses, tanks and the map edge. Shells
+  already in the air still land where they were aimed, so you may have left
+  the spot. A flash marks the old and new places. 120 for two. The CPU does
+  not buy or fire it.
 - **Fog of war** (setup option, off by default; works online too). Your tank
   sees 110 m around itself; the ground, trees, houses and water beyond are
   dimmed and enemy tanks out there are hidden. You still have intel on them, drawn as a ring in their
@@ -160,6 +172,17 @@ each other.
   round. CPU tanks (Normal and Hard) drive only to get out of a hole or off a
   spot where they keep being hit, and a drive never holds a turn for more
   than a few seconds.
+- **Jump jets.** Press J while planning to hop about 25 m along the hull in a
+  1.6 s arc, 10 m high at the top, over craters, rubble and your neighbours.
+  It costs a charge, not the shot or any fuel. Everyone starts with one;
+  the armory sells two for 80. The hop lands on the spot the core worked out
+  (shortening to 20, 16, 12 or 8 m if the full jump would end in water,
+  off the map, on a tank or house or on a cliff more than 22 m above you),
+  and says so in the aim card if none fit, keeping the charge. It uses the
+  same state as driving, so online it travels in your plan and replays the
+  same on every screen. CPU tanks (Normal and Hard) hop when stuck in a hole
+  at least 4 m deep and out of fuel for a drive, in the direction that
+  leaves it least in a hole.
 - **Perk draft.** With Twists on (the default, on the setup screen), after
   every round each tank picks one of three random perks before it shops. They
   last the whole match and stack; CPU tanks pick for themselves. In hotseat
@@ -222,7 +245,8 @@ each other.
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
   draft, modifiers, driving and fuel (`twists.test.js`), road routing (`paths.test.js`),
-  aim history and both firing modes (`volley.test.js`), whole CPU-only matches, and
+  aim history and both firing modes (`volley.test.js`), jump jets, Teleport and Flak
+  (`jets.test.js`), whole CPU-only matches, and
   online matches between several simulated screens with deliberate drift,
   including screens reloading at every stage of a match (`netplay.test.js`).
 

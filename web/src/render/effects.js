@@ -30,6 +30,7 @@ export class Effects {
     this.items = [];
     this.smokeTex = radialTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
     this.glowTex = radialTexture('rgba(255,240,200,1)', 'rgba(255,120,30,0)');
+    this.warpTex = radialTexture('rgba(235,252,255,1)', 'rgba(90,200,255,0)');
     this.fireGeo = new THREE.IcosahedronGeometry(1, 2);
     this.debrisGeo = new THREE.TetrahedronGeometry(0.6);
     // Explosion flashes come from a fixed pool of lights that never leaves
@@ -155,8 +156,9 @@ export class Effects {
       });
     }
 
-    // Smoke column.
-    for (let i = 0; i < 10; i++) {
+    // Smoke column: a small blast (flak) gets a few puffs, so a dozen at once stay cheap.
+    const puffs = Math.max(4, Math.min(10, Math.round(radius * 0.9)));
+    for (let i = 0; i < puffs; i++) {
       const sm = this.sprite(this.smokeTex, '#57504a');
       sm.position.set(x + (Math.random() - 0.5) * radius, y + Math.random() * radius * 0.5, z + (Math.random() - 0.5) * radius);
       const rise = 2 + Math.random() * 4;
@@ -201,6 +203,37 @@ export class Effects {
       sm.scale.setScalar(size * (0.7 + k * 1.9));
       sm.material.opacity = opacity * Math.min(1, t * 8) * (1 - k);
     } });
+  }
+
+  // A teleport: a bright flash that swells and fades, a ring of light that
+  // opens out, and sparks that rise off the spot. Sprites only, no lights.
+  warp(pos) {
+    const [x, y, z] = pos;
+    const core = this.sprite(this.warpTex, '#ffffff', true);
+    core.position.set(x, y + 2.2, z);
+    core.material.opacity = 1;
+    this.items.push({ life: 0, max: 0.7, obj: core, pool: this.freeSprites, update: (it, t) => {
+      const k = t / it.max;
+      core.scale.setScalar(5 + 9 * Math.sin(k * Math.PI) + 6 * k);
+      core.material.opacity = (1 - k) ** 1.4;
+    } });
+    const halo = this.sprite(this.warpTex, '#7fdcff', true);
+    halo.position.set(x, y + 1.2, z);
+    this.items.push({ life: 0, max: 0.55, obj: halo, pool: this.freeSprites, update: (it, t) => {
+      const k = t / it.max;
+      halo.scale.setScalar(6 + 26 * Math.sqrt(k));
+      halo.material.opacity = 0.7 * (1 - k);
+    } });
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + Math.random();
+      this.puff({ x: x + Math.cos(a) * 2.2, y: y + 0.6, z: z + Math.sin(a) * 2.2 }, { color: '#bfeaff', size: 0.9, life: 0.9, rise: 6 + Math.random() * 5, opacity: 0.9 });
+    }
+  }
+
+  // Jump jets firing under a tank at `pos` (just the flame and a bit of smoke).
+  jetFlame(pos) {
+    this.puff(pos, { color: '#ffb347', size: 1.5, life: 0.45, rise: -3.5, opacity: 0.85 });
+    this.puff(pos, { color: '#8d8982', size: 2.2, life: 1.1, rise: 0.6, opacity: 0.4 });
   }
 
   muzzleFlash(pos) {

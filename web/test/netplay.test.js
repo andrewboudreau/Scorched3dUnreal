@@ -12,12 +12,14 @@ function makeRoom() {
 }
 
 const WEAPON_CYCLE = ['shell', 'ranger', 'mound', 'roller', 'breacher', 'shell'];
+// A bot with `kit` also hops with jump jets, and shoots Flak and Teleports once it has bought them.
+const KIT_CYCLE = ['flak', 'teleport', 'shell', 'flak', 'ranger', 'teleport', 'breacher'];
 
 // One screen: its own frame rate, and a bot at the controls of its human.
 // `resume`: the same seat coming back after a reload, reading the log from the top.
-function makeClient(room, seat, name, { resume = false } = {}) {
+function makeClient(room, seat, name, { resume = false, kit = false } = {}) {
   const dice = makeRng(1000 + seat + (resume ? 50 : 0));
-  const c = { seat, name, cursor: 0, alive: true, dice, shots: 0 };
+  const c = { seat, name, cursor: 0, alive: true, dice, shots: 0, hops: 0, warps: 0, frags: 0 };
   c.session = new Session({
     seat,
     send: (msg) => room.append(seat, msg),
@@ -34,7 +36,11 @@ function makeClient(room, seat, name, { resume = false } = {}) {
     if (g) {
       const dt = (1 / 30) * (0.6 + dice.next() * 0.9);   // every screen runs at its own uneven pace
       g.update(dt);
-      g.drainEvents();
+      for (const e of g.drainEvents()) {
+        if (e.type === 'jump') c.hops++;
+        if (e.type === 'warp') c.warps++;
+        if (e.type === 'projectile' && e.weapon === 'flaklet') c.frags++;
+      }
       // Screens other than the host drift while they wait, the way different
       // browsers' maths would: the host's snapshot has to put it all back.
       if (seat !== 0 && g.phase === 'wait' && c.drifted !== g.volleyKey) {
@@ -46,13 +52,18 @@ function makeClient(room, seat, name, { resume = false } = {}) {
       }
       const me = g.current;
       if (g.phase === 'aim' && me && g.isLocal(me)) {
-        if (g.phaseTime < 0.4) g.drive(1, dice.next() < 0.5 ? 1 : 0, dt);
+        if (g.phaseTime < 0.4) {
+          // Once a volley, a kit bot turns the hull a little and hops before it drives.
+          if (kit && me.jets > 0 && c.hopped !== g.volleyKey) { c.hopped = g.volleyKey; me.hull = (me.hull + dice.range(-60, 60) + 360) % 360; g.jump(); }
+          g.drive(1, dice.next() < 0.5 ? 1 : 0, dt);
+        }
         else {
           const foe = g.players.find((p) => p.alive && p !== me);
           me.yaw = ((Math.atan2(foe.z - me.z, foe.x - me.x) * 180) / Math.PI + 360) % 360 + dice.range(-3, 3);
           me.elev = 45;
           me.power = 50 + dice.range(-8, 8);
-          const w = WEAPON_CYCLE[c.shots++ % WEAPON_CYCLE.length];
+          const cycle = kit ? KIT_CYCLE : WEAPON_CYCLE;
+          const w = cycle[c.shots++ % cycle.length];
           me.weapon = me.inventory[w] > 0 ? w : 'shell';
           g.fire();
         }
@@ -62,6 +73,7 @@ function makeClient(room, seat, name, { resume = false } = {}) {
         for (const p of g.localHumans) {
           if (g.shopped.includes(p.id)) continue;
           if (g.draft[p.id]) g.pickPerk(p.id, g.draft[p.id][p.id % g.draft[p.id].length]);
+          if (kit) for (const id of ['teleport', 'jet', 'flak']) g.buy(p.id, id);
           g.buy(p.id, 'armor');
           s.shopDone(p.id);
         }
@@ -86,7 +98,7 @@ function play(clients, frames, until) {
 const summary = (g) => JSON.stringify({
   phase: g.phase,
   round: g.round,
-  players: g.players.map((p) => ({ hp: p.hp, alive: p.alive, wins: p.wins, money: p.money, perks: p.perks, inventory: p.inventory, stats: p.stats, x: p.x, z: p.z, ai: p.ai })),
+  players: g.players.map((p) => ({ hp: p.hp, alive: p.alive, wins: p.wins, money: p.money, perks: p.perks, inventory: p.inventory, stats: p.stats, x: p.x, z: p.z, ai: p.ai, jets: p.jets, y: Math.round(p.y * 1000) })),
   ground: Array.from(g.terrain.heights.filter((_, i) => i % 97 === 0)).map((h) => h.toFixed(3)),
 });
 
@@ -215,4 +227,45 @@ test('netplay: with fog of war on, every screen keeps the same intel', () => {
   assert.ok(a.cfg.fog && b.cfg.fog);
   assert.equal(summary(b), summary(a));
   assert.deepEqual(b.intel, a.intel);
+});
+
+test('netplay: jump jet hops, Flak and Teleports replay the same on every screen', () => {
+  const room = makeRoom();
+  const clients = [makeClient(room, 0, 'Ana', { kit: true }), makeClient(room, 1, 'Bo', { kit: true }), makeClient(room, 2, 'Cy', { kit: true })];
+  play(clients, 3, () => false);
+  clients[0].session.start({ ...CONFIG, seed: 31, rounds: 3 }, [{ name: 'Rook', ai: 'normal' }]);
+  const done = play(clients, 60000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
+  assert.ok(done > 0, `match finished (${clients.map((c) => `${c.session.game?.phase} r${c.session.game?.round}`).join(', ')})`);
+  const games = clients.map((c) => c.session.game);
+  assert.equal(summary(games[1]), summary(games[0]));
+  assert.equal(summary(games[2]), summary(games[0]));
+  // The hops and warps really happened, and each screen saw its own.
+  assert.ok(clients.every((c) => c.hops >= 1), `hops: ${clients.map((c) => c.hops)}`);
+  assert.ok(clients.reduce((n, c) => n + c.hops, 0) >= 5);
+  assert.ok(clients.some((c) => c.warps >= 1), 'someone teleported');
+  assert.ok(clients.every((c) => c.frags >= 14 && c.frags % 14 === 0), `flak fragments: ${clients.map((c) => c.frags)}`);
+  // Every plan that went out carried the charges left after the hop.
+  const plans = room.log.filter((e) => e.msg.t === 'plan');
+  assert.ok(plans.length > 0 && plans.every((e) => Number.isInteger(e.msg.tank.jets)));
+  assert.ok(plans.some((e) => e.msg.tank.jets === 0), 'a spent charge travelled with the plan');
+  // Charges never went negative and what was bought arrived.
+  assert.ok(games[0].players.every((p) => p.jets >= 0));
+  assert.ok(games[0].players.some((p) => p.stats.shots > 0 && p.inventory.flak !== undefined));
+});
+
+test('netplay: a screen that reloads after hopping keeps its hop and charge', () => {
+  const room = makeRoom();
+  const clients = [makeClient(room, 0, 'Ana', { kit: true }), makeClient(room, 1, 'Bo', { kit: true })];
+  play(clients, 3, () => false);
+  clients[0].session.start({ ...CONFIG, seed: 31, rounds: 2 }, []);
+  // Into the first volley's planning, past the hops.
+  play(clients, 20000, () => clients.every((c) => c.hops >= 1));
+  assert.ok(clients[1].hops >= 1);
+  play(clients, 20000, () => clients[0].session.game?.phase === 'flight' || clients[0].session.game?.phase === 'volley');
+  // Bo's screen reloads and reads the whole log back.
+  const back = makeClient(room, 1, 'Bo', { resume: true, kit: true });
+  clients[1] = back;
+  const done = play(clients, 60000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
+  assert.ok(done > 0, 'match finished');
+  assert.equal(summary(clients[1].session.game), summary(clients[0].session.game));
 });

@@ -4,7 +4,10 @@
 // parts run where it lands.
 //
 //   blast  { radius, damage, depth }    carve a crater and hurt tanks nearby
-//   split  { count, spread, child }     at the apex, become `count` child shells
+//   split  { count, spread, child,       at the apex, become `count` child shells.
+//            shape }                     'line' (default) fans them sideways in a
+//                                        row; 'disc' scatters them over a circle,
+//                                        `spread` being its radius in m/s
 //   roll   { then: [...parts] }         roll along the ground first, then run `then`
 //   mound  { radius, height }           heap dirt instead of removing it
 //   range  { turn, power }              leave the barrel as five harmless probes:
@@ -14,6 +17,7 @@
 //   scout  { radius, turns }            fog of war: the shooter sees everything
 //                                       within `radius` of where it lands, for
 //                                       their next `turns` shots
+//   warp   {}                           the shooter's tank is moved to where it lands
 
 export const WEAPONS = [
   {
@@ -43,6 +47,19 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 10, damage: 28, depth: 0.55 }],
   },
   {
+    id: 'flak', name: 'Flak', price: 220, bundle: 2,
+    desc: 'Bursts at the top of its arc into 14 small shells over a wide area. Shallow craters, light hits.',
+    // Spread 5 m/s lands a pattern about 50 m across: 8 left gaps wider than a
+    // tank between fragments, so a burst right over a target could miss it.
+    flight: [{ type: 'split', count: 14, spread: 5, shape: 'disc', child: 'flaklet' }],
+    // Only if it never reaches the top of its arc (a flat shot): a small dud of a blast.
+    impact: [{ type: 'blast', radius: 8, damage: 18, depth: 0.4 }],
+  },
+  {
+    id: 'flaklet', name: 'Flak fragment', hidden: true,
+    impact: [{ type: 'blast', radius: 7, damage: 10, depth: 0.3 }],
+  },
+  {
     id: 'bomblet', name: 'Bomblet', hidden: true,   // thrown by the Shrapnel perk
     impact: [{ type: 'blast', radius: 6, damage: 16, depth: 0.45 }],
   },
@@ -63,6 +80,11 @@ export const WEAPONS = [
     impact: [],
   },
   {
+    id: 'teleport', name: 'Teleport', price: 120, bundle: 2,
+    desc: 'No damage. Your tank is moved to where it lands (nudged off water, houses and other tanks).',
+    impact: [{ type: 'warp' }],
+  },
+  {
     id: 'scout', name: 'Scout Missile', price: 50, bundle: 2, fog: true,
     desc: 'Fog of war only. No damage: lights up everything within 120 m of where it lands, for you, for your next two shots.',
     impact: [{ type: 'scout', radius: 120, turns: 2 }],
@@ -72,6 +94,7 @@ export const WEAPONS = [
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },
   { id: 'fuel', name: 'Fuel Can', price: 70, desc: '+20 m of driving for the next round.' },
+  { id: 'jet', name: 'Jump Jets', price: 80, bundle: 2, desc: 'Two charges. Press J while planning to hop about 25 m the way the hull faces, over a crater rim. Costs no fuel and not your shot.' },
 ];
 
 export const WEAPON_BY_ID = Object.fromEntries(WEAPONS.map((w) => [w.id, w]));
@@ -98,6 +121,7 @@ export function impactEffects(weapon, point) {
       if (part.type === 'blast') out.push({ type: 'blast', point, radius: part.radius, damage: part.damage, depth: part.depth });
       else if (part.type === 'mound') out.push({ type: 'mound', point, radius: part.radius, height: part.height });
       else if (part.type === 'scout') out.push({ type: 'scout', point, radius: part.radius, turns: part.turns });
+      else if (part.type === 'warp') out.push({ type: 'warp', point });
       else if (part.type === 'roll') run(part.then);
     }
   };
@@ -105,10 +129,28 @@ export function impactEffects(weapon, point) {
   return out;
 }
 
-// Children for a split part: same position, velocity fanned out sideways.
-export function splitVelocities(vel, count, spread) {
+// Children for a split part: same position, velocity fanned out sideways (a
+// row across the line of flight), or with shape 'disc' pushed out over a
+// circle of radius `spread`, so the fragments come down over an area.
+export function splitVelocities(vel, count, spread, shape = 'line') {
   const [vx, , vz] = vel;
   const h = Math.hypot(vx, vz) || 1;
+  if (shape === 'disc') {
+    // A sunflower pattern: even coverage with no two fragments alike, and no
+    // randomness, so every copy of an online game agrees.
+    const ux = Math.hypot(vx, vz) > 1e-6 ? vx / h : 1;
+    const uz = Math.hypot(vx, vz) > 1e-6 ? vz / h : 0;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    const disc = [];
+    for (let k = 0; k < count; k++) {
+      const r = spread * Math.sqrt((k + 0.5) / count);
+      const a = k * golden;
+      const along = r * Math.cos(a);
+      const across = r * Math.sin(a);
+      disc.push([vel[0] + ux * along - uz * across, vel[1], vel[2] + uz * along + ux * across]);
+    }
+    return disc;
+  }
   // Horizontal unit vector perpendicular to travel.
   const px = -vz / h;
   const pz = vx / h;

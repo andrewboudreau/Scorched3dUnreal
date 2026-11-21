@@ -131,6 +131,16 @@ export function chooseTarget(me, players, difficulty, rng) {
   return enemies.reduce((a, b) => (Math.hypot(b.x - me.x, b.z - me.z) < Math.hypot(a.x - me.x, a.z - me.z) ? b : a));
 }
 
+// How far below the ground 14 m around it a tank at x/z (standing at height y) sits.
+export function holeDepth(terrain, x, z, y) {
+  let rim = 0;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    rim += terrain.heightAt(x + Math.cos(a) * 14, z + Math.sin(a) * 14);
+  }
+  return rim / 8 - y;
+}
+
 // Should a CPU spend fuel this turn, and where to? It moves to climb out of a
 // hole or to get off a spot it keeps being hit on, and otherwise stays put.
 // Returns { heading (degrees), budget (fuel to spend) } or null.
@@ -138,13 +148,7 @@ export function chooseTarget(me, players, difficulty, rng) {
 // { x, y, z, moved }.
 export function planDrive({ me, terrain, rng, difficulty = 'normal', tryDrive }) {
   if (difficulty === 'easy' || !(me.fuel > 4)) return null;
-  // How far below its surroundings the tank sits.
-  let rim = 0;
-  for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * Math.PI * 2;
-    rim += terrain.heightAt(me.x + Math.cos(a) * 14, me.z + Math.sin(a) * 14);
-  }
-  const sunk = rim / 8 - me.y;
+  const sunk = holeDepth(terrain, me.x, me.z, me.y);
   const shaken = (me.hitsHere || 0) >= 2;
   if (!(sunk > 3 || (shaken && rng.next() < 0.6))) return null;
   const budget = sunk > 3 ? me.fuel : Math.min(me.fuel, 16);
@@ -159,10 +163,31 @@ export function planDrive({ me, terrain, rng, difficulty = 'normal', tryDrive })
   return best;
 }
 
+// Should a CPU spend a jump jet charge? Only to get out of a hole (the ground
+// around it more than 4 m higher), and only toward a landing that is clearly
+// less of one. It is asked after planDrive, so it is what a tank does when
+// driving will not get it out (no fuel, or walls too steep). `tryHop(heading)`
+// reports the hop as game.previewHop does. Returns { heading, budget: 0, jump: true } or null.
+export function planJump({ me, terrain, difficulty = 'normal', tryHop }) {
+  if (difficulty === 'easy' || !(me.jets > 0)) return null;
+  const sunk = holeDepth(terrain, me.x, me.z, me.y);
+  if (sunk < 4) return null;
+  let best = null;
+  for (let k = 0; k < 8; k++) {
+    const heading = k * 45;
+    const hop = tryHop(heading);
+    if (!hop.ok) continue;
+    const gain = sunk - holeDepth(terrain, hop.x, hop.z, hop.y);
+    if (gain >= 3 && (!best || gain > best.gain)) best = { heading, budget: 0, jump: true, gain };
+  }
+  return best;
+}
+
 export function chooseWeapon(me, target, rng) {
   const has = (id) => me.inventory[id] > 0;
   if (has('roller') && target.y < me.y - 8 && rng.next() < 0.6) return 'roller';
   if (has('breacher') && rng.next() < 0.5) return 'breacher';
   if (has('scatter') && rng.next() < 0.4) return 'scatter';
+  if (has('flak') && rng.next() < 0.4) return 'flak';
   return 'shell';
 }

@@ -211,6 +211,31 @@ export class Sound {
     this.burst({ dur: 0.25, freq: 400, gain: 0.5 * k, thump: 60, cutoff });
   }
 
+  // Jump jets lighting: a rising hiss that dies away as the tank climbs.
+  jet(dist = 0) {
+    const { k, cutoff } = this.far(dist);
+    this.burst({ dur: 0.9, freq: 700, sweepTo: 2600, q: 0.6, type: 'bandpass', gain: 0.5 * k, thump: 90, cutoff });
+  }
+
+  // A Teleport: a quick bright sweep up, then a soft thump where it arrives.
+  warp(dist = 0) {
+    const ctx = this.ensure();
+    if (!ctx || this.muted) return;
+    const { k } = this.far(dist);
+    const t = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(380, t);
+    o.frequency.exponentialRampToValueAtTime(2400, t + 0.22);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22 * Math.max(0.3, k), t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + 0.35);
+  }
+
   // A rangefinder probe touching down: a short, soft ping.
   ping(dist = 0) {
     const ctx = this.ensure();
