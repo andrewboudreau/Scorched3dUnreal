@@ -80,7 +80,8 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
 ## HUD, menus and the armory at small sizes
 
 - In game: the left column (player card, with the round at its head, and the
-  rangefinder) and the scoreboard shrink (scale 0.72; the card 0.58 under 520 px
+  rangefinder) and the players box shrink. On a phone the players box leaves the
+  column for the top right, as the column has no room (scale 0.72; the card 0.55 under 520 px
   tall, so it clears the drive cross on a 375 px phone) and perks hide; the keyboard
   help line goes; the weapon bar is the weapon button's pop-up; the Guided Missile
   steering bar and the chat log move up.

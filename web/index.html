@@ -35,7 +35,8 @@
 
   <!-- In-game HUD -->
   <div id="hud" class="hidden">
-    <!-- The left column: your card, and the rangefinder under it when you have one. -->
+    <!-- The left column: your card, every tank's health, and the rangefinder when
+         you have one. On a phone the players box moves to the top right (main.js). -->
     <div id="hud-left">
     <div id="player-card" class="panel">
       <div class="pc-round">
@@ -63,6 +64,7 @@
       <div class="weapon"><label>Weapon</label><span id="ro-weapon">Shell</span><span id="ro-ammo" class="ammo"></span></div>
       <div id="pc-perks" class="perks"></div>
     </div>
+    <div id="scoreboard" class="panel"></div>
     <div id="range-card" class="panel hidden" title="Click to look at where the probes landed">
       <div class="rc-head">Rangefinder <span>click to look</span></div>
       <canvas id="rc-plot"></canvas>
@@ -70,8 +72,6 @@
       <div id="rc-est"></div>
     </div>
     </div>
-
-    <div id="scoreboard" class="panel"></div>
 
     <div id="weapon-bar"></div>
     <div id="steer-hint" class="panel small hidden"><b>A / D</b> steer <div class="bar"><div id="steer-fuel" class="fill"></div></div></div>

@@ -1272,6 +1272,8 @@ window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
 const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), weaponBar: $('weapon-bar'), online: () => !!session }) : null;
 if (touch) {
+  // The left column is full on a phone, so the players box sits top right.
+  $('hud').appendChild($('scoreboard'));
   // No keyboard here: the hints say what to tap instead.
   $('steer-hint').querySelector('b').textContent = '\u25C0 \u25B6';
   $('chat-input').placeholder = 'Say something';

@@ -84,8 +84,10 @@ sits under the device's own volume (a web page cannot set that), so it starts at
 full. Also full screen where the browser allows it, and the resource-pack review
 where packs are served.
 
-The round and its modifier head the player card; opponents' health stays in the
-scoreboard, top right.
+Everything sits in one column on the left: the player card (with the round and
+its modifier at its head), the players box with every tank's health, and the
+rangefinder when you have one. On a short screen the rangefinder wraps into a
+second column beside the first. On a phone the players box sits top right.
 
 
 ## How it plays
