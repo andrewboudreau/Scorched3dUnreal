@@ -65,20 +65,27 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
 | C | follow-shell camera |
 | V | overview camera |
-| M | mute everything (also in Settings, the ⚙ button) |
+| M | mute everything (Master; Settings, the ⚙ button, has Effects and Music too) |
 | N | next music track |
-| - / = | volume down / up (also a slider on the setup screen; it is remembered) |
+| - / = | Master volume down / up (remembered) |
 | Mouse | drag to orbit, wheel to zoom |
 
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
-the left, and Fine, Find, View, Chat (online) and ⚙ in the middle. The weapon
+the left with ⚙ Settings above Jet, and Fine, Find, View and Chat (online) in
+the middle. The weapon
 button above Fire opens the weapons as a pop-up, and the keyboard hints are
 hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
 landscape. See `docs/mobile.md`.
 
-**Settings** (⚙, bottom right on a desktop) holds sound on/off, full screen where
-the browser allows it, and the resource-pack review where packs are served.
+**Settings** (⚙, bottom right on a desktop, on every screen) holds the sound:
+Master, Effects and Music levels, each with a mute, and the music track. Master
+sits under the device's own volume (a web page cannot set that), so it starts at
+full. Also full screen where the browser allows it, and the resource-pack review
+where packs are served.
+
+The round and its modifier head the player card; opponents' health stays in the
+scoreboard, top right.
 
 
 ## How it plays

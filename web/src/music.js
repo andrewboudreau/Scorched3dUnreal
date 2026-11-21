@@ -2,12 +2,13 @@
 // no audio files. Each track is a key, a chord progression and a `play`
 // function that is asked, sixteenth by sixteenth, what to sound. Notes are
 // scheduled a little ahead on the audio clock, so timing does not depend on
-// the frame rate. It plays into Sound's master, so M and the volume reach it;
-// it has its own level on top. In the kill cam the music closes down to a
+// the frame rate. It plays into Sound's master, so M and Master reach it;
+// it has its own level and mute on top. In the kill cam the music closes down to a
 // muffled low-pass along with the slow motion.
 
 const TRACK_KEY = 'craterfall.music';
 const LEVEL_KEY = 'craterfall.musicVolume';
+const MUTE_KEY = 'craterfall.musicMuted';
 const AHEAD = 0.25;            // seconds of notes scheduled ahead of the clock
 
 const SCALES = {
@@ -111,6 +112,7 @@ export class Music {
     this.trackId = TRACK_BY_ID[saved] ? saved : 'outpost';
     const level = Number(ls?.getItem(LEVEL_KEY));
     this.volume = ls?.getItem(LEVEL_KEY) != null && level >= 0 && level <= 1 ? level : 0.5;
+    this.muted = ls?.getItem(MUTE_KEY) === '1';
     this.ctx = null;
     this.cur = null;
     this.slow = 1;
@@ -171,7 +173,15 @@ export class Music {
     return b;
   }
 
-  level() { return this.volume * 0.5; }
+  // Under Master since the split (it used to sit under the one shared level).
+  level() { return this.muted ? 0 : this.volume * 0.3; }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    try { globalThis.localStorage?.setItem(MUTE_KEY, this.muted ? '1' : '0'); } catch { /* private mode */ }
+    if (this.out) this.out.gain.setTargetAtTime(this.level(), this.ctx.currentTime, 0.05);
+    return this.muted;
+  }
 
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));

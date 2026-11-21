@@ -1,9 +1,25 @@
 // Synthesised sound, no assets. One-shots (cannon, blasts, ticks, chirps,
 // bleats) plus three quiet beds that `update` keeps in step with the game:
-// wind, a shell's whistle and the engine. Everything goes through `master`,
-// so the volume slider and M reach all of it.
+// wind, a shell's whistle and the engine.
+//
+// Levels: every effect goes through `fx` (the Effects level and mute), music
+// through its own bus (music.js), and both through `master` (the Master level,
+// and M). Master sits under the device's own volume, which a web page cannot
+// set; it starts at full so the device's buttons do the real work.
 
-const VOLUME_KEY = 'craterfall.volume';
+const MASTER_KEY = 'craterfall.master';
+const FX_KEY = 'craterfall.fx';
+const FX_MUTE_KEY = 'craterfall.fxMuted';
+const OLD_VOLUME_KEY = 'craterfall.volume';   // the one slider before Effects and Master were split
+const store = globalThis.localStorage;
+export function readLevel(key, fallback) {
+  const v = store?.getItem(key);
+  const n = Number(v);
+  return v != null && v !== '' && n >= 0 && n <= 1 ? n : fallback;
+}
+export function saveLevel(key, v) {
+  try { store?.setItem(key, String(v)); } catch { /* private mode */ }
+}
 // No speed-of-sound delay: real sound speed put far blasts up to a second
 // behind their flash, which read as lag. Distance only muffles and quiets.
 const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are dropped past this
@@ -11,9 +27,10 @@ const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are drop
 export class Sound {
   constructor() {
     this.ctx = null;
-    this.muted = false;
-    const saved = Number(globalThis.localStorage?.getItem(VOLUME_KEY));
-    this.volume = saved > 0 && saved <= 1 ? saved : 0.6;
+    this.muted = false;                                  // master mute (M); not remembered
+    this.volume = readLevel(MASTER_KEY, 1);
+    this.fxVolume = readLevel(FX_KEY, readLevel(OLD_VOLUME_KEY, 0.6));
+    this.fxMuted = store?.getItem(FX_MUTE_KEY) === '1';
     this.nextChirp = 4;
     this.nextBleat = 9;
     // Recorded samples standing in for (or under) the synth, per event; only
@@ -30,19 +47,19 @@ export class Sound {
     const takes = this.samples[event];
     if (!takes?.length) return false;
     const ctx = this.ensure();
-    if (!ctx || this.muted) return true;
+    if (!ctx || this.silent) return true;
     const { k, cutoff } = this.far(dist);
     const src = ctx.createBufferSource();
     src.buffer = takes[Math.floor(Math.random() * takes.length)];
     src.playbackRate.value = 0.95 + Math.random() * 0.1;
     const g = ctx.createGain();
     g.gain.value = gain * k * this.sampleLevel;
-    let out = this.master;
+    let out = this.fx;
     if (cutoff) {
       out = ctx.createBiquadFilter();
       out.type = 'lowpass';
       out.frequency.value = cutoff;
-      out.connect(this.master);
+      out.connect(this.fx);
     }
     src.connect(g).connect(out);
     src.start(ctx.currentTime + delay);
@@ -56,6 +73,9 @@ export class Sound {
       const ctx = this.ctx = new AC();
       this.master = ctx.createGain();
       this.master.gain.value = this.level();
+      this.fx = ctx.createGain();
+      this.fx.gain.value = this.fxLevel();
+      this.fx.connect(this.master);
       // A volley is six cannons and six blasts: squash the peaks rather than clip.
       const squash = ctx.createDynamicsCompressor();
       squash.threshold.value = -16;
@@ -74,18 +94,41 @@ export class Sound {
     return this.ctx;
   }
 
+  // Nothing would be heard: skip making the voices.
+  get silent() { return this.muted || this.fxMuted || this.volume === 0 || this.fxVolume === 0; }
+
   level() { return this.muted ? 0 : this.volume * 0.8; }
+  fxLevel() { return this.fxMuted ? 0 : this.fxVolume; }
+
+  apply() {
+    const t = this.ctx?.currentTime ?? 0;
+    this.master?.gain.setTargetAtTime(this.level(), t, 0.03);
+    this.fx?.gain.setTargetAtTime(this.fxLevel(), t, 0.03);
+  }
 
   setVolume(v) {
     this.volume = Math.max(0, Math.min(1, v));
-    try { globalThis.localStorage?.setItem(VOLUME_KEY, String(this.volume)); } catch { /* private mode */ }
-    if (this.master) this.master.gain.value = this.level();
+    saveLevel(MASTER_KEY, this.volume);
+    this.apply();
   }
 
   toggleMute() {
     this.muted = !this.muted;
-    if (this.master) this.master.gain.value = this.level();
+    this.apply();
     return this.muted;
+  }
+
+  setFxVolume(v) {
+    this.fxVolume = Math.max(0, Math.min(1, v));
+    saveLevel(FX_KEY, this.fxVolume);
+    this.apply();
+  }
+
+  toggleFx() {
+    this.fxMuted = !this.fxMuted;
+    saveLevel(FX_MUTE_KEY, this.fxMuted ? 1 : 0);
+    this.apply();
+    return this.fxMuted;
   }
 
   // ---- beds ----
@@ -101,7 +144,7 @@ export class Sound {
     filter.Q.value = q;
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    src.connect(filter).connect(gain).connect(this.master);
+    src.connect(filter).connect(gain).connect(this.fx);
     src.start(0, Math.random());
     return { filter, gain };
   }
@@ -125,7 +168,7 @@ export class Sound {
       o.start();
       return o;
     });
-    ef.connect(eg).connect(this.master);
+    ef.connect(eg).connect(this.fx);
     this.engine = { gain: eg, filter: ef, oscs };
   }
 
@@ -170,17 +213,17 @@ export class Sound {
   // A burst of filtered noise, optionally with a low sine thump under it.
   burst({ dur, freq, q = 0.7, gain = 1, sweepTo = null, thump = 0, type = 'lowpass', delay = 0, cutoff = 0 }) {
     const ctx = this.ensure();
-    if (!ctx || this.muted) return;
+    if (!ctx || this.silent) return;
     if (this.voices >= MAX_VOICES || (this.voices >= MAX_VOICES / 2 && gain < 0.3)) return;
     this.voices++;
     const t = ctx.currentTime + delay;
-    let out = this.master;
+    let out = this.fx;
     if (cutoff) {
       // Distance: everything in this burst goes through one more low-pass.
       out = ctx.createBiquadFilter();
       out.type = 'lowpass';
       out.frequency.value = cutoff;
-      out.connect(this.master);
+      out.connect(this.fx);
     }
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
@@ -262,7 +305,7 @@ export class Sound {
   warp(dist = 0) {
     if (this.sample('warp', dist, { gain: 0.45 })) return;
     const ctx = this.ensure();
-    if (!ctx || this.muted) return;
+    if (!ctx || this.silent) return;
     const { k } = this.far(dist);
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
@@ -273,7 +316,7 @@ export class Sound {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.22 * Math.max(0.3, k), t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.fx);
     o.start(t);
     o.stop(t + 0.35);
   }
@@ -282,7 +325,7 @@ export class Sound {
   ping(dist = 0) {
     if (this.sample('ping', dist, { gain: 0.3 })) return;
     const ctx = this.ensure();
-    if (!ctx || this.muted) return;
+    if (!ctx || this.silent) return;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
     const g = ctx.createGain();
@@ -291,7 +334,7 @@ export class Sound {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.16 * Math.max(0.35, this.far(dist).k), t + 0.005);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.fx);
     o.start(t);
     o.stop(t + 0.25);
   }
@@ -304,7 +347,7 @@ export class Sound {
   // Two or three quick falling-then-rising notes.
   chirp(k = 1) {
     const ctx = this.ensure();
-    if (!ctx || this.muted) return;
+    if (!ctx || this.silent) return;
     const base = 2600 + Math.random() * 1500;
     const notes = 2 + Math.floor(Math.random() * 3);
     for (let i = 0; i < notes; i++) {
@@ -317,7 +360,7 @@ export class Sound {
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.05 * k, t + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-      o.connect(g).connect(this.master);
+      o.connect(g).connect(this.fx);
       o.start(t);
       o.stop(t + 0.1);
     }
@@ -326,7 +369,7 @@ export class Sound {
   // A wobbly nasal "baa".
   bleat(k = 1) {
     const ctx = this.ensure();
-    if (!ctx || this.muted) return;
+    if (!ctx || this.silent) return;
     const t = ctx.currentTime;
     const dur = 0.45 + Math.random() * 0.25;
     const pitch = 300 + Math.random() * 90;
@@ -348,7 +391,7 @@ export class Sound {
     g.gain.exponentialRampToValueAtTime(0.09 * k, t + 0.05);
     g.gain.setValueAtTime(0.09 * k, t + dur * 0.7);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(f).connect(g).connect(this.master);
+    o.connect(f).connect(g).connect(this.fx);
     o.start(t); wobble.start(t);
     o.stop(t + dur + 0.02); wobble.stop(t + dur + 0.02);
   }

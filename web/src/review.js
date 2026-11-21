@@ -270,7 +270,7 @@ export class PackReview {
     src.buffer = buf;
     const g = ctx.createGain();
     g.gain.value = 0.8 * s.sampleLevel;
-    src.connect(g).connect(s.master);
+    src.connect(g).connect(s.fx);
     src.start();
   }
 

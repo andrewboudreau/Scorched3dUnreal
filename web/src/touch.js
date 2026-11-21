@@ -87,7 +87,7 @@ export class TouchControls {
     const $ = (s) => root.querySelector(s);
     this.el = {
       pad: $('.t-pad'), read: $('.t-read'), power: $('.t-power'), powerFill: $('.t-power i'), powerNum: $('.t-power b'),
-      fire: $('.t-fire'), weapon: $('.t-weapon'), note: $('.t-note'), mid: $('.t-mid'),
+      fire: $('.t-fire'), weapon: $('.t-weapon'), note: $('.t-note'),
       fineBtn: $('[data-act=fine]'), chat: $('[data-act=chat]'),
     };
     this.el.chat.style.display = 'none';
@@ -135,9 +135,6 @@ export class TouchControls {
     this.weaponBar?.classList.toggle('open', on);
     this.el.weapon.classList.toggle('on', on);
   }
-
-  // Put another control (the settings button) in the middle row.
-  dock(el) { this.el.mid.appendChild(el); }
 
   // One press of a key (Space, Tab, J, F, V): down and straight back up.
   tapKey(el, k) {

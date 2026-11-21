@@ -1219,21 +1219,16 @@ window.addEventListener('keydown', (e) => {
     else if (game.current) aimCameraAt(game.current);
   } else if (k === 'm') toggleMute();
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
-  else if (k === 'n') { sound.ensure(); const t = music.next(); $('opt-music').value = t.id; banner(`Music: ${t.name}`, t.mood || '', 900); }
+  else if (k === 'n') { sound.ensure(); const t = music.next(); settings.render(); banner(`Music: ${t.name}`, t.mood || '', 900); }
 });
 
+// Master level, from - / =.
 function setVolume(v, announce = false) {
+  sound.ensure();
   sound.setVolume(Math.round(v * 10) / 10);
-  $('opt-volume').value = Math.round(sound.volume * 100);
+  settings.render();
   if (announce) banner(`Volume ${Math.round(sound.volume * 100)}%`, '', 700);
 }
-$('opt-volume').value = Math.round(sound.volume * 100);
-$('opt-music').innerHTML = TRACKS.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
-$('opt-music').value = music.trackId;
-$('opt-music').addEventListener('change', () => { sound.ensure(); music.select($('opt-music').value); });
-$('opt-music-vol').value = Math.round(music.volume * 100);
-$('opt-music-vol').addEventListener('input', () => { sound.ensure(); music.setVolume(Number($('opt-music-vol').value) / 100); });
-$('opt-volume').addEventListener('input', () => { sound.ensure(); setVolume(Number($('opt-volume').value) / 100); });
 window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
@@ -1245,13 +1240,27 @@ if (touch) {
   $('chat-input').placeholder = 'Say something';
 }
 
-function toggleMute() { banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700); }
+function toggleMute() {
+  sound.ensure();
+  banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700);
+  settings.render();
+}
 
-// Settings (the gear): sound, full screen, and the resource packs where they are served.
+// Settings (the gear): the three sound levels and the music track, full screen,
+// and the resource packs where they are served (added with the packs, below).
 const settings = new Settings({ parent: document.body });
-if (touch) touch.dock(settings.button); else document.body.appendChild(settings.button);
-settings.add({ id: 'sound', label: () => (sound.muted ? 'Sound: off' : 'Sound: on'), hint: touch ? '' : 'M', run: () => { toggleMute(); return true; } });
-if (canFullscreen()) settings.add({ id: 'full', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
+const keys = (s) => (touch ? '' : s);
+settings.group('sound', 'Sound', `Master sits under your device's volume, which still sets the overall level.${keys(' M mutes all, - / = set Master.')}`);
+settings.level({ id: 'master', label: 'Master', group: 'sound', get: () => sound.volume, muted: () => sound.muted,
+  set: (v) => { sound.ensure(); sound.setVolume(v); }, toggle: () => { sound.ensure(); sound.toggleMute(); } });
+settings.level({ id: 'fx', label: 'Effects', group: 'sound', get: () => sound.fxVolume, muted: () => sound.fxMuted,
+  set: (v) => { sound.ensure(); sound.setFxVolume(v); }, toggle: () => { sound.ensure(); sound.toggleFx(); } });
+settings.level({ id: 'music', label: 'Music', group: 'sound', get: () => music.volume, muted: () => music.muted,
+  set: (v) => { sound.ensure(); music.setVolume(v); }, toggle: () => { sound.ensure(); music.toggleMute(); } });
+settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', options: TRACKS.map((t) => ({ value: t.id, text: t.name })),
+  get: () => music.trackId, set: (id) => { sound.ensure(); music.select(id); } });
+settings.group('more', 'Screen and tools');
+if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
@@ -1403,7 +1412,7 @@ function setPerks(el, p, long) {
 // The HUD's fixed elements, looked up once.
 let hudEls = null;
 const HUD_IDS = ['pc-swatch', 'pc-name', 'pc-tag', 'pc-hp', 'pc-armor', 'pc-money', 'pc-fuel', 'ro-fuel', 'pc-note', 'pc-perks', 'ro-yaw', 'ro-elev',
-  'ro-power', 'ro-jets', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label'];
+  'ro-power', 'ro-jets', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label', 'round-mod', 'round-desc'];
 
 function updateHud() {
   if (!hudEls) { hudEls = {}; for (const id of HUD_IDS) hudEls[id] = $(id); }
@@ -1477,7 +1486,10 @@ function updateHud() {
     setPerks(ref.perks, q, false);
   }
   const mod = game.modifier;
-  setText(E['round-label'], `Round ${game.round} / ${game.cfg.rounds}${mod.id === 'clear' ? '' : ` · ${mod.name}: ${mod.desc}`}`);
+  // The round and its modifier head the card.
+  setText(E['round-label'], `Round ${game.round} / ${game.cfg.rounds}`);
+  setText(E['round-mod'], mod.id === 'clear' ? '' : mod.name);
+  setText(E['round-desc'], mod.id === 'clear' ? '' : mod.desc);
 }
 
 function updateLabels() {
@@ -2303,5 +2315,5 @@ packsHere().catch(() => null).then((lib) => lib || packsMirror()).then(async (li
     groundAt: (x, z) => (game ? game.terrain : menuField.terrain).heightAt(x, z),
   });
   window.craterfall.review = review;
-  settings.add({ id: 'packs', label: 'Resource packs', hint: lib.static ? 'the shareable packs, phone-sized' : touch ? 'the asset library' : 'the asset library · P', run: () => review.toggle(true) });
+  settings.add({ id: 'packs', group: 'more', label: 'Resource packs', hint: lib.static ? 'the shareable packs, phone-sized' : touch ? 'the asset library' : 'the asset library · P', run: () => review.toggle(true) });
 }).catch(() => { /* no pack library here */ });

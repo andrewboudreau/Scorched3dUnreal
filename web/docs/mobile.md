@@ -27,8 +27,8 @@ sideways" card over the game (menus can stay portrait-friendly).
 | Right thumb | **Power strip** beside it: drag ↕ | `adjustAim` power, as Q/E do |
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
-| Left thumb | **Jet** | J |
-| Bottom middle | Small: Fine, Find, View, Chat (online only), ⚙ Settings (sound, full screen, resource packs) | F, V, Enter; Fine scales the pad by 0.2 like Shift |
+| Left thumb | **Jet**, and **⚙ Settings** above it (Master / Effects / Music levels and mutes, music track, full screen, resource packs) | J; M and - / = for Master |
+| Bottom middle | Small: Fine, Find, View, Chat (online only) | F, V, Enter; Fine scales the pad by 0.2 like Shift |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so
 reaching 47.3° means nudging and waiting; a drag sets a *change*, so a 3 px move is a
@@ -78,9 +78,11 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
 
 ## HUD, menus and the armory at small sizes
 
-- In game: the player card and scoreboard shrink (scale 0.72, 0.62 under 520 px
-  tall) and perks hide; the keyboard help line goes; the round label and weapon bar
-  move to the top centre; the Guided Missile steering bar and the chat log move up.
+- In game: the left column (player card, with the round at its head, and the
+  rangefinder) and the scoreboard shrink (scale 0.72; the card 0.58 under 520 px
+  tall, so it clears the drive cross on a 375 px phone) and perks hide; the keyboard
+  help line goes; the weapon bar is the weapon button's pop-up; the Guided Missile
+  steering bar and the chat log move up.
 - The setup, draft, shop and results cards already fit (`max-height: 92vh` and
   scroll). Buttons get a 40 px minimum height. The shop grid is 3 columns in
   landscape and fine. The setup card is long; in landscape it scrolls. A later pass
