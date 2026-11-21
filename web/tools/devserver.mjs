@@ -1,8 +1,13 @@
 // Local server for trying online play: serves the game from web/ and the same
 // rooms API as module/Rooms.cs (keep the two in step), under /api/rooms.
 //   node tools/devserver.mjs [port]      then open http://localhost:8080/
+//
+// It also mounts the resource-pack library (CRATERFALL_PACKS, default the NAS
+// library) at /packs/, lists it at /api/packs and saves review picks from the
+// in-game pack review (src/review.js) to docs/pack-picks.json. The live server
+// has none of this, so the review panel only ever appears locally.
 import http from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, readdir, writeFile } from 'node:fs/promises';
 import { randomBytes, randomInt } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +16,41 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2]) || 8080;
 const HOLD = 20000, GONE_AFTER = 45000, MAX_SEATS = 6;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
+  '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.glb': 'model/gltf-binary', '.hdr': 'application/octet-stream', '.md': 'text/markdown; charset=utf-8', '.webp': 'image/webp' };
+const PACKS = path.resolve(process.env.CRATERFALL_PACKS || String.raw`<pack library>`);
+const PICKS = path.join(root, 'docs', 'pack-picks.json');
+
+// Every pack folder with a pack.json, newest spec fields as they are.
+async function packList() {
+  let dirs = [];
+  try { dirs = await readdir(PACKS, { withFileTypes: true }); } catch { return null; }
+  const out = [];
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue;
+    try { out.push({ ...JSON.parse(await readFile(path.join(PACKS, d.name, 'pack.json'), 'utf8')), dir: d.name }); } catch { /* not built yet */ }
+  }
+  return out;
+}
+
+async function packs(req, res, url) {
+  if (req.method === 'GET' && url.pathname === '/api/packs') {
+    const list = await packList();
+    if (!list) return json(res, 404, { error: `No pack library at ${PACKS}` });
+    let picks = null;
+    try { picks = JSON.parse(await readFile(PICKS, 'utf8')); } catch { /* none saved yet */ }
+    return json(res, 200, { root: PACKS, packs: list, picks });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/packs/picks') {
+    const b = await readBody(req);
+    if (!b || typeof b.picks !== 'object') return json(res, 400, {});
+    const text = JSON.stringify({ saved: new Date().toISOString(), library: PACKS, picks: b.picks }, null, 2);
+    if (text.length > 512 * 1024) return json(res, 413, {});
+    await writeFile(PICKS, `${text}\n`);
+    return json(res, 200, { file: PICKS });
+  }
+  return json(res, 404, {});
+}
 
 const rooms = new Map();
 const menu = new Map();          // visitor id -> { name, seen }
@@ -136,8 +175,11 @@ async function api(req, res, url) {
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/rooms')) return api(req, res, url);
-  let file = path.join(root, decodeURIComponent(url.pathname));
-  if (!file.startsWith(root)) { res.writeHead(403); return res.end(); }
+  if (url.pathname.startsWith('/api/packs')) return packs(req, res, url);
+  const fromPacks = url.pathname.startsWith('/packs/');
+  const base = fromPacks ? PACKS : root;
+  let file = path.join(base, decodeURIComponent(fromPacks ? url.pathname.slice(7) : url.pathname));
+  if (file !== base && !file.startsWith(base + path.sep)) { res.writeHead(403); return res.end(); }
   try {
     if ((await stat(file)).isDirectory()) file = path.join(file, 'index.html');
     const body = await readFile(file);

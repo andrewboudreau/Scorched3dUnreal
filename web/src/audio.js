@@ -16,6 +16,37 @@ export class Sound {
     this.volume = saved > 0 && saved <= 1 ? saved : 0.6;
     this.nextChirp = 4;
     this.nextBleat = 9;
+    // Recorded samples standing in for (or under) the synth, per event; only
+    // the pack review (src/review.js) sets these. See sample().
+    this.samples = {};
+    this.samplesMode = 'replace';
+    this.sampleLevel = 1;
+  }
+
+  // Play one of the samples set for `event` (a random take, slightly
+  // re-pitched so repeats differ), quieter and duller with distance like the
+  // synth. True if the synth should then be skipped.
+  sample(event, dist = 0, { gain = 1, delay = 0 } = {}) {
+    const takes = this.samples[event];
+    if (!takes?.length) return false;
+    const ctx = this.ensure();
+    if (!ctx || this.muted) return true;
+    const { k, cutoff } = this.far(dist);
+    const src = ctx.createBufferSource();
+    src.buffer = takes[Math.floor(Math.random() * takes.length)];
+    src.playbackRate.value = 0.95 + Math.random() * 0.1;
+    const g = ctx.createGain();
+    g.gain.value = gain * k * this.sampleLevel;
+    let out = this.master;
+    if (cutoff) {
+      out = ctx.createBiquadFilter();
+      out.type = 'lowpass';
+      out.frequency.value = cutoff;
+      out.connect(this.master);
+    }
+    src.connect(g).connect(out);
+    src.start(ctx.currentTime + delay);
+    return this.samplesMode === 'replace';
   }
 
   ensure() {
@@ -188,6 +219,8 @@ export class Sound {
 
   // Cannon: a sharp crack on top, a chest thump under it, a short tail.
   fire(dist = 0, wait = 0) {
+    this.sample('whoosh', dist, { gain: 0.35, delay: wait + 0.06 });
+    if (this.sample('fire', dist, { gain: 0.85, delay: wait })) return;
     const { k, cutoff } = this.far(dist);
     const delay = wait;
     this.burst({ dur: 0.07, freq: 3200, q: 0.9, type: 'bandpass', gain: 0.75 * k, delay, cutoff });
@@ -196,6 +229,11 @@ export class Sound {
   }
 
   explode(radius = 10, dist = 0) {
+    // A recorded blast by size, or a far-off one (already muffled, so it gets
+    // only half the distance treatment).
+    const far = dist > 320 && this.samples['explode-far'];
+    const size = radius < 9 ? 'explode-small' : radius < 16 ? 'explode-medium' : 'explode-big';
+    if (far ? this.sample('explode-far', dist / 2, { gain: 0.9 }) : this.sample(size, dist, { gain: 0.7 + Math.min(0.3, radius / 60) })) return;
     const s = Math.min(1.6, radius / 12);
     const { k, cutoff } = this.far(dist);
     // A sharp crack on top at any range: without it a far, muffled blast has a
@@ -206,19 +244,23 @@ export class Sound {
     this.burst({ dur: 1.8 + s, freq: 240, sweepTo: 60, gain: 0.2 * k * s, delay: 0.35, cutoff: cutoff ? Math.min(cutoff, 500) : 500 });
   }
 
-  thud(dist = 0) {
+  // `kind`: 'impact' (shells rolling, mounds, landings, props) or 'wreck' (parts of a dead tank).
+  thud(dist = 0, kind = 'impact') {
+    if (this.sample(kind, dist, { gain: 0.55 })) return;
     const { k, cutoff } = this.far(dist);
     this.burst({ dur: 0.25, freq: 400, gain: 0.5 * k, thump: 60, cutoff });
   }
 
   // Jump jets lighting: a rising hiss that dies away as the tank climbs.
   jet(dist = 0) {
+    if (this.sample('jet', dist, { gain: 0.5 })) return;
     const { k, cutoff } = this.far(dist);
     this.burst({ dur: 0.9, freq: 700, sweepTo: 2600, q: 0.6, type: 'bandpass', gain: 0.5 * k, thump: 90, cutoff });
   }
 
   // A Teleport: a quick bright sweep up, then a soft thump where it arrives.
   warp(dist = 0) {
+    if (this.sample('warp', dist, { gain: 0.45 })) return;
     const ctx = this.ensure();
     if (!ctx || this.muted) return;
     const { k } = this.far(dist);
@@ -238,6 +280,7 @@ export class Sound {
 
   // A rangefinder probe touching down: a short, soft ping.
   ping(dist = 0) {
+    if (this.sample('ping', dist, { gain: 0.3 })) return;
     const ctx = this.ensure();
     if (!ctx || this.muted) return;
     const t = ctx.currentTime;
@@ -253,7 +296,10 @@ export class Sound {
     o.stop(t + 0.25);
   }
 
-  click() { this.burst({ dur: 0.05, freq: 5000, gain: 0.15 }); }
+  click() { if (!this.sample('click', 0, { gain: 0.3 })) this.burst({ dur: 0.05, freq: 5000, gain: 0.15 }); }
+
+  // A shell striking a tank: recorded only (the blast covers it otherwise).
+  hit(dist = 0) { this.sample('hit', dist, { gain: 0.5 }); }
 
   // Two or three quick falling-then-rising notes.
   chirp(k = 1) {

@@ -114,6 +114,7 @@ export class Sky {
   }
 
   setDay(k) {
+    if (this.frozen) return;      // a sky from the pack review (src/review.js) holds the light
     k = Math.max(0, Math.min(1, k));
     if (Math.abs(k - this.day) < 0.0004) return;
     this.day = k;
@@ -159,6 +160,7 @@ export class Sky {
   }
 
   update(dt, wind) {
+    if (this.frozen) return;      // an HDRI sky from the pack review: no clouds
     const mesh = this.cloudMesh;
     const sx = this.sunDir.x / this.sunDir.y;
     const sz = this.sunDir.z / this.sunDir.y;

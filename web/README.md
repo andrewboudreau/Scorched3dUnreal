@@ -21,6 +21,27 @@ To try online play locally, run `node tools/devserver.mjs` instead. It serves
 the game on the same port and adds the rooms API, so two browser tabs can play
 each other.
 
+### Reviewing resource packs
+
+The dev server also mounts the asset library's resource packs (the NAS library
+by default; set `CRATERFALL_PACKS` to another folder). A **Packs (P)** button
+then appears in the game, opening a review panel (`src/review.js`):
+
+- **Sounds**: play any of them, or put one in for a game event (cannon, small,
+  medium, big and far blasts, impacts, tank hits, wreck parts, jet, teleport,
+  shell whoosh, UI click). **Use pack in game** does all of them by name, so the
+  next shot sounds like the pack; **layer** plays the synth underneath, and the
+  Test row fires each event on the spot.
+- **Skies**: an HDRI replaces the sky and its light, and the game's sun (and its
+  shadows) is turned to the brightest spot in it.
+- **Materials**: re-skin the ground (at the material's real tile size), or put a
+  sample ball by the camera.
+- **Models**: set down by the camera at true scale, next to the tanks.
+
+Mark items keep or drop and **Save picks**: they go to `docs/pack-picks.json`
+for the resource oracle. Packs are never hot-linked from the live game; the ones
+kept are copied into the repo.
+
 ## Controls
 
 | Key | Action |
@@ -248,6 +269,7 @@ Home Screen" installs it as an app that opens fullscreen in landscape. See
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`) and the flocks (`birds.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
+- `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
   `Game` and reads the same ordered message log (plans, shop choices). At
   each volley, and again before each round, the host sends its full state

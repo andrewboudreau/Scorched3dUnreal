@@ -72,6 +72,7 @@ window.addEventListener('resize', () => {
 
 let game = null;
 let terrainMesh = null;
+let review = null;           // the resource-pack review (src/review.js), dev server only
 let sceneryMesh = null;
 let tanks = [];
 let smoke = [];                 // per tank: seconds until its next puff
@@ -221,6 +222,7 @@ function startMatch(config) {
   terrainMesh = new TerrainMesh(game.terrain);
   sceneryMesh = new SceneryMesh(game.scenery);
   scene.add(terrainMesh.group, sceneryMesh.group);
+  review?.onMatch();
   effects.groundAt = (x, z) => game.terrain.heightAt(x, z);
   tanks = game.players.map((p) => {
     const m = new TankMesh(p.color);
@@ -435,6 +437,7 @@ function handleEvents() {
         break;
       case 'damage': {
         if (seen(game.players[e.player])) popDamage(e.player, e.amount);
+        { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); }
         if (insetFor === e.player) flashInset(e.amount);
         // Name the victim on the shooter's pip.
         const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
@@ -460,7 +463,7 @@ function handleEvents() {
         }
         if (near > 6) blast = null;
         const w = new Wreck(scene, tanks[e.player], blast, effects, (x, z) => game.terrain.heightAt(x, z));
-        w.onLand = (at, heavy) => sound.thud(camDist([at.x, at.y, at.z]) * (heavy ? 1 : 1.6));
+        w.onLand = (at, heavy) => sound.thud(camDist([at.x, at.y, at.z]) * (heavy ? 1 : 1.6), 'wreck');
         wrecks.push(w);
         banner(`${p.name} destroyed`, by && by !== p ? `by ${by.name}` : by === p ? 'self-inflicted' : '', 1800);
         break;
@@ -2269,3 +2272,16 @@ window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, cam
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };
 if (touch) window.craterfall.touch = touch;
+
+// Resource-pack review (P): only where tools/devserver.mjs serves the asset
+// library at api/packs. Elsewhere the fetch fails and nothing more is loaded.
+fetch('api/packs').then((r) => (r.ok ? r.json() : null)).then(async (lib) => {
+  if (!lib?.packs?.length) return;
+  const { PackReview } = await import('./review.js');
+  review = new PackReview(lib, {
+    scene, sky, renderer, camera, controls, sound, banner,
+    ground: () => (game ? terrainMesh : menuMesh),
+    groundAt: (x, z) => (game ? game.terrain : menuField.terrain).heightAt(x, z),
+  });
+  window.craterfall.review = review;
+}).catch(() => { /* no pack library here */ });
