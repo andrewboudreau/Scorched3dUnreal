@@ -22,8 +22,9 @@ const DEG = Math.PI / 180;
 
 // ---------------------------------------------------------------- renderer
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+// MSAA on a 2x screen is 4x the pixels times 4 samples; 1.5 looks the same.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -106,6 +107,38 @@ let bannerHold = 0;             // a round banner keeps the turn banner waiting 
 let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
+// Scratch objects for per-frame work. Nothing may keep one past the call that filled it
+// (except camGoal, which deliberately points at _killGoal / _menuGoal and only reads them).
+const _lblV = new THREE.Vector3();       // projecting labels and popups
+const _shellC = new THREE.Vector3();     // centre of the shells in flight
+const _camBefore = new THREE.Vector3();
+const _camDelta = new THREE.Vector3();
+const _killGoal = new THREE.Vector3();
+const _menuGoal = new THREE.Vector3();
+
+// ---- DOM write helpers: touching the DOM with the value it already has still costs
+// style work, so every per-frame write goes through one of these.
+function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
+// An inline style property, remembered on the element so we never read it back.
+function setStyle(el, prop, v) {
+  const c = el._st || (el._st = {});
+  if (c[prop] !== v) { c[prop] = v; el.style[prop] = v; }
+}
+function setDisplay(el, v) { if (el._disp !== v) { el._disp = v; el.style.display = v; } }
+// Move an absolutely placed element (left/top 0 in CSS) by transform, which needs no layout.
+// `anchor` is the element's own centring translate from style.css.
+function moveTo(el, x, y, anchor) {
+  const tf = `translate(${Math.round(x * 2) / 2}px, ${Math.round(y * 2) / 2}px) ${anchor}`;
+  if (el._tf !== tf) { el._tf = tf; el.style.transform = tf; }
+}
+const CENTRE = 'translate(-50%, -50%)', ABOVE = 'translate(-50%, -100%)';
+// Where the HUD panels sit, read once at the start of each frame (before that frame's
+// DOM writes) so screenSpot never forces a layout per marker.
+const HUD_PANELS = ['player-card', 'range-card', 'scoreboard'];
+let hudBoxes = [];
+function readHudBoxes() {
+  hudBoxes = HUD_PANELS.map((id) => { const b = $(id).getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; });
+}
 
 // A short line showing where the shot starts out, for tanks with Tracer Rounds.
 const tracer = new THREE.Line(
@@ -131,6 +164,14 @@ function dropTrail(line) {
   line.material.dispose();
 }
 
+// A wreck (see makeWreck) owns its boxes and its one shared material outright.
+function dropWreck(w) {
+  scene.remove(w);
+  const mats = new Set();
+  w.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); mats.add(o.material); } });
+  mats.forEach((m) => m.dispose());
+}
+
 function clearTrails() {
   fadingTrails.forEach(dropTrail);
   fadingTrails.length = 0;
@@ -144,13 +185,14 @@ function disposeMatch() {
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
   ghosts = []; pulses = []; fogFor = null;
   groundShade.fogOn.value = 0;
-  wrecks.forEach((w) => scene.remove(w));
+  wrecks.forEach(dropWreck);
   shells.forEach((s) => { scene.remove(s.mesh, s.line); });
   shells.clear();
   clearTrails();
   closeHandoff();
   effects.clear();
   tanks = []; wrecks = []; labels = [];
+  pips.forEach(dropPip);      // takes a rangefinder pip's beam out of the scene too
   pips.length = 0;
   heroId = null;
   $('labels').innerHTML = '';
@@ -205,6 +247,7 @@ function startMatch(config) {
   buildScoreboard();
   $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
   game.start();
+  handleEvents();      // builds the round (terrain, scenery, water) so the warm-up sees it
   showHud(true);
   warmShaders();
 }
@@ -212,10 +255,7 @@ function startMatch(config) {
 // Compile every shader the match can need now, while the screen is changing
 // anyway, rather than the first time a fog ring or explosion shows up.
 function warmShaders() {
-  const hidden = ghosts.map((g) => g.ring).filter((r) => !r.visible);
-  hidden.forEach((r) => { r.visible = true; });
   effects.warm(renderer, camera);
-  hidden.forEach((r) => { r.visible = false; });
 }
 
 // ---------------------------------------------------------------- events
@@ -229,7 +269,7 @@ function banner(text, sub = '', ms = 1600) {
 }
 
 function addShake(pos, power) {
-  const d = camera.position.distanceTo(new THREE.Vector3(...pos));
+  const d = camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
   shake = Math.max(shake, power * Math.max(0, 1 - d / 900));
 }
 
@@ -237,7 +277,7 @@ function handleEvents() {
   for (const e of game.drainEvents()) {
     switch (e.type) {
       case 'roundStart':
-        wrecks.forEach((w) => scene.remove(w));
+        wrecks.forEach(dropWreck);
         wrecks = [];
         clearTrails();
         pips.forEach(dropPip);
@@ -473,7 +513,6 @@ function addProbePip(owner, pos, pb) {
 // camera) is pulled onto an edge, in far enough for a name to fit and clear of
 // the HUD panels; `angle` then points from there toward it.
 const _pipV = new THREE.Vector3();
-const HUD_PANELS = ['player-card', 'range-card', 'scoreboard'];
 function screenSpot(x, y, z) {
   const W = window.innerWidth, H = window.innerHeight;
   const v = _pipV.set(x, y, z).project(camera);
@@ -487,8 +526,7 @@ function screenSpot(x, y, z) {
   let sy = Math.min(b, Math.max(t, (-ny * 0.5 + 0.5) * H));
   if (off) {
     // Keep clear of the HUD panels: slide down below any that it lands on.
-    for (const id of HUD_PANELS) {
-      const box = $(id).getBoundingClientRect();
+    for (const box of hudBoxes) {
       if (box.width && sx > box.left - 30 && sx < box.right + 30 && sy > box.top - 30 && sy < box.bottom + 25) sy = Math.min(b, box.bottom + 25);
     }
   }
@@ -505,10 +543,12 @@ function unstack(s, placed) {
 }
 
 function place(el, s) {
-  el.classList.toggle('edge', s.off);
-  el.style.left = `${s.sx}px`;
-  el.style.top = `${s.sy}px`;
-  if (s.off) el.style.setProperty('--a', `${s.angle}rad`);
+  if (el._edge !== s.off) { el._edge = s.off; el.classList.toggle('edge', s.off); }
+  moveTo(el, s.sx, s.sy, CENTRE);
+  if (s.off) {
+    const a = `${s.angle}rad`;
+    if (el._a !== a) { el._a = a; el.style.setProperty('--a', a); }
+  }
 }
 
 function updatePips() {
@@ -521,7 +561,7 @@ function updatePips() {
     const left = q.until ? (q.until - now) / 1000 : Infinity;
     if (left <= 0) { dropPip(q); pips.splice(i, 1); continue; }
     const hide = handoffOpen || (q.sticky && game.phase === 'aim' && game.current && game.current.id !== q.owner);
-    q.el.style.display = hide ? 'none' : '';
+    setDisplay(q.el, hide ? 'none' : '');
     if (q.beam) {
       // Fade a beam the camera is right beside: up close it is a wall, not a marker.
       const near = Math.min(1, Math.max(0.12, (Math.hypot(camera.position.x - q.pos[0], camera.position.z - q.pos[2]) - 25) / 90));
@@ -529,7 +569,7 @@ function updatePips() {
       q.beam.material.opacity = 0.5 * near * Math.min(1, left / 1.2);
     }
     if (hide) continue;
-    q.el.style.opacity = Math.min(1, left / 1.2);
+    setStyle(q.el, 'opacity', Math.min(1, left / 1.2));
     const s = screenSpot(q.pos[0], q.pos[1] + 1, q.pos[2]);
     if (s.off) unstack(s, placed);
     place(q.el, s);
@@ -539,7 +579,7 @@ function updatePips() {
     const w = (q.w ||= span.offsetWidth || 60) / 2 + 4;
     let top = 14;
     while (top < 100 && labels.some(([x, y, hw]) => Math.abs(x - s.sx) < hw + w && Math.abs(y - (s.sy + top)) < 13)) top += 13;
-    span.style.top = `${top}px`;
+    setStyle(span, 'top', `${top}px`);
     labels.push([s.sx, s.sy + top, w]);
   }
 }
@@ -553,11 +593,11 @@ function updateLocators() {
     const el = locators[i];
     const b = me && p !== me && p.alive ? believed(p) : null;
     const s = b ? screenSpot(b.x, b.y + 4, b.z) : null;
-    if (!s || !s.off) { el.style.display = 'none'; return; }
-    el.style.display = '';
+    if (!s || !s.off) { setDisplay(el, 'none'); return; }
+    setDisplay(el, '');
     unstack(s, placed);
     place(el, s);
-    el.querySelector('small').textContent = `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`;
+    setText(el._small || (el._small = el.querySelector('small')), `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`);
   });
 }
 
@@ -612,26 +652,43 @@ $('range-card').addEventListener('click', () => rcSpot && peekSpot(rcSpot));
 
 const signed = (v, digits = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
 
+// The card only changes when something it shows does, so it remembers what it last
+// drew (rcKey) and skips the canvas and the text until that differs.
+let rcKey = '';
+let rcDims = null;              // the plot canvas's CSS size; null until read, and after a resize
+window.addEventListener('resize', () => { rcDims = null; });
+
 function updateRangeCard() {
   const me = rangeOwner();
   const r = me && ranges.get(me.id);
   const a = r?.probes.aim;
-  $('range-card').classList.toggle('hidden', !a);
-  if (!a) { rcSpot = null; return; }
+  const card = $('range-card');
+  card.classList.toggle('hidden', !a);
+  if (!a) { rcSpot = null; rcKey = ''; rcDims = null; return; }
   rcSpot = a.pos;
+
+  const cv = $('rc-plot');
+  const dpr = window.devicePixelRatio || 1;
+  if (!rcDims || !rcDims[0]) rcDims = [cv.clientWidth, cv.clientHeight];   // a layout read, so only when needed
+  const [W, H] = rcDims;
+  const foe = game.players.filter((p) => p.alive && p !== me).map(believed).filter(Boolean)
+    .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
+  // The three reasons the estimate is "rough" are thresholds, so the key holds the verdicts, not the raw numbers.
+  const moved = Math.hypot(me.x - r.at[0], me.z - r.at[1]) > 4;
+  const elevOff = Math.abs(me.elev - r.elev) > 0.05;
+  const windOff = Math.hypot(game.wind[0] - r.wind[0], game.wind[1] - r.wind[1]) > 0.6;
+  let key = `${me.id}|${me.weapon}|${W}x${H}@${dpr}|${r.at[0]},${r.at[1]}|${r.elev}|${moved}${elevOff}${windOff}|${foe ? `${foe.x},${foe.y},${foe.z}` : '-'}`;
+  for (const k in r.probes) { const pb = r.probes[k]; key += `|${k}:${pb.pos[0]},${pb.pos[1]},${pb.pos[2]},${pb.yaw},${pb.power}`; }
+  if (key === rcKey) return;
+  rcKey = key;
 
   const ax = rangeAxes(a.yaw);
   const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
-  const foe = game.players.filter((p) => p.alive && p !== me).map(believed).filter(Boolean)
-    .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
   const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
   const w = WEAPON_BY_ID[me.weapon];
   const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
 
   // ---- plot
-  const cv = $('rc-plot');
-  const dpr = window.devicePixelRatio || 1;
-  const W = cv.clientWidth, H = cv.clientHeight;
   if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
   const g2 = cv.getContext('2d');
   g2.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -704,23 +761,26 @@ function updateRangeCard() {
   }
 
   // ---- words
-  if (!t) { $('rc-read').textContent = 'No enemy left to range on.'; $('rc-est').textContent = ''; return; }
+  if (!t) { setText($('rc-read'), 'No enemy left to range on.'); $('rc-est').textContent = ''; $('rc-est')._html = null; return; }
   const off = Math.hypot(t.side, t.along);
-  $('rc-read').textContent = off <= blast * 0.8 ? `As aimed: on ${foe.name}`
-    : `As aimed: ${Math.round(Math.abs(t.along))} m ${t.along > 0 ? 'short' : 'long'}, ${Math.round(Math.abs(t.side))} m ${t.side > 0 ? 'left' : 'right'} of ${foe.name}`;
+  setText($('rc-read'), off <= blast * 0.8 ? `As aimed: on ${foe.name}`
+    : `As aimed: ${Math.round(Math.abs(t.along))} m ${t.along > 0 ? 'short' : 'long'}, ${Math.round(Math.abs(t.side))} m ${t.side > 0 ? 'left' : 'right'} of ${foe.name}`);
   const est = solveAim(r.probes, [foe.x, foe.y, foe.z]);
   const notes = [];
-  if (Math.hypot(me.x - r.at[0], me.z - r.at[1]) > 4) notes.push('you have moved');
-  if (Math.abs(me.elev - r.elev) > 0.05) notes.push(`probed at ${r.elev.toFixed(1)}° elevation`);
-  if (Math.hypot(game.wind[0] - r.wind[0], game.wind[1] - r.wind[1]) > 0.6) notes.push('the wind has shifted');
+  if (moved) notes.push('you have moved');
+  if (elevOff) notes.push(`probed at ${r.elev.toFixed(1)}° elevation`);
+  if (windOff) notes.push('the wind has shifted');
   const note = notes.length ? `<small>Rough: ${notes.join(', ')}.</small>` : '';
+  let html;
   if (!est || Math.abs(est.dYaw) > 25 || Math.abs(est.dPower) > 35) {
-    $('rc-est').innerHTML = `Too far off to estimate: aim again and probe.${note}`;
+    html = `Too far off to estimate: aim again and probe.${note}`;
   } else if (est.power > TANK.maxPower || est.power < TANK.minPower) {
-    $('rc-est').innerHTML = `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
+    html = `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
   } else {
-    $('rc-est').innerHTML = `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
+    html = `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
   }
+  const estEl = $('rc-est');
+  if (estEl._html !== html) { estEl._html = html; estEl.innerHTML = html; }
 }
 
 
@@ -834,7 +894,7 @@ function killCamView() {
   if (pr) camTarget.lerp(_v.set(pr.pos[0], pr.pos[1], pr.pos[2]), 0.3);
   const [sx, sz] = killCam.side, [dx, dz] = killCam.dir;
   // camGoal is an offset from the target.
-  camGoal = new THREE.Vector3(sx * 40 - dx * 16 + (v.x - camTarget.x), 24, sz * 40 - dz * 16 + (v.z - camTarget.z));
+  camGoal = _killGoal.set(sx * 40 - dx * 16 + (v.x - camTarget.x), 24, sz * 40 - dz * 16 + (v.z - camTarget.z));
 }
 
 // ---------------------------------------------------------------- inset
@@ -896,7 +956,7 @@ function flashInset(amount) {
 
 function popDamage(pid, amount) {
   const p = game.players[pid];
-  const v = new THREE.Vector3(p.x, p.y + 6, p.z).project(camera);
+  const v = _lblV.set(p.x, p.y + 6, p.z).project(camera);
   if (v.z > 1) return;
   const el = document.createElement('div');
   el.className = 'dmg-pop';
@@ -950,11 +1010,14 @@ function updateCamera(dt) {
       frame = Math.min(1300, Math.max(130, (_box.getSize(_v).length() * 0.62) / Math.tan((camera.fov * DEG) / 2)));
       camGoal = null;
     } else if (game.phase === 'flight' && followShell && game.projectiles.some((pr) => !shellHidden(pr))) {
-      const c = new THREE.Vector3();
-      const shown = game.projectiles.filter((pr) => !shellHidden(pr));
-      shown.forEach((pr) => c.add(new THREE.Vector3(...pr.pos)));
-      c.divideScalar(shown.length);
-      camTarget.copy(c);
+      let n = 0;
+      _shellC.set(0, 0, 0);
+      for (const pr of game.projectiles) {
+        if (shellHidden(pr)) continue;
+        _shellC.add(_v.set(pr.pos[0], pr.pos[1], pr.pos[2]));
+        n++;
+      }
+      camTarget.copy(_shellC.divideScalar(n));
     } else if (game.phase === 'aim' && game.current) {
       const look = peek && performance.now() < peek.until ? (peek.id != null ? game.players[peek.id] : peek) : null;
       if (!look) peek = null;
@@ -964,9 +1027,9 @@ function updateCamera(dt) {
       if (!look && !camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
     }
   }
-  const before = controls.target.clone();
+  _camBefore.copy(controls.target);
   controls.target.lerp(camTarget, 1 - Math.exp(-dt * 3.2));
-  camera.position.add(controls.target.clone().sub(before));
+  camera.position.add(_camDelta.copy(controls.target).sub(_camBefore));
   if (frame) {
     // Back off (or close in) to the framing distance, looking down enough to see over the hills.
     const k = 1 - Math.exp(-dt * 2.2);
@@ -1165,6 +1228,7 @@ function soundScape(dt) {
 
 function showHud(on) { $('hud').classList.toggle('hidden', !on); }
 
+const sbRows = new Map();       // player id -> the scoreboard row and the bits of it that change
 function buildScoreboard() {
   $('scoreboard').innerHTML = game.players.map((p) => `
     <div class="sb-row" id="sb-${p.id}" data-id="${p.id}" title="Click to look at ${escapeHtml(p.name)}">
@@ -1174,8 +1238,10 @@ function buildScoreboard() {
       <span class="wins"></span>
       <div class="sb-perks"></div>
     </div>`).join('');
+  sbRows.clear();
   $('scoreboard').querySelectorAll('.sb-row').forEach((row) => {
     row.onclick = () => game && peekAt(game.players[Number(row.dataset.id)]);
+    sbRows.set(Number(row.dataset.id), { row, fill: row.querySelector('.fill'), wins: row.querySelector('.wins'), perks: row.querySelector('.sb-perks') });
   });
 }
 
@@ -1187,42 +1253,49 @@ function setPerks(el, p, long) {
   el.innerHTML = p.perks.map((id) => perkChip(id, long)).join('');
 }
 
+// The HUD's fixed elements, looked up once.
+let hudEls = null;
+const HUD_IDS = ['pc-swatch', 'pc-name', 'pc-tag', 'pc-hp', 'pc-armor', 'pc-money', 'pc-fuel', 'ro-fuel', 'pc-note', 'pc-perks', 'ro-yaw', 'ro-elev',
+  'ro-power', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label'];
+
 function updateHud() {
+  if (!hudEls) { hudEls = {}; for (const id of HUD_IDS) hudEls[id] = $(id); }
+  const E = hudEls;
   const p = game.current || game.players[game.lastShooter ?? 0];
   if (game.current) game.lastShooter = game.current.id;
   if (p) {
-    $('pc-swatch').style.background = p.color;
-    $('pc-name').textContent = p.name;
-    $('pc-tag').textContent = p.ai ? `CPU ${p.ai}` : 'Human';
-    $('pc-hp').style.width = `${(p.hp / p.maxHp) * 100}%`;
-    $('pc-armor').style.width = `${Math.min(100, p.armor * 3.3)}%`;
-    $('pc-money').textContent = p.money;
-    $('pc-fuel').style.width = `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`;
-    $('ro-fuel').textContent = `${Math.floor(p.fuel + 0.05)} m`;
+    setStyle(E['pc-swatch'], 'background', p.color);
+    setText(E['pc-name'], p.name);
+    setText(E['pc-tag'], p.ai ? `CPU ${p.ai}` : 'Human');
+    setStyle(E['pc-hp'], 'width', `${(p.hp / p.maxHp) * 100}%`);
+    setStyle(E['pc-armor'], 'width', `${Math.min(100, p.armor * 3.3)}%`);
+    setText(E['pc-money'], String(p.money));
+    setStyle(E['pc-fuel'], 'width', `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`);
+    setText(E['ro-fuel'], `${Math.floor(p.fuel + 0.05)} m`);
     const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
-    $('pc-note').textContent = noting ? driveNote.text : '';
-    setPerks($('pc-perks'), p, true);
-    $('ro-yaw').textContent = `${p.yaw.toFixed(1)}°`;
-    $('ro-elev').textContent = `${p.elev.toFixed(1)}°`;
-    $('ro-power').textContent = p.power.toFixed(1);
-    $('pc-power').style.width = `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`;
+    setText(E['pc-note'], noting ? driveNote.text : '');
+    setPerks(E['pc-perks'], p, true);
+    setText(E['ro-yaw'], `${p.yaw.toFixed(1)}°`);
+    setText(E['ro-elev'], `${p.elev.toFixed(1)}°`);
+    setText(E['ro-power'], p.power.toFixed(1));
+    setStyle(E['pc-power'], 'width', `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`);
     // Under each: what the last shot used, and how far the aim is from it now.
     const last = p.ai ? null : p.shots[p.shots.length - 1];
-    const was = (id, then, now, unit, wrap) => {
+    const was = (el, then, now, unit, wrap) => {
       let text = p.ai ? '' : '—';
       if (last) {
         const d = wrap ? ((now - then + 540) % 360) - 180 : now - then;
         const delta = Math.abs(d) < 0.05 ? 'same' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`;
         text = `last ${then.toFixed(1)}${unit}<b>${delta}</b>`;
       }
-      if ($(id).dataset.t !== text) { $(id).dataset.t = text; $(id).innerHTML = text; }
+      if (el.dataset.t !== text) { el.dataset.t = text; el.innerHTML = text; }
     };
-    was('last-yaw', last?.yaw, p.yaw, '°', true);
-    was('last-elev', last?.elev, p.elev, '°', false);
-    was('last-power', last?.power, p.power, '', false);
+    was(E['last-yaw'], last?.yaw, p.yaw, '°', true);
+    was(E['last-elev'], last?.elev, p.elev, '°', false);
+    was(E['last-power'], last?.power, p.power, '', false);
     const w = WEAPON_BY_ID[p.weapon];
-    $('ro-weapon').textContent = w.name;
-    $('ro-ammo').textContent = ammoText(p.inventory[w.id]);
+    setText(E['ro-weapon'], w.name);
+    setText(E['ro-ammo'], ammoText(p.inventory[w.id]));
     updateWeaponBar(p);
   }
   // Wind, drawn from behind the turret of the tank on the card (up is the way
@@ -1236,37 +1309,37 @@ function updateHud() {
   const side = (-wx * Math.sin(yaw) + wz * Math.cos(yaw)) * 10;
   const rel = Math.atan2(side, along);
   const arrow = `rotate(${Math.round((rel / DEG - 90) * 2) / 2}deg)`;
-  if ($('wind-arrow').style.transform !== arrow) $('wind-arrow').style.transform = arrow;
-  $('wind-arrow').style.opacity = mag < 0.05 ? 0.2 : 1;
-  $('wind-speed').textContent = mag < 0.05 ? 'calm' : (mag * 10).toFixed(0);
+  setStyle(E['wind-arrow'], 'transform', arrow);
+  setStyle(E['wind-arrow'], 'opacity', mag < 0.05 ? 0.2 : 1);
+  setText(E['wind-speed'], mag < 0.05 ? 'calm' : (mag * 10).toFixed(0));
   const parts = [];
   if (Math.abs(side) >= 0.5) parts.push(`${Math.abs(side).toFixed(0)} ${side > 0 ? 'right' : 'left'}`);
   if (Math.abs(along) >= 0.5) parts.push(`${Math.abs(along).toFixed(0)} ${along > 0 ? 'longer' : 'shorter'}`);
   const aimText = mag < 0.05 ? '' : parts.join(' · ');
-  if ($('wind-aim').textContent !== aimText) $('wind-aim').textContent = aimText;
+  setText(E['wind-aim'], aimText);
   for (const q of game.players) {
-    const row = $(`sb-${q.id}`);
-    if (!row) continue;
-    row.classList.toggle('dead', !q.alive);
-    row.classList.toggle('active', game.current === q);
-    row.querySelector('.fill').style.width = `${(q.hp / q.maxHp) * 100}%`;
-    row.querySelector('.wins').textContent = '★'.repeat(Math.min(q.wins, 3)) + (q.wins > 3 ? q.wins : '');
-    setPerks(row.querySelector('.sb-perks'), q, false);
+    const ref = sbRows.get(q.id);
+    if (!ref) continue;
+    const alive = q.alive, active = game.current === q;
+    if (ref.alive !== alive) { ref.alive = alive; ref.row.classList.toggle('dead', !alive); }
+    if (ref.active !== active) { ref.active = active; ref.row.classList.toggle('active', active); }
+    setStyle(ref.fill, 'width', `${(q.hp / q.maxHp) * 100}%`);
+    setText(ref.wins, '★'.repeat(Math.min(q.wins, 3)) + (q.wins > 3 ? q.wins : ''));
+    setPerks(ref.perks, q, false);
   }
   const mod = game.modifier;
-  $('round-label').textContent = `Round ${game.round} / ${game.cfg.rounds}${mod.id === 'clear' ? '' : ` · ${mod.name}: ${mod.desc}`}`;
+  setText(E['round-label'], `Round ${game.round} / ${game.cfg.rounds}${mod.id === 'clear' ? '' : ` · ${mod.name}: ${mod.desc}`}`);
 }
 
 function updateLabels() {
   game.players.forEach((p, i) => {
     const el = labels[i];
-    const v = new THREE.Vector3(p.x, p.y + 8, p.z).project(camera);
+    const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
     const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
-    el.style.display = visible ? 'block' : 'none';
+    setDisplay(el, visible ? 'block' : 'none');
     if (!visible) return;
-    el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
-    el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
-    el.querySelector('.fill').style.width = `${(p.hp / p.maxHp) * 100}%`;
+    moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
+    setStyle(el._fill || (el._fill = el.querySelector('.fill')), 'width', `${(p.hp / p.maxHp) * 100}%`);
   });
 }
 
@@ -1293,7 +1366,7 @@ function seen(p, view = fogFor) {
 // Where this screen believes `p` is: { x, y, z, r, at } with r the radius of
 // doubt (0 when seen or last seen), or null when it has no idea.
 function believed(p) {
-  if (seen(p)) return { x: p.x, y: p.y, z: p.z, r: 0, at: game.turnsThisRound, live: true };
+  if (seen(p)) return { x: p.x, y: p.y, z: p.z, r: 0, at: game.turnsThisRound, live: true, id: p.id, name: p.name, color: p.color };
   let best = null;
   for (const v of fogFor) {
     const i = game.intel[v.id]?.[p.id];
@@ -1301,7 +1374,7 @@ function believed(p) {
   }
   if (!best) return null;
   const t = game.terrain;
-  return { x: best.x, y: t.inBounds(best.x, best.z) ? t.heightAt(best.x, best.z) : p.y, z: best.z, r: best.r, at: best.at };
+  return { x: best.x, y: t.inBounds(best.x, best.z) ? t.heightAt(best.x, best.z) : p.y, z: best.z, r: best.r, at: best.at, id: p.id, name: p.name, color: p.color };
 }
 
 // A shell from a tank this screen cannot see stays hidden while it climbs,
@@ -1327,21 +1400,19 @@ function updateFog(dt) {
     const g = ghosts[i];
     const b = !show ? believed(p) : null;
     g.ring.visible = !!b;
-    if (!b) { g.el.style.display = 'none'; return; }
+    if (!b) { setDisplay(g.el, 'none'); return; }
     g.ring.position.set(b.x, b.y + 1.5, b.z);
     g.ring.scale.setScalar(Math.max(8, b.r));
     g.ring.material.opacity = b.r ? 0.4 : 0.6;
     const v = _v.set(b.x, b.y + 7, b.z).project(camera);
     const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
-    g.el.style.display = on ? 'block' : 'none';
+    setDisplay(g.el, on ? 'block' : 'none');
     if (!on) return;
-    g.el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
-    g.el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
+    moveTo(g.el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
     const ago = game.turnsThisRound - b.at;
     const unit = game.volleyMode ? 'volley' : 'turn';
     const text = (b.r ? 'roughly here' : 'last seen here') + (ago > 0 ? `, ${ago} ${unit}${ago > 1 ? 's' : ''} ago` : '');
-    const small = g.el.querySelector('small');
-    if (small.textContent !== text) small.textContent = text;
+    setText(g.small || (g.small = g.el.querySelector('small')), text);
   });
   for (let i = pulses.length - 1; i >= 0; i--) {
     const q = pulses[i];
@@ -1959,6 +2030,9 @@ function frame() {
 // One frame of everything, `dt` seconds long.
 function tick(dt, draw = true) {
   elapsed += dt;
+  // The HUD panels' boxes, read before this frame writes anything so the layout is clean
+  // (a hidden tab's draw-less ticks have no one looking, so they keep the last boxes).
+  if (game && draw) readHudBoxes();
   let dayGoal = 0.12;
   if (session) {
     session.pump();
@@ -1976,6 +2050,7 @@ function tick(dt, draw = true) {
     applySteering();
     game.update(sdt);
     handleEvents();
+    terrainMesh.flushPaths?.(renderer);   // upload just the scuffed part of the path mask
     game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, sdt));
     updateFog(dt);
     tankSmoke(dt);
@@ -2002,7 +2077,7 @@ function tick(dt, draw = true) {
     menuScenery.sync(elapsed);
     const t = performance.now() * 0.00005;
     camTarget.set(0, 0, 0);
-    camGoal = new THREE.Vector3(Math.cos(t) * 600, 300, Math.sin(t) * 600);
+    camGoal = _menuGoal.set(Math.cos(t) * 600, 300, Math.sin(t) * 600);
   }
   day = dayLock ?? day + Math.max(-dt * 0.5, Math.min(dt * 0.012, dayGoal - day));
   sky.setDay(day);

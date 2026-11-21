@@ -38,7 +38,7 @@ export class Birds {
     this.wings = new THREE.InstancedMesh(wingGeometry(), wing, count * 2);
     for (const m of [this.bodies, this.wings]) {
       m.frustumCulled = false;
-      m.castShadow = true;
+      m.castShadow = false;   // a 4096 shadow pass every frame for specks nobody sees
       scene.add(m);
     }
     this.flocks = [];

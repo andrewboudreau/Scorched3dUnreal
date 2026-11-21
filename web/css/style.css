@@ -73,8 +73,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 #banner.show { opacity: 1; }
 #banner small { display: block; font-size: 16px; font-weight: 600; color: var(--muted); }
 
+/* Labels, pips and locators are placed from main.js with a transform (translate(x, y) then their own
+   centring one), so moving them never forces layout; hence left/top 0 on them. */
 #labels { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
-.tank-label { position: absolute; transform: translate(-50%, -100%); text-align: center; font-size: 12px; font-weight: 700;
+.tank-label { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); text-align: center; font-size: 12px; font-weight: 700;
   text-shadow: 0 1px 4px #000; white-space: nowrap; }
 .tank-label .bar { width: 54px; height: 4px; margin: 3px auto 0; }
 .dmg-pop { position: absolute; transform: translate(-50%, -50%); font-weight: 800; color: #ff6b5b; font-size: 18px;
@@ -82,7 +84,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 @keyframes pop { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
 
 /* Volley pips: where another tank's shell came down. The dot sits on the spot. */
-.pip { position: absolute; width: 10px; height: 10px; transform: translate(-50%, -50%); }
+.pip { position: absolute; left: 0; top: 0; width: 10px; height: 10px; transform: translate(-50%, -50%); }
 .pip i { position: absolute; inset: 0; border-radius: 50%; background: var(--c);
   box-shadow: 0 0 0 2px rgba(0, 0, 0, .55), 0 0 10px var(--c); }
 .pip i::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--c); opacity: 0;
@@ -158,8 +160,8 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 /* Weapons carried by the tank whose turn it is */
 #weapon-bar { position: fixed; z-index: 2; bottom: 70px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap;
   justify-content: center; max-width: 94vw; }
-.wb-item { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
-  padding: 6px 10px; font-weight: 600; backdrop-filter: blur(6px); }
+.wb-item { display: flex; align-items: center; gap: 7px; background: rgba(14, 18, 24, 0.84); border: 1px solid var(--edge); border-radius: 8px;
+  padding: 6px 10px; font-weight: 600; }
 .wb-item.on { border-color: var(--accent); background: rgba(255, 181, 71, .22); }
 .wb-item:disabled { opacity: .75; }
 .wb-key { font-size: 11px; color: var(--muted); border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; }
@@ -171,7 +173,7 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 .pip.probe span { font-weight: 600; }
 
 /* Off-screen opponents while you plan. */
-.locator { position: absolute; width: 14px; height: 14px; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; }
+.locator { position: absolute; left: 0; top: 0; width: 14px; height: 14px; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; }
 .locator i { position: absolute; inset: 0; border-radius: 50%; background: rgba(10, 14, 19, .8); border: 2px solid var(--c); }
 .locator i::after { content: ''; position: absolute; left: 50%; top: 50%; border: 6px solid transparent; border-left: 10px solid var(--c);
   border-right-width: 0; transform: translate(-50%, -50%) rotate(var(--a)) translate(15px); }

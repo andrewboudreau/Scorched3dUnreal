@@ -193,6 +193,17 @@ const STATIC = ['pine', 'oak', 'bush', 'rock', 'house', 'ruin'];
 const WALKERS = ['villager', 'limb', 'sheep'];
 const SHADOW = { pine: true, oak: true, bush: true, rock: true, house: true, ruin: true, villager: true, limb: true, sheep: true };
 
+// One stand-in for each scenery shader variant (water, a plain mesh such as
+// the bridge, instanced props with and without per-instance colour), for the
+// shader warm-up at match start. They are never rendered.
+export function sceneryStandIns() {
+  const a = assets();
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const tinted = new THREE.InstancedMesh(box, a.material, 1);
+  tinted.setColorAt(0, new THREE.Color(1, 1, 1));
+  return [new THREE.Mesh(box, a.water), new THREE.Mesh(box, a.material), new THREE.InstancedMesh(box, a.material, 1), tinted];
+}
+
 export class SceneryMesh {
   constructor(scenery) {
     this.scenery = scenery;

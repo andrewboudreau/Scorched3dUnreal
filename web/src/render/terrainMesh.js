@@ -82,6 +82,33 @@ const PATH_TEXELS = 2048;
 const NO_PATHS = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 NO_PATHS.needsUpdate = true;
 
+// The 2048^2 path mask is big, so it is built once and handed from match to
+// match: `data` is the CPU copy (one byte per texel), `tex` the GPU texture over
+// it, and `src` a second, never-rendered texture over the same bytes that
+// copyTextureToTexture reads partial rectangles from. `scratch` is the canvas
+// the strokes are drawn on, only used inside setPaths.
+const pathPool = [];
+let scratch = null;
+function scratchCanvas() {
+  if (!scratch) {
+    scratch = document.createElement('canvas');
+    scratch.width = scratch.height = PATH_TEXELS;
+  }
+  return scratch;
+}
+function makePathSlot() {
+  const data = new Uint8Array(PATH_TEXELS * PATH_TEXELS);
+  const tex = new THREE.DataTexture(data, PATH_TEXELS, PATH_TEXELS, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.flipY = false;                 // row 0 is world z at the field's far edge, as the canvas was
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 4;
+  const src = new THREE.DataTexture(data, PATH_TEXELS, PATH_TEXELS, THREE.RedFormat, THREE.UnsignedByteType);
+  return { data, tex, src, box: new THREE.Box2(), at: new THREE.Vector2() };
+}
+
 function addGroundDetail(material, paths) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uCloud = groundShade.clouds;
@@ -122,16 +149,17 @@ float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * 
 {
   float fade = 1.0 - smoothstep(50.0, 420.0, length(vViewPosition));
   if (fade > 0.0) {
-    vec2 q = gWarp(vGroundP.xz);
+    vec2 q = gQW;   // warped once in color_fragment, which runs first
     float h0 = gRough(q);
     vec3 tilt = vec3(h0 - gRough(q + vec2(0.35, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.35))) * (1.3 * fade);
     normal = normalize(normal + (viewMatrix * vec4(tilt, 0.0)).xyz);
   }
 }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+vec2 gQW = gWarp(vGroundP.xz);
 {
   vec2 q = vGroundP.xz;
-  vec2 qw = gWarp(q);
+  vec2 qw = gQW;
   float n = gNoise(gR1 * qw * 0.083 + 2.1) * 0.5 + gNoise(gR2 * qw * 0.29 + 6.3) * 0.3 + gNoise(gR3 * qw * 1.63 + 4.4) * 0.2;
   diffuseColor.rgb *= 0.84 + 0.32 * n;
   // Broad patches, tens of metres across: drier, yellower grass in some,
@@ -165,47 +193,73 @@ float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * 
   };
 }
 
+// The per-vertex noise and the triangle index depend only on the field's size
+// and resolution (the seeds are fixed), so every match on the same grid shares
+// one copy. Nobody writes to these after they are built.
+const gridCache = new Map();
+function gridFor(field) {
+  const key = `${field.size}|${field.res}`;
+  let g = gridCache.get(key);
+  if (g) return g;
+  const n = field.n;
+  const count = n * n;
+  const xz = new Float32Array(count * 3);   // x and z of every vertex; y stays 0
+  const jitter = new Float32Array(count);
+  const patch = new Float32Array(count);    // broad lush/dry meadow patches, -1..1
+  const noise = makePerlin(99);
+  const broad = makePerlin(41);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const k = j * n + i;
+      xz[k * 3] = field.vx(i);
+      xz[k * 3 + 2] = field.vz(j);
+      jitter[k] = noise(i * 0.21, j * 0.21) * 0.5 + noise(i * 0.9, j * 0.9) * 0.25;
+      patch[k] = broad(field.vx(i) * 0.014, field.vz(j) * 0.014) + broad(field.vx(i) * 0.05, field.vz(j) * 0.05) * 0.4;
+    }
+  }
+  const index = count > 65535 ? new Uint32Array(field.res * field.res * 6) : new Uint16Array(field.res * field.res * 6);
+  let w = 0;
+  for (let j = 0; j < field.res; j++) {
+    for (let i = 0; i < field.res; i++) {
+      const a = j * n + i;
+      const b = a + 1;
+      const c = a + n;
+      const d = c + 1;
+      // Alternate the split diagonal so crater rims don't saw-tooth in one direction.
+      if ((i + j) & 1) { index[w++] = a; index[w++] = c; index[w++] = d; index[w++] = a; index[w++] = d; index[w++] = b; }
+      else { index[w++] = a; index[w++] = c; index[w++] = b; index[w++] = b; index[w++] = c; index[w++] = d; }
+    }
+  }
+  g = { xz, jitter, patch, index };
+  gridCache.set(key, g);
+  return g;
+}
+
 export class TerrainMesh {
   constructor(field) {
     this.field = field;
     const n = field.n;
     const count = n * n;
-    this.positions = new Float32Array(count * 3);
+    const grid = gridFor(field);
+    this.positions = grid.xz.slice();
     this.normals = new Float32Array(count * 3);
     this.colors = new Float32Array(count * 3);
-    this.jitter = new Float32Array(count);
-    this.patch = new Float32Array(count);   // broad lush/dry meadow patches, -1..1
-    const noise = makePerlin(99);
-    const broad = makePerlin(41);
-    for (let j = 0; j < n; j++) {
-      for (let i = 0; i < n; i++) {
-        const k = j * n + i;
-        this.positions[k * 3] = field.vx(i);
-        this.positions[k * 3 + 2] = field.vz(j);
-        this.jitter[k] = noise(i * 0.21, j * 0.21) * 0.5 + noise(i * 0.9, j * 0.9) * 0.25;
-        this.patch[k] = broad(field.vx(i) * 0.014, field.vz(j) * 0.014) + broad(field.vx(i) * 0.05, field.vz(j) * 0.05) * 0.4;
-      }
-    }
-    const index = [];
-    for (let j = 0; j < field.res; j++) {
-      for (let i = 0; i < field.res; i++) {
-        const a = j * n + i;
-        const b = a + 1;
-        const c = a + n;
-        const d = c + 1;
-        // Alternate the split diagonal so crater rims don't saw-tooth in one direction.
-        if ((i + j) & 1) index.push(a, c, d, a, d, b);
-        else index.push(a, c, b, b, c, d);
-      }
-    }
+    this.jitter = grid.jitter;   // shared, read-only
+    this.patch = grid.patch;     // shared, read-only
     const geo = new THREE.BufferGeometry();
-    geo.setIndex(index);
+    geo.setIndex(new THREE.BufferAttribute(grid.index, 1));
     geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    // Until an attribute has been uploaded in full (and after every rebuild) a
+    // partial update range would leave the rest stale, so ranges wait for this.
+    this.fullPending = { position: true, normal: true, color: true };
+    for (const name of ['position', 'normal', 'color']) {
+      geo.attributes[name].onUpload(() => { this.fullPending[name] = false; });
+    }
     this.geometry = geo;
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
-    this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, canvas: null };
+    this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, slot: null, dirty: null };
     addGroundDetail(this.material, this.paths);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.receiveShadow = true;
@@ -243,16 +297,13 @@ export class TerrainMesh {
   // Paint these paths (core/paths.js) onto the ground, replacing any before.
   setPaths(paths) {
     const P = this.paths;
-    if (!P.canvas) {
-      P.canvas = document.createElement('canvas');
-      P.canvas.width = P.canvas.height = PATH_TEXELS;
-      const tex = new THREE.CanvasTexture(P.canvas);
-      tex.flipY = false;                 // canvas y runs with world z
-      tex.colorSpace = THREE.NoColorSpace;
-      tex.anisotropy = 4;
-      P.map.value = tex;
+    if (!P.slot) {
+      P.slot = pathPool.pop() || makePathSlot();
+      P.map.value = P.slot.tex;
     }
-    const g = P.canvas.getContext('2d');
+    P.dirty = null;
+    const cv = scratchCanvas();
+    const g = cv.getContext('2d');
     const k = PATH_TEXELS / this.field.size;
     const px = (v) => (v + this.field.half) * k;
     g.globalCompositeOperation = 'source-over';
@@ -268,33 +319,82 @@ export class TerrainMesh {
       p.points.forEach(([x, z], i) => (i ? g.lineTo(px(x), px(z)) : g.moveTo(px(x), px(z))));
       g.stroke();
     }
-    P.map.value.needsUpdate = true;
+    g.shadowBlur = 0;
+    // The shader reads only red. Canvas row 0 is texture row 0 (flipY is off
+    // and canvas y runs with world z), so the rows copy straight across.
+    const rgba = g.getImageData(0, 0, PATH_TEXELS, PATH_TEXELS).data;
+    const data = P.slot.data;
+    for (let i = 0, n = data.length; i < n; i++) data[i] = rgba[i * 4];
+    P.slot.tex.needsUpdate = true;
   }
 
   // The ground in `region` was just blown out or buried: the path there is gone.
+  // The same radial fade the canvas used to paint (opaque black inside 0.55 r,
+  // clear at r), applied to the mask directly; flushPaths uploads the result.
   scuffPaths(region) {
     const P = this.paths;
-    if (!P.canvas) return;
+    if (!P.slot) return;
     const f = this.field;
     const k = PATH_TEXELS / f.size;
-    const x = ((region.i0 + region.i1) / 2) * f.cell * k;
-    const y = ((region.j0 + region.j1) / 2) * f.cell * k;
+    const cx = ((region.i0 + region.i1) / 2) * f.cell * k;
+    const cy = ((region.j0 + region.j1) / 2) * f.cell * k;
     const r = Math.max(2, ((region.i1 - region.i0) / 2 - 1.5) * f.cell * 0.95) * k;
-    const g = P.canvas.getContext('2d');
-    const fade = g.createRadialGradient(x, y, r * 0.55, x, y, r);
-    fade.addColorStop(0, 'rgba(0,0,0,1)');
-    fade.addColorStop(1, 'rgba(0,0,0,0)');
-    g.shadowBlur = 0;
-    g.fillStyle = fade;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
-    P.map.value.needsUpdate = true;
+    const r0 = r * 0.55;
+    const inv = 1 / (r - r0);
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(PATH_TEXELS - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(PATH_TEXELS - 1, Math.ceil(cy + r));
+    if (x1 < x0 || y1 < y0) return;
+    const data = P.slot.data;
+    const r2 = r * r;
+    for (let y = y0; y <= y1; y++) {
+      const dy = y + 0.5 - cy;
+      const row = y * PATH_TEXELS;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x + 0.5 - cx;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= r2) continue;
+        const d = Math.sqrt(d2);
+        const keep = d <= r0 ? 0 : (d - r0) * inv;   // 1 - alpha of the fade
+        const i = row + x;
+        if (data[i] !== 0) data[i] = Math.round(data[i] * keep);
+      }
+    }
+    const D = P.dirty;
+    if (!D) P.dirty = { x0, y0, x1, y1 };
+    else {
+      if (x0 < D.x0) D.x0 = x0;
+      if (y0 < D.y0) D.y0 = y0;
+      if (x1 > D.x1) D.x1 = x1;
+      if (y1 > D.y1) D.y1 = y1;
+    }
+  }
+
+  // Send whatever scuffPaths changed since the last call to the GPU: just the
+  // touched rectangle, then the mips are rebuilt.
+  flushPaths(renderer) {
+    const P = this.paths;
+    const D = P.dirty;
+    if (!D) return;
+    P.dirty = null;
+    const slot = P.slot;
+    if (!slot) return;
+    if (!renderer?.copyTextureToTexture) { slot.tex.needsUpdate = true; return; }
+    slot.box.min.set(D.x0, D.y0);
+    slot.box.max.set(D.x1 + 1, D.y1 + 1);
+    slot.at.set(D.x0, D.y0);
+    renderer.copyTextureToTexture(slot.src, slot.tex, slot.box, slot.at);
   }
 
   dispose() {
     this.geometry.dispose();
     this.skirtGeometry.dispose();
     this.material.dispose();
-    if (this.paths.canvas) this.paths.map.value.dispose();
+    // The path mask (and its GPU copy) goes back to the pool for the next match.
+    const P = this.paths;
+    if (P.slot) { pathPool.push(P.slot); P.slot = null; P.map.value = NO_PATHS; }
+    P.dirty = null;
   }
 
   rebuild() {
@@ -332,7 +432,7 @@ export class TerrainMesh {
         let nx = hl - hr;
         let ny = 2 * f.cell;
         let nz = hd - hu;
-        const len = Math.hypot(nx, ny, nz);
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
         nx /= len; ny /= len; nz /= len;
         this.normals[k * 3] = nx;
         this.normals[k * 3 + 1] = ny;
@@ -369,9 +469,16 @@ export class TerrainMesh {
       }
     }
     const g = this.geometry;
-    g.attributes.position.needsUpdate = true;
-    g.attributes.normal.needsUpdate = true;
-    g.attributes.color.needsUpdate = true;
+    const full = i0 === 0 && j0 === 0 && i1 === f.res && j1 === f.res;
+    // Upload only the rows this touched: one span from the first vertex to the last.
+    const from = (j0 * n + i0) * 3;
+    const count = ((j1 * n + i1) - (j0 * n + i0) + 1) * 3;
+    for (const name of ['position', 'normal', 'color']) {
+      const a = g.attributes[name];
+      if (full) { a.clearUpdateRanges(); this.fullPending[name] = true; }
+      else if (!this.fullPending[name]) a.addUpdateRange(from, count);
+      a.needsUpdate = true;
+    }
     if (i0 === 0 || j0 === 0 || i1 === f.res || j1 === f.res) this.updateSkirt();
   }
 
