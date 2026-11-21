@@ -10,6 +10,7 @@ import http from 'node:http';
 import { readFile, stat, readdir, writeFile } from 'node:fs/promises';
 import { randomBytes, randomInt } from 'node:crypto';
 import path from 'node:path';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -189,4 +190,10 @@ http.createServer(async (req, res) => {
     res.writeHead(404);
     res.end();
   }
-}).listen(port, () => console.log(`Craterfall dev server on http://localhost:${port}/`));
+}).listen(port, () => {
+  console.log(`Craterfall dev server on http://localhost:${port}/`);
+  // For a phone on the same Wi-Fi (Windows Firewall must let the port in).
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    for (const a of addrs || []) if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) console.log(`  ${name}: http://${a.address}:${port}/`);
+  }
+});
