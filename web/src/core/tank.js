@@ -21,6 +21,7 @@ export const TANK = {
   fuel: 30,            // metres on the level
   climbCost: 2,        // extra fuel per metre, times the slope
   fuelCan: 20,         // metres added by one armory fuel can
+  refuelShare: 1 / 3,  // of the round's fuel, put back after every shot
   driveSpeed: 6,       // m/s forward
   reverseSpeed: 3.5,   // m/s backward
   hullTurnSpeed: 75,   // deg/s, free

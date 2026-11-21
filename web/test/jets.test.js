@@ -456,3 +456,16 @@ test('flak: six tanks firing it in one volley stay sane (84 impacts, ground and 
   // One 'terrain' event per carve: the renderer batches them, the core never dedupes.
   assert.ok(events.filter((e) => e.type === 'terrain').length >= 84);
 });
+
+test('fuel: every shot puts back a third of the round\'s fuel, never past full', () => {
+  const g = arena();
+  const me = g.current;
+  const full = me.fuelMax;
+  assert.ok(full > 0);
+  me.fuel = 0;
+  assert.ok(g.fire());
+  assert.ok(Math.abs(me.fuel - full * TANK.refuelShare) < 1e-9);
+  me.fuel = full - 1;
+  g.launch(me);
+  assert.equal(me.fuel, full);
+});

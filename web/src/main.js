@@ -5,13 +5,14 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
 import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
-import { ROLL, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
+import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
-import { TankMesh, makeWreck } from './render/tankMesh.js';
+import { TankMesh } from './render/tankMesh.js';
+import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Birds } from './render/birds.js';
@@ -165,13 +166,22 @@ function dropTrail(line) {
   line.material.dispose();
 }
 
-// A wreck (see makeWreck) owns its boxes and its one shared material outright.
-function dropWreck(w) {
-  scene.remove(w);
-  const mats = new Set();
-  w.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); mats.add(o.material); } });
-  mats.forEach((m) => m.dispose());
+function dropWreck(w) { w.dispose(); }
+
+// Where to draw a shell this frame: between its last two sim steps, by how far
+// the clock has run into the next one. Without this a slowed-down shell (the
+// kill cam) only moves on the frames that happen to take a step.
+const _shellAt = [0, 0, 0];
+function shellPos(pr) {
+  if (pr.roller || !pr.prev || !game) return pr.pos;
+  const a = Math.min(1, game.acc / SIM_DT);
+  for (let k = 0; k < 3; k++) _shellAt[k] = pr.prev[k] + (pr.pos[k] - pr.prev[k]) * a;
+  return _shellAt;
 }
+
+// Blasts seen in this batch of events, so a tank that dies to one knows
+// which way it was thrown.
+const recentBlasts = [];
 
 function clearTrails() {
   fadingTrails.forEach(dropTrail);
@@ -276,6 +286,7 @@ function addShake(pos, power) {
 }
 
 function handleEvents() {
+  recentBlasts.length = 0;
   for (const e of game.drainEvents()) {
     switch (e.type) {
       case 'roundStart':
@@ -396,6 +407,7 @@ function handleEvents() {
         break;
       }
       case 'explosion':
+        recentBlasts.push(e);
         effects.explosion(e.pos, e.radius);
         sound.explode(e.radius, camDist(e.pos));
         birds.scare(e.pos, 90 + e.radius * 5);
@@ -436,10 +448,15 @@ function handleEvents() {
         const by = e.by != null ? game.players[e.by] : null;
         effects.explosion([p.x, p.y + 2, p.z], 16);
         sound.explode(18, camDist([p.x, p.y, p.z]));
-        const w = makeWreck(p.color);
-        w.position.set(p.x, game.terrain.heightAt(p.x, p.z), p.z);
-        w.rotation.y = Math.random() * Math.PI * 2;
-        scene.add(w);
+        // Thrown away from the nearest blast that reached it this frame, if any.
+        let blast = null, near = Infinity;
+        for (const b of recentBlasts) {
+          const d = Math.hypot(b.pos[0] - p.x, b.pos[1] - p.y, b.pos[2] - p.z) - b.radius;
+          if (d < near) { near = d; blast = b; }
+        }
+        if (near > 6) blast = null;
+        const w = new Wreck(scene, tanks[e.player], blast, effects, (x, z) => game.terrain.heightAt(x, z));
+        w.onLand = (at, heavy) => sound.thud(camDist([at.x, at.y, at.z]) * (heavy ? 1 : 1.6));
         wrecks.push(w);
         banner(`${p.name} destroyed`, by && by !== p ? `by ${by.name}` : by === p ? 'self-inflicted' : '', 1800);
         break;
@@ -896,7 +913,7 @@ function applySteering() {
 // When a shell in the air is about to end the round (its blast would leave at
 // most one tank standing), time slows, the frame letterboxes and the camera
 // swings round to watch it land from the side.
-let killCam = null;             // { id, victim, side: [x, z], end }
+let killCam = null; let lastDt = 0;             // { id, victim, side: [x, z], end }
 let timeScale = 1;
 const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
 
@@ -946,7 +963,7 @@ function decidingShot() {
   return pick && alive.length - dying.size <= 1 ? pick : null;
 }
 
-function updateKillCam() {
+function updateKillCam(dt) {
   const now = performance.now();
   if (!killCam && game && game.phase === 'flight' && followShell && !overview && !pinned) {
     const k = decidingShot();
@@ -969,8 +986,12 @@ function updateKillCam() {
     if (killCam.end == null && !game.projectiles.some((q) => q.id === killCam.id)) killCam.end = now + KILLCAM.after * 1000;
     if (killCam.end != null && now > killCam.end) { killCam = null; document.body.classList.remove('killcam'); }
   }
+  // Ease into the slow motion over a few tenths of a second and back out more
+  // gently, on the real clock so it feels the same at any frame rate.
   const goal = killCam && killCam.end == null ? KILLCAM.slow : killCam ? 0.55 : 1;
-  timeScale += (goal - timeScale) * Math.min(1, 0.25);
+  const tau = goal < timeScale ? 0.22 : 0.45;
+  timeScale += (goal - timeScale) * (1 - Math.exp(-dt / tau));
+  if (Math.abs(goal - timeScale) < 0.002) timeScale = goal;
 }
 
 // Camera for the kill cam: off to the side, low, looking at the target with
@@ -978,8 +999,12 @@ function updateKillCam() {
 function killCamView() {
   const v = game.players[killCam.victim];
   const pr = game.projectiles.find((q) => q.id === killCam.id);
+  // Look between the target and the incoming shell; once it has landed, let
+  // the pull fade instead of snapping back onto the tank.
+  if (pr) { const s = shellPos(pr); killCam.shell = [s[0], s[1], s[2]]; }
+  const pull = killCam.pull = pr ? 0.3 : (killCam.pull ?? 0) * Math.exp(-lastDt * 3);
   camTarget.set(v.x, v.y + 3, v.z);
-  if (pr) camTarget.lerp(_v.set(pr.pos[0], pr.pos[1], pr.pos[2]), 0.3);
+  if (killCam.shell && pull > 0.001) camTarget.lerp(_v.set(...killCam.shell), pull);
   const [sx, sz] = killCam.side, [dx, dz] = killCam.dir;
   // camGoal is an offset from the target.
   camGoal = _killGoal.set(sx * 40 - dx * 16 + (v.x - camTarget.x), 24, sz * 40 - dz * 16 + (v.z - camTarget.z));
@@ -1084,7 +1109,7 @@ function updateCamera(dt) {
       if (game.phase === 'volley') camTarget.set(hero.x, hero.y + 4, hero.z);
       else if (mine.length) {
         camTarget.set(0, 0, 0);
-        mine.forEach((pr) => camTarget.add(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])));
+        mine.forEach((pr) => camTarget.add(_v.fromArray(shellPos(pr))));
         camTarget.divideScalar(mine.length);
       }
     } else if (game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
@@ -1102,7 +1127,7 @@ function updateCamera(dt) {
       _shellC.set(0, 0, 0);
       for (const pr of game.projectiles) {
         if (shellHidden(pr)) continue;
-        _shellC.add(_v.set(pr.pos[0], pr.pos[1], pr.pos[2]));
+        _shellC.add(_v.fromArray(shellPos(pr)));
         n++;
       }
       camTarget.copy(_shellC.divideScalar(n));
@@ -2136,7 +2161,8 @@ function tick(dt, draw = true) {
   }
   if (session?.over && game?.phase !== 'matchOver') netEnded(session.over);
   if (game) {
-    updateKillCam();
+    updateKillCam(dt);
+    lastDt = dt;
     const sdt = dt * timeScale;   // game time: slowed for the kill cam
     applyHeldKeys(dt);
     applySteering();
@@ -2145,12 +2171,13 @@ function tick(dt, draw = true) {
     terrainMesh.flushPaths?.(renderer);   // upload just the scuffed part of the path mask
     game.players.forEach((p, i) => tanks[i].sync(p, game.terrain, sdt));
     updateHops(sdt);
+    for (const w of wrecks) w.update(sdt);
     updateFog(dt);
     tankSmoke(dt);
     for (const pr of game.projectiles) {
       const sv = shells.get(pr.id);
       if (sv && shellHidden(pr)) sv.mesh.visible = false;
-      else sv?.push(pr.pos);
+      else sv?.push(shellPos(pr));
       if (!pr.roller) birds.scare(pr.pos, 28);
     }
     fadeTrails(dt);

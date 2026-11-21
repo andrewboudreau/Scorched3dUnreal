@@ -715,6 +715,9 @@ export class Game {
       }
     } else this.spawnProjectile(pos, vel, w.id, p.id, shot);
     this.heardFire(p);
+    // Every shot tops the tank up by a third of its round's fuel, so a tank
+    // can keep moving through a long round instead of running dry early.
+    p.fuel = Math.min(p.fuelMax, p.fuel + p.fuelMax * TANK.refuelShare);
     this.emit({ type: 'fire', player: p.id, pos, weapon: w.id, shot, delay });
     return true;
   }

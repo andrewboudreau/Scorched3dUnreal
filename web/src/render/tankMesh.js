@@ -191,18 +191,3 @@ export class TankMesh {
     this.treads.forEach((t) => t.dispose());
   }
 }
-
-// A burnt-out hulk left where a tank died.
-export function makeWreck(color) {
-  const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.18), roughness: 1, flatShading: true });
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(6.2, 1.3, 3.8), m);
-  body.position.y = 0.9;
-  body.rotation.z = 0.12;
-  const turret = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 2.2), m);
-  turret.position.set(1.8, 1.4, 2.6);
-  turret.rotation.set(0.4, 0.6, 0.9);
-  g.add(body, turret);
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return g;
-}

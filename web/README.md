@@ -164,7 +164,8 @@ each other.
   turn it is and who is next); CPU tanks buy for themselves. Everyone gets a
   $150 stipend per round on top of damage, kill and win pay.
 - **Fuel.** Every tank has 30 m of driving per round, on its own turn (or
-  its own planning, in a volley), before it fires. Climbing burns extra (a 45 degree slope costs three times level
+  its own planning, in a volley), before it fires, and every shot it fires
+  puts a third of that back (never past full). Climbing burns extra (a 45 degree slope costs three times level
   ground and is the steepest a tank can take); coasting downhill costs the
   same as level. Tanks will not drive into water, off the map, through each
   other or through a standing house, but one that has ended up in a flooded
