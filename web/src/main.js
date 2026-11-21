@@ -17,6 +17,7 @@ import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
+import { Music, TRACKS } from './music.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -57,6 +58,7 @@ scene.add(floor);
 const birds = new Birds(scene);
 const effects = new Effects(scene);
 const sound = new Sound();
+const music = new Music(sound);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -1210,6 +1212,7 @@ window.addEventListener('keydown', (e) => {
     else if (game.current) aimCameraAt(game.current);
   } else if (k === 'm') banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700);
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
+  else if (k === 'n') { sound.ensure(); const t = music.next(); $('opt-music').value = t.id; banner(`Music: ${t.name}`, t.mood || '', 900); }
 });
 
 function setVolume(v, announce = false) {
@@ -1218,6 +1221,11 @@ function setVolume(v, announce = false) {
   if (announce) banner(`Volume ${Math.round(sound.volume * 100)}%`, '', 700);
 }
 $('opt-volume').value = Math.round(sound.volume * 100);
+$('opt-music').innerHTML = TRACKS.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
+$('opt-music').value = music.trackId;
+$('opt-music').addEventListener('change', () => { sound.ensure(); music.select($('opt-music').value); });
+$('opt-music-vol').value = Math.round(music.volume * 100);
+$('opt-music-vol').addEventListener('input', () => { sound.ensure(); music.setVolume(Number($('opt-music-vol').value) / 100); });
 $('opt-volume').addEventListener('input', () => { sound.ensure(); setVolume(Number($('opt-volume').value) / 100); });
 window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
@@ -2204,6 +2212,7 @@ function tick(dt, draw = true) {
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   birds.update(dt);
   soundScape(dt);
+  music.update(dt, game ? timeScale : 1);
   effects.update(dt * timeScale);
   updateCamera(dt);
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
@@ -2241,7 +2250,7 @@ $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, effects, tick, held,
+window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
   get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },

@@ -65,7 +65,7 @@
     <div id="help" class="panel small">
       <b>A/D</b> turret &nbsp; <b>W/S</b> elevation &nbsp; <b>Q/E</b> power &nbsp; <b>Shift</b> fine
       &nbsp; <b>Arrows</b> drive (uses fuel) &nbsp; <b>J</b> jump jet &nbsp; <b>Tab / 1-9</b> weapon &nbsp; <b>Space</b> <span id="help-fire">fire</span><br />
-      <b>A/D</b> in flight: steer a Guided Missile &nbsp; <b>F</b> find enemy &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>- / =</b> volume &nbsp; <b>Enter</b> chat (online) &nbsp; drag to orbit, wheel to zoom
+      <b>A/D</b> in flight: steer a Guided Missile &nbsp; <b>F</b> find enemy &nbsp; <b>C</b> follow cam &nbsp; <b>V</b> overview &nbsp; <b>M</b> mute &nbsp; <b>N</b> next music track &nbsp; <b>- / =</b> volume &nbsp; <b>Enter</b> chat (online) &nbsp; drag to orbit, wheel to zoom
     </div>
     <div id="banner"></div>
     <div id="labels"></div>
@@ -90,6 +90,8 @@
         <label>Twists <select id="opt-twists"><option value="1" selected>Perks and modifiers</option><option value="0">Off</option></select></label>
         <label title="You only see what is near your tank, or what a Scout Missile lights up">Fog of war <select id="opt-fog"><option value="0" selected>Off</option><option value="1">On</option></select></label>
         <label>Volume <input id="opt-volume" type="range" min="0" max="100" step="10" value="60" /></label>
+        <label>Music <select id="opt-music"></select></label>
+        <label>Music level <input id="opt-music-vol" type="range" min="0" max="100" step="10" value="50" /></label>
       </div>
       <button id="start" class="primary">Start match</button>
       <div id="online">

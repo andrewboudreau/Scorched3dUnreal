@@ -38,6 +38,7 @@ each other.
 | C | follow-shell camera |
 | V | overview camera |
 | M | mute everything |
+| N | next music track |
 | - / = | volume down / up (also a slider on the setup screen; it is remembered) |
 | Mouse | drag to orbit, wheel to zoom |
 
@@ -220,6 +221,11 @@ each other.
   bird chirp or a bleat now and then (quieter with distance), a layered
   cannon, a whistle as a shell comes down, blasts that arrive later and
   duller from far away, and an engine hum while a tank drives.
+- **Music** is synthesised too: a small step sequencer plays one of four
+  tracks, picked on the menu (Music, with its own level) or with N in a
+  match: *Outpost* (calm pads and plucks), *Artillery March* (snare rolls and
+  brass), *Bunker Lo-fi* (swung keys and crackle) and *Barrage* (chiptune).
+  The choice is remembered. The kill cam muffles it along with the slow motion.
 
 ## Layout
 
@@ -232,7 +238,7 @@ each other.
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`) and the flocks (`birds.js`).
-- `src/audio.js` is the synthesised sound.
+- `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
   `Game` and reads the same ordered message log (plans, shop choices). At
   each volley, and again before each round, the host sends its full state
