@@ -206,6 +206,16 @@ function startMatch(config) {
   $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
   game.start();
   showHud(true);
+  warmShaders();
+}
+
+// Compile every shader the match can need now, while the screen is changing
+// anyway, rather than the first time a fog ring or explosion shows up.
+function warmShaders() {
+  const hidden = ghosts.map((g) => g.ring).filter((r) => !r.visible);
+  hidden.forEach((r) => { r.visible = true; });
+  effects.warm(renderer, camera);
+  hidden.forEach((r) => { r.visible = false; });
 }
 
 // ---------------------------------------------------------------- events

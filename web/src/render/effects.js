@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 // Short-lived visual effects: fireballs, debris, smoke, shell trails.
 
+const FLASHES = 3;   // explosion lights that can glow at once
+
 function radialTexture(inner, outer) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -24,6 +26,39 @@ export class Effects {
     this.glowTex = radialTexture('rgba(255,240,200,1)', 'rgba(255,120,30,0)');
     this.fireGeo = new THREE.IcosahedronGeometry(1, 2);
     this.debrisGeo = new THREE.TetrahedronGeometry(0.6);
+    // Explosion flashes come from a fixed pool of lights that never leaves
+    // the scene. Adding or removing a light changes the light count, and
+    // three then recompiles every lit material: a frozen second mid-shot.
+    this.flashes = [];
+    for (let i = 0; i < FLASHES; i++) {
+      const light = new THREE.PointLight('#ffb060', 0, 10, 1.6);
+      scene.add(light);
+      this.flashes.push({ light, life: 0, max: 0, peak: 0 });
+    }
+    // One of each effect material, never disposed: a shader program lives
+    // while any material uses it, so these keep the programs compiled
+    // between explosions instead of being rebuilt for the next one.
+    this.keep = [
+      new THREE.Mesh(this.fireGeo, new THREE.MeshBasicMaterial({ color: '#ffcc66', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })),
+      new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })),
+      new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTex, transparent: true, depthWrite: false })),
+      new THREE.Mesh(this.debrisGeo, new THREE.MeshStandardMaterial({ color: '#4a3524', roughness: 1, flatShading: true })),
+      new THREE.Mesh(this.fireGeo, new THREE.MeshBasicMaterial({ color: '#fff2c4' })),                     // roller ball
+      new THREE.Mesh(this.fireGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })),   // probe beams
+      new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]),
+        new THREE.LineBasicMaterial({ transparent: true })),                                                    // shell trails
+    ];
+    this.keep[3].castShadow = true;
+  }
+
+  // Compile the effect shaders up front (with the scene's lights in place),
+  // so the first explosion of a match does not stall on it.
+  warm(renderer, camera) {
+    const g = new THREE.Group();
+    g.add(...this.keep);
+    this.scene.add(g);
+    renderer.compile(this.scene, camera);
+    this.scene.remove(g);
   }
 
   explosion(pos, radius) {
@@ -40,11 +75,13 @@ export class Effects {
       fireMat.color.setHSL(0.1 - 0.08 * k, 1, 0.65 - 0.35 * k);
     } });
 
-    // Flash light.
-    const light = new THREE.PointLight('#ffb060', 40 * radius, radius * 9, 1.6);
-    light.position.set(x, y + radius * 0.4, z);
-    this.scene.add(light);
-    this.items.push({ life: 0, max: 0.45, obj: light, update: (it, t) => { light.intensity = 40 * radius * (1 - t / it.max); } });
+    // Flash light, borrowed from the pool: the one that is dimmest now.
+    let f = this.flashes[0];
+    for (const c of this.flashes) if (c.light.intensity < f.light.intensity) f = c;
+    f.life = 0; f.max = 0.45; f.peak = 40 * radius;
+    f.light.distance = radius * 9;
+    f.light.intensity = f.peak;
+    f.light.position.set(x, y + radius * 0.4, z);
 
     // Glow sprite.
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
@@ -140,6 +177,11 @@ export class Effects {
   }
 
   update(dt) {
+    for (const f of this.flashes) {
+      if (f.light.intensity <= 0) continue;
+      f.life += dt;
+      f.light.intensity = f.life >= f.max ? 0 : f.peak * (1 - f.life / f.max);
+    }
     for (const it of this.items) {
       it.life += dt;
       it.update(it, it.life, dt);
@@ -157,6 +199,7 @@ export class Effects {
   clear() {
     for (const it of this.items) this.scene.remove(it.obj);
     this.items = [];
+    for (const f of this.flashes) f.light.intensity = 0;
   }
 }
 
