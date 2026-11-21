@@ -77,6 +77,7 @@ export class TouchControls {
         <div class="t-power"><i></i><b></b><span>PWR</span></div>
         <div class="t-pad"><span class="t-read"></span><small>drag: &#8596; turret &nbsp; &#8597; elevation</small></div>
         <div class="t-col">
+          <div class="t-btn t-small t-sight" data-key="g">SIGHT</div>
           <div class="t-btn t-weapon" data-act="weapons"></div>
           <div class="t-btn t-fire" data-key=" ">FIRE</div>
         </div>

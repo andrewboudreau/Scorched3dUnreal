@@ -425,3 +425,40 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
 .rv-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, .12); color: var(--muted); }
 .rv-foot button { margin-left: auto; }
 .rv-copy { margin: 0 12px 6px; height: 70px; font: 11px monospace; color: var(--text); background: rgba(0, 0, 0, .4); }
+
+/* The sight (src/gunner.js): a compass tape across the top that lines up with
+   the world, the turret line down the middle, and readouts under the tape. */
+#gunner { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+.gn-line { position: absolute; left: 50%; top: 24%; bottom: 30%; border-left: 1px dashed rgba(255, 255, 255, .4); }
+.gn-tape { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: min(640px, 56vw); height: 40px;
+  background: linear-gradient(rgba(10, 14, 20, .6), rgba(10, 14, 20, .3)); border: 1px solid var(--edge); border-radius: var(--r-lg); }
+.gn-ticks { position: absolute; inset: 0; overflow: hidden; }
+.gn-ticks i { position: absolute; left: 0; top: 0; width: 0; height: 100%; display: flex; justify-content: center; align-items: flex-end;
+  padding-bottom: 5px; font: 600 10px/1 system-ui, sans-serif; font-style: normal; color: #cfd8e2; font-variant-numeric: tabular-nums; }
+.gn-ticks i::before { content: ''; position: absolute; top: 0; left: 0; height: 7px; border-left: 1px solid rgba(255, 255, 255, .5); }
+.gn-ticks i.big::before { height: 13px; border-color: rgba(255, 255, 255, .9); }
+.gn-mid { position: absolute; left: 50%; top: -1px; transform: translateX(-50%); border: 7px solid transparent; border-top-color: var(--accent); }
+.gn-mark { position: absolute; left: 0; top: 100%; width: 0; display: flex; flex-direction: column; align-items: center; }
+.gn-mark.off-l { align-items: flex-start; }
+.gn-mark.off-r { align-items: flex-end; }
+.gn-mark i { width: 0; height: 0; border: 6px solid transparent; border-bottom-color: var(--c); margin-top: -12px; }
+.gn-mark.off-l i, .gn-mark.off-r i { display: none; }
+.gn-mark span { margin-top: 2px; white-space: nowrap; font-size: 11px; font-weight: 700; color: var(--c); background: rgba(10, 14, 20, .6);
+  padding: 1px 5px; border-radius: var(--r); text-shadow: 0 1px 2px #000; }
+.gn-read { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap;
+  font-size: 14px; text-shadow: 0 1px 3px #000, 0 0 8px rgba(0, 0, 0, .6); }
+.gn-last { margin-top: 3px; font-size: 12px; color: #dfe6ee; }
+body.touch .gn-tape { top: 6px; width: min(560px, max(220px, calc(100vw - 360px))); height: 34px; }
+body.touch .gn-read { top: 66px; font-size: 13px; }
+body.touch .gn-line { top: 30%; bottom: 40%; }
+
+/* The aim arc's label at the top of the climb. */
+.arc-peak { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; font-size: 11px; font-weight: 600;
+  padding: 1px 6px; border-radius: var(--r); background: rgba(10, 14, 20, .6); color: #fff; text-shadow: 0 1px 2px #000; }
+
+#gunner-btn { position: fixed; right: calc(var(--inset) + 50px); bottom: var(--inset); z-index: 11; height: 40px; padding: 0 12px;
+  background: var(--panel); backdrop-filter: blur(6px); }
+#gunner-btn b { margin-left: 4px; color: var(--muted); font-size: 11px; }
+#gunner-btn.on { border-color: var(--accent); color: var(--accent); }
+body.touch #gunner-btn { display: none; }
+.t-sight { width: 84px; }

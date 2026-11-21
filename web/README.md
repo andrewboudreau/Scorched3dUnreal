@@ -204,6 +204,23 @@ second column beside the first. On a phone the players box sits top right.
   first shot is a rough guess and the error shrinks with every shot at the same
   target. It grows back when the target or shooter moves or the wind swings.
   Easy stays wild, Normal usually lands on shot 2 to 4, Hard on shot 1 to 2.
+- **Aim arc.** While you plan, a dashed line in your colour shows the shell's
+  climb from the muzzle to the top of its flight, with this turn's wind and
+  any moon's pull, and a ring on the ground under the top says how high and
+  how far out it is ("top 98 m up, 199 m out"). On level ground a shell comes
+  down about twice as far out as its top. It stops short of the landing on
+  purpose: that is still yours to judge (or the Rangefinder's).
+- **Sight** (G, or SIGHT on a phone). The camera rides behind and above your
+  turret, looking down its line, so the middle of the screen is where you
+  point. A compass tape across the top lines up with the world: bearings
+  every 5°, and every enemy you know of at its bearing with its range (pinned
+  to an end, with an arrow, when it is off to the side). Under it, the enemy
+  nearest your line and how far to turn ("Marlow 488 m · turn 6.7° left"),
+  and where your last shot came down from where you stand ("54 m short, 64 m
+  right of Marlow"; cleared when you move). Drag anywhere to aim (across
+  turns the turret by as much as the view moves, up and down raises the
+  barrel), and the wheel or a pinch zooms. It stays on from turn to turn and
+  hands the camera back while shells fly.
 - **Floating isles** (Terrain menu). Instead of one stretch of ground, a dozen
   or so isles hang in open space, each with grass on top and rock beneath. Every
   tank starts on an isle of its own. Two or three small moons hang among them and pull

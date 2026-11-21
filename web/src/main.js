@@ -17,6 +17,7 @@ import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Moons } from './render/moons.js';
+import { AimArc, Gunner } from './gunner.js';
 import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
@@ -64,6 +65,9 @@ scene.add(floor);
 
 const birds = new Birds(scene);
 const effects = new Effects(scene);
+const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
+const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
+const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
 const sound = new Sound();
 const music = new Music(sound);
 
@@ -220,6 +224,8 @@ function disposeMatch() {
   $('labels').innerHTML = '';
   moons.set([]);
   sky.setSpace(false);
+  lastLand.clear();
+  aimArc.hide();
   floor.visible = birds.bodies.visible = birds.wings.visible = true;
 }
 
@@ -429,6 +435,7 @@ function handleEvents() {
             if (r) r.probes[v.probe.key] = { ...v.probe, pos: [...e.pos] };
           }
         } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
+        if (!v?.probe && owner != null) noteLanding(owner, v?.shot, e.type === 'impact' ? e.pos : null);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
         if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
         break;
@@ -608,6 +615,7 @@ function closeHandoff() {
   $('handoff').classList.add('hidden');
 }
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
+$('gunner-btn').onclick = (e) => { e.currentTarget.blur(); sound.click(); toggleGunner(); };   // blur: Space must fire, not press it again
 
 // ---------------------------------------------------------------- pips and locators
 
@@ -1119,6 +1127,115 @@ function popDamage(pid, amount) {
   setTimeout(() => el.remove(), 1300);
 }
 
+// ---------------------------------------------------------------- the sight
+
+// The tank this screen is planning a shot for, or null.
+function planning() {
+  if (!game || handoffOpen || game.phase !== 'aim') return null;
+  const p = game.current;
+  return p && p.alive && game.isLocal(p) ? p : null;
+}
+
+// The sight drives the camera only while you plan; it comes back each turn.
+function gunnerFor() {
+  return gunner.on && !overview && !pinned && !killCam ? planning() : null;
+}
+
+function toggleGunner() {
+  gunner.on = !gunner.on;
+  $('gunner-btn')?.classList.toggle('on', gunner.on);
+  document.querySelector('#touch [data-key=g]')?.classList.toggle('on', gunner.on);
+  if (gunner.on) overview = false;
+  banner(gunner.on ? 'Sight on' : 'Sight off', gunner.on ? (touch ? 'drag to aim, pinch to zoom' : 'drag to aim, wheel to zoom') : '', 900);
+}
+
+// Hand the camera back to the orbit controls from wherever the sight left it,
+// looking the same way, so nothing jumps.
+function leaveGunner() {
+  gunner.active = false;
+  gunner.hide();
+  controls.enabled = true;
+  camera.fov = 55;
+  camera.updateProjectionMatrix();
+  controls.target.copy(camera.position).add(_v.set(0, 0, -100).applyQuaternion(camera.quaternion));
+}
+
+// Where a tank's shot came down, kept for its next turn. Only the first
+// landing of each shot counts (a cluster's bomblets follow it down).
+function noteLanding(owner, shot, pos) {
+  const was = lastLand.get(owner);
+  if (was && was.shot === shot) return;
+  const p = game.players[owner];
+  lastLand.set(owner, { shot, pos: pos && [...pos], at: [p.x, p.z] });
+}
+
+// "Last shot: 32 m short, 6 m right of Rook", in the shooter's own frame:
+// along the line from it to the enemy nearest the landing.
+function lastShotText(p) {
+  const l = lastLand.get(p.id);
+  if (!l) return '';
+  if (Math.hypot(p.x - l.at[0], p.z - l.at[1]) > 4) return '';     // moved since: it no longer says much
+  if (!l.pos) return `Last shot: ${game.isles ? 'lost in the void' : 'out of the arena'}`;
+  let best = null;
+  for (const q of game.players) {
+    if (q === p || !q.alive) continue;
+    const b = believed(q);
+    if (!b) continue;
+    const d = Math.hypot(b.x - l.pos[0], b.z - l.pos[2]);
+    if (!best || d < best.d) best = { b, d };
+  }
+  if (!best) return '';
+  const { b } = best;
+  const L = Math.hypot(b.x - p.x, b.z - p.z) || 1;
+  const fx = (b.x - p.x) / L, fz = (b.z - p.z) / L;
+  const ex = l.pos[0] - b.x, ez = l.pos[2] - b.z;
+  const along = ex * fx + ez * fz;       // + long, - short
+  const side = -ex * fz + ez * fx;       // + right, - left (yaw grows to the right)
+  if (Math.hypot(along, side) < 4) return `Last shot: on ${b.name}`;
+  const parts = [];
+  if (Math.abs(along) >= 2) parts.push(`${Math.round(Math.abs(along))} m ${along < 0 ? 'short' : 'long'}`);
+  if (Math.abs(side) >= 2) parts.push(`${Math.round(Math.abs(side))} m ${side < 0 ? 'left' : 'right'}`);
+  return `Last shot: ${parts.join(', ')} of ${b.name}`;
+}
+
+function updateAimAids() {
+  const p = planning();
+  aimArc.update(game, p, camera);
+  if (!gunner.active || !p) { gunner.hide(); return; }
+  const enemies = [];
+  for (const q of game.players) {
+    if (q === p || !q.alive) continue;
+    const b = believed(q);
+    if (b) enemies.push({ name: b.r > 0 ? `${q.name}?` : q.name, color: q.color, x: b.x, y: b.y, z: b.z });
+  }
+  gunner.hud(camera, p, enemies, lastShotText(p));
+}
+
+// In the sight, a drag aims: across turns the turret by as much as the view
+// moves under the finger, up and down raises the barrel. Wheel or pinch zooms.
+const aimDrag = new Map();     // pointer id -> last [x, y]
+renderer.domElement.addEventListener('pointerdown', (e) => { if (gunner.active) aimDrag.set(e.pointerId, [e.clientX, e.clientY]); });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const was = aimDrag.get(e.pointerId);
+  if (!was || !gunner.active) return;
+  const now = [e.clientX, e.clientY];
+  if (aimDrag.size >= 2) {
+    // Pinch: the change in spread between the first two fingers.
+    const [[ia, qa], [ib, qb]] = [...aimDrag.entries()];
+    const a = ia === e.pointerId ? now : qa;
+    const b = ib === e.pointerId ? now : qb;
+    const before = Math.hypot(qa[0] - qb[0], qa[1] - qb[1]);
+    const after = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (before > 0 && after > 0) gunner.zoom(Math.log(before / after) / 0.12);
+  } else {
+    const perPx = camera.fov / window.innerHeight;     // degrees of view per pixel
+    game.adjustAim((now[0] - was[0]) * perPx, -(now[1] - was[1]) * perPx * 0.5, 0);
+  }
+  aimDrag.set(e.pointerId, now);
+});
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => aimDrag.delete(e.pointerId));
+renderer.domElement.addEventListener('wheel', (e) => { if (gunner.active) gunner.zoom(Math.sign(e.deltaY)); }, { passive: true });
+
 // ---------------------------------------------------------------- camera
 
 function aimCameraAt(p) {
@@ -1132,6 +1249,14 @@ const _box = new THREE.Box3();
 
 function updateCamera(dt) {
   camera.position.sub(lastShake);
+  const gp = gunnerFor();
+  if (gp) {
+    if (!gunner.active) { controls.enabled = false; camGoal = null; }
+    gunner.pose(camera, gp, game.terrain, dt);
+    lastShake.set(0, 0, 0);
+    return;
+  }
+  if (gunner.active) leaveGunner();
   let frame = 0;                // a volley asks for this much distance
   if (game) {
     if (pinned) {
@@ -1274,6 +1399,7 @@ window.addEventListener('keydown', (e) => {
   else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
   else if (k === 'j') doJump();
   else if (k === 'f') peekNext();
+  else if (k === 'g') toggleGunner();
   else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
   else if (k === 'v') {
     overview = !overview;
@@ -1570,7 +1696,8 @@ function updateLabels() {
   game.players.forEach((p, i) => {
     const el = labels[i];
     const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
-    const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1
+      && !(gunner.active && p === game.current);   // in the sight your own label would sit on the turret line
     setDisplay(el, visible ? 'block' : 'none');
     if (!visible) return;
     moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
@@ -2334,6 +2461,7 @@ function tick(dt, draw = true) {
   music.update(dt, game ? timeScale : 1);
   effects.update(dt * timeScale);
   updateCamera(dt);
+  updateAimAids();
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   if (!draw) return;
   renderer.render(scene, camera);
