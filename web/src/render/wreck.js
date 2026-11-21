@@ -138,7 +138,7 @@ export class Wreck {
   update(dt) {
     if (dt <= 0) return;
     this.time += dt;
-    const glow = 0.35 * Math.max(0, 1 - this.time / 2.5) ** 2;
+    const glow = 0.22 * Math.max(0, 1 - this.time / 2) ** 2;
     this.cache.forEach((m) => { m.emissiveIntensity = glow; });
     for (const p of this.pieces) if (!p.rest) this.step(p, dt);
     this.smoke(dt);

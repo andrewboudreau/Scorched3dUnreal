@@ -92,6 +92,10 @@ export class TankMesh {
     this.root.add(this.turret);
     const dome = add(this.turret, new THREE.SphereGeometry(1.55, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), paint, 0, -0.35, 0);
     dome.scale.set(1.15, 0.8, 1);
+    // The dome's floor and the turret ring under it: hidden in the hull on a
+    // live tank, but a turret blown off (see render/wreck.js) shows its underside.
+    add(dome, new THREE.CircleGeometry(1.55, 14), trim, 0, 0, 0).rotation.x = Math.PI / 2;
+    add(this.turret, new THREE.CylinderGeometry(1.3, 1.4, 0.4, 14), steel, 0, -0.5, 0);
     add(this.turret, new THREE.CylinderGeometry(0.42, 0.48, 0.22, 8), trim, -0.45, 0.9, 0.5);    // hatch
     add(this.turret, box(1.1, 0.6, 1.3), trim, -1.75, 0.05, 0);                                  // bustle
     add(this.turret, box(0.5, 0.7, 0.9), trim, 1.25, 0.05, 0);                                   // mantlet
