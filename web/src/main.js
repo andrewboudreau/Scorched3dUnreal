@@ -19,6 +19,7 @@ import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
+import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -325,7 +326,7 @@ function handleEvents() {
         if (!overview && seen(p, fogView())) aimCameraAt(p);
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
-          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), 'Plan it, then Space to lock it in'];
+          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), touch ? 'Plan it, then tap Lock in' : 'Plan it, then Space to lock it in'];
         if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
         setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
           Math.max(50, bannerHold - performance.now()));
@@ -567,7 +568,7 @@ function openHandoff(p) {
   $('handoff-swatch').style.background = p.color;
   $('handoff-title').textContent = `${p.name}, plan your shot`;
   $('handoff-step').textContent = hotseatStep(p, `volley ${game.turnsThisRound + 1}`);
-  $('handoff-text').textContent = 'Everyone else, look away. Drive and aim as you like, then press Space to lock it in. Nobody fires until every tank is ready.';
+  $('handoff-text').textContent = `Everyone else, look away. Drive and aim as you like, then ${touch ? 'tap Lock in' : 'press Space to lock it in'}. Nobody fires until every tank is ready.`;
   $('handoff').classList.remove('hidden');
 }
 
@@ -1216,7 +1217,7 @@ window.addEventListener('keydown', (e) => {
     overview = !overview;
     if (overview) camGoal = new THREE.Vector3(0, 610, 520);
     else if (game.current) aimCameraAt(game.current);
-  } else if (k === 'm') banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700);
+  } else if (k === 'm') toggleMute();
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
   else if (k === 'n') { sound.ensure(); const t = music.next(); $('opt-music').value = t.id; banner(`Music: ${t.name}`, t.mood || '', 900); }
 });
@@ -1237,7 +1238,20 @@ window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
-const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), online: () => !!session, muted: () => sound.muted }) : null;
+const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), weaponBar: $('weapon-bar'), online: () => !!session }) : null;
+if (touch) {
+  // No keyboard here: the hints say what to tap instead.
+  $('steer-hint').querySelector('b').textContent = '\u25C0 \u25B6';
+  $('chat-input').placeholder = 'Say something';
+}
+
+function toggleMute() { banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700); }
+
+// Settings (the gear): sound, full screen, and the resource packs where they are served.
+const settings = new Settings({ parent: document.body });
+if (touch) touch.dock(settings.button); else document.body.appendChild(settings.button);
+settings.add({ id: 'sound', label: () => (sound.muted ? 'Sound: off' : 'Sound: on'), hint: touch ? '' : 'M', run: () => { toggleMute(); return true; } });
+if (canFullscreen()) settings.add({ id: 'full', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
@@ -1268,7 +1282,7 @@ $('weapon-bar').addEventListener('click', (e) => {
 
 function applyHeldKeys(dt) {
   const live = game && !handoffOpen && game.phase === 'aim' && game.current && !game.current.ai;
-  const pad = touch?.take(dt, live ? game.current : null);   // touch aim pad, power strip and tilt
+  const pad = touch?.take(dt, live ? game.current : null);   // touch aim pad and power strip
   if (!live) return;
   if (pad) game.adjustAim(pad.yaw, pad.elev, pad.power);
   const fine = held.has('shift') ? 0.2 : 1;
@@ -2023,9 +2037,10 @@ function renderLobby() {
   const n = seats.length + cpus.length;
   $('start').textContent = `Start online match · ${n} tank${n === 1 ? '' : 's'}`;
   $('start').disabled = false;
+  const chat = touch ? '' : ' Press Enter to chat.';
   $('net-note').textContent = session.isHost
-    ? (seats.length < 2 ? 'Send your friends the invite link, or the code. Everyone in the room plays; CPUs are optional.' : 'Start when everyone is in. Press Enter to chat.')
-    : 'Waiting for the host to start the match. Press Enter to chat.';
+    ? (seats.length < 2 ? 'Send your friends the invite link, or the code. Everyone in the room plays; CPUs are optional.' : `Start when everyone is in.${chat}`)
+    : `Waiting for the host to start the match.${chat}`;
 }
 
 // Who the game is waiting on, while it waits.
@@ -2288,4 +2303,5 @@ packsHere().catch(() => null).then((lib) => lib || packsMirror()).then(async (li
     groundAt: (x, z) => (game ? game.terrain : menuField.terrain).heightAt(x, z),
   });
   window.craterfall.review = review;
+  settings.add({ id: 'packs', label: 'Resource packs', hint: lib.static ? 'the shareable packs, phone-sized' : touch ? 'the asset library' : 'the asset library · P', run: () => review.toggle(true) });
 }).catch(() => { /* no pack library here */ });

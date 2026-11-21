@@ -25,58 +25,37 @@ sideways" card over the game (menus can stay portrait-friendly).
 | --- | --- | --- |
 | Right thumb | **Aim pad**: drag ↔ turret, ↕ elevation, like a trackpad (relative, with pointer acceleration: slow is precise, a flick turns far) | `game.adjustAim`, as held A/D/W/S do |
 | Right thumb | **Power strip** beside it: drag ↕ | `adjustAim` power, as Q/E do |
-| Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap to cycle | Space, Tab |
+| Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
 | Left thumb | **Jet** | J |
-| Bottom middle | Small: Tilt (off / Lean / Grip), Zero, Inv, Fine, Find, View, Mute, Chat (online only), Fullscreen | F, V, M, Enter; Fine scales pad and tilt by 0.2 like Shift |
+| Bottom middle | Small: Fine, Find, View, Chat (online only), ⚙ Settings (sound, full screen, resource packs) | F, V, Enter; Fine scales the pad by 0.2 like Shift |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so
 reaching 47.3° means nudging and waiting; a drag sets a *change*, so a 3 px move is a
-0.4° correction you can feel. The weapon bar stays (tap a weapon) but moves to the
-top and scrolls sideways on short screens. The pad shows the turret and elevation
-under your thumb, since the player card shrinks.
+0.4° correction you can feel. The weapon bar is not shown across the screen: it
+is the weapon button's pop-up, so the top of the screen stays clear. Keyboard hints
+(the help strip, weapon number keys, "press Space") are hidden or say what to tap.
+The pad shows the turret and elevation under your thumb, since the player card shrinks.
 
 Things the prototype does not do yet, worth trying next:
 
 - **Long-press Fire to arm**, or a confirm swipe, if accidental shots turn out to be a problem.
 - **Fine-tune nudges**: tiny ± steppers for elevation and power (0.1 a tap), for the last correction.
 - **Rangefinder card** as a tap-to-open sheet. It is hidden on short screens for now.
-- **Chat** button (Enter does not exist), and a **mute** button (M does not exist; the setup slider still works).
 
-## Gyro / tilt aim
+## Tilt aim (dropped for now)
 
-Optional, off by default, a toggle in the aim HUD. Two models are worth comparing:
+Two tilt modes were built and tried on a phone, then taken out because they were
+buggy in play: **Lean** (tilt as a joystick: zero the pose, lean to turn, tip to
+raise, a 3° deadzone to full speed at 22°) and **Grip** (tilt as a mouse, only
+while a thumb rests on the aim pad). The code is in git history (src/touch.js
+before the commit "drop tilt aim"). If it comes back, remember:
 
-1. **Tilt as a joystick** (built: **Lean**). Zero the pose; lean the right edge down to
-   turn right, tip the top edge away from you to raise the barrel (**Inv** flips
-   that; the choice is kept in localStorage). A 3° deadzone,
-   full speed at 22°, a squared response so small leans are fine control, and a
-   0.08 s low-pass on the readings. Works lying on a couch, and the turret can
-   swing all the way round without you turning your body. It re-zeros on its own
-   at the start of every aim (however you hold the phone then is neutral) and with
-   the **Zero** button, and after a screen rotation.
-2. **Gyro as a mouse** (built: **Grip**). While a thumb rests on the aim pad, each
-   frame's change in lean moves the turret 2.2° per degree and the change in pitch
-   moves the barrel 1.2° per degree (Fine scales both by 0.2). Lift the thumb and the
-   phone can be re-centred without moving the aim, like lifting a mouse, so a 180°
-   shot never means turning round. Dragging the pad still works at the same time:
-   drag for the big moves, tilt for the last few degrees. It reads the same
-   low-passed `deviceorientation` pose as Lean rather than `devicemotion`, so one
-   permission and one code path cover both.
-
-Platform notes:
-
-- **iOS 13+** needs `DeviceOrientationEvent.requestPermission()`, called straight
-  from a tap (no other `await` before it). The Tilt button does that. If the user
-  says no, iOS remembers until the site data is cleared, so we say so.
-- **HTTPS only.** Chrome and Safari block motion sensors on plain http. blogfor.net
-  is https, so it is fine; testing a dev server from a phone over a LAN IP is not
-  (use a tunnel or `chrome://flags` "insecure origins treated as secure").
-- Screen axes: readings are in device axes. The prototype turns them into screen
-  axes with `screen.orientation.angle` (90 / 270 in landscape), so left and right
-  hold in both landscape directions.
-- Some Android phones send null readings (no gyro or no permission); we say "no
-  tilt readings" after 1.5 s.
+- **iOS 13+** needs `DeviceOrientationEvent.requestPermission()` straight from a
+  tap, and **https** (a LAN dev server will not do).
+- Readings are in device axes; turn them into screen axes with
+  `screen.orientation.angle` so both landscape directions work.
+- Low-pass the readings (0.08 s) and re-zero at the start of every aim.
 
 ## Haptics
 
@@ -88,7 +67,7 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
 ## Screen, fullscreen, orientation
 
 - `requestFullscreen` + `screen.orientation.lock('landscape')` works on Android
-  Chrome. The prototype has a ⛶ button that does both.
+  Chrome. Settings > Full screen does both.
 - **iPhone Safari has no element fullscreen** (iPad has `webkitRequestFullscreen`).
   The fix on iPhone is "Add to Home Screen" (done): `manifest.webmanifest` with
   `"display": "fullscreen"`, `"orientation": "landscape"` and icons in `img/`, plus
@@ -141,22 +120,21 @@ nothing can be done about that except say so in a help line.
 
 ## What to try first
 
-**One experiment: the two-thumb layout with the relative aim pad, plus tilt aim
-as a toggle.** Once deployed, play a few rounds on a real phone at
+**One experiment: the two-thumb layout with the relative aim pad.** Once deployed, play a few rounds on a real phone at
 `https://blogfor.net/Craterfall/` (the controls show up by themselves on a touch
 device; on desktop add `?mobile=1`) and answer three questions:
 
 1. Can you hit a tank 300 m away by shot 3 with the pad alone? If not, add the ± steppers.
-2. Is tilt fun, or does it just get in the way? If fun, build the gyro-mouse with a clutch next.
-3. Is it smooth? If not, do the shadow and scenery cuts above before anything else.
+2. Is it smooth? If not, do the shadow and scenery cuts above before anything else.
 
 ## The prototype
 
-- `src/touch.js`, about 300 lines, no dependencies beyond `core/tank.js` speeds.
+- `src/touch.js`, about 240 lines, no dependencies beyond `core/tank.js` speeds.
+  `src/settings.js` is the ⚙ modal, shared with the desktop.
 - Turned on by `(pointer: coarse)` or `?mobile=1`; `?mobile=0` turns it off.
   Desktop without the flag is unchanged.
 - Buttons send synthetic `keydown`/`keyup` events on `window`, so they go through
-  main.js's key handler, `held` set and hand-off logic. The pad, power strip and tilt
+  main.js's key handler, `held` set and hand-off logic. The pad and power strip
   hand main.js an aim change each frame (`touch.take(dt, player)`), which it passes
   to `game.adjustAim`, the same call the held keys make.
-- `window.craterfall.touch` is the controls object (tilt state, `buzz()`).
+- `window.craterfall.touch` is the controls object (`buzz()`, `openWeapons()`).

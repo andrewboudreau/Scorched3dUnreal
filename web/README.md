@@ -24,8 +24,8 @@ each other.
 ### Reviewing resource packs
 
 The dev server also mounts the asset library's resource packs (the NAS library
-by default; set `CRATERFALL_PACKS` to another folder). A **Packs (P)** button
-then appears in the game, opening a review panel (`src/review.js`):
+by default; set `CRATERFALL_PACKS` to another folder). **Settings > Resource
+packs** (or P) then opens a review panel (`src/review.js`):
 
 - **Sounds**: play any of them, or put one in for a game event (cannon, small,
   medium, big and far blasts, impacts, tank hits, wreck parts, jet, teleport,
@@ -65,19 +65,21 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
 | C | follow-shell camera |
 | V | overview camera |
-| M | mute everything |
+| M | mute everything (also in Settings, the ⚙ button) |
 | N | next music track |
 | - / = | volume down / up (also a slider on the setup screen; it is remembered) |
 | Mouse | drag to orbit, wheel to zoom |
 
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
-the left, an optional tilt aim, and Mute (and Chat, online) buttons. Tap
-**Tilt** to cycle off, **Lean** (tilt steers like a joystick) and **Grip** (tilt
-steers only while your thumb rests on the aim pad, like a mouse you lift to
-re-centre); **Inv** flips which way tipping the phone raises the barrel. "Add to
-Home Screen" installs it as an app that opens fullscreen in landscape. See
-`docs/mobile.md`.
+the left, and Fine, Find, View, Chat (online) and ⚙ in the middle. The weapon
+button above Fire opens the weapons as a pop-up, and the keyboard hints are
+hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
+landscape. See `docs/mobile.md`.
+
+**Settings** (⚙, bottom right on a desktop) holds sound on/off, full screen where
+the browser allows it, and the resource-pack review where packs are served.
+
 
 ## How it plays
 

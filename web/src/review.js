@@ -1,14 +1,14 @@
 // Resource-pack review: audition the asset library's packs inside a live
-// match. Press P. Sounds can be played on their own or put in for a game event
+// match: Settings > Resource packs, or P. Sounds can be played on their own or put in for a game event
 // (the cannon, blasts by size, impacts, jets...), so the next shot uses them;
 // a sky HDRI replaces the sky, its light and the sun's direction; a material
 // re-skins the ground or a sample ball; a model is set down by the camera.
 // Every item can be marked keep or drop, and the picks saved to
 // docs/pack-picks.json for the resource oracle.
 //
-// Only loaded when tools/devserver.mjs serves the library (see main.js), so
-// nothing here reaches the live site. Packs are read as they stand on the NAS;
-// the ones the game keeps are copied into the repo separately.
+// Only loaded when tools/devserver.mjs serves the library, or on the live site
+// with ?packs from the phone-sized mirror (see main.js and tools/packmirror.py).
+// The ones the game keeps are copied into the repo separately.
 
 import * as THREE from 'three';
 import { HDRLoader } from '../vendor/three/addons/loaders/HDRLoader.js';
@@ -54,13 +54,8 @@ export class PackReview {
 
   // ---------------------------------------------------------------- panel
 
+  // Opened from Settings (main.js), or P on a keyboard.
   build() {
-    const pill = this.pill = document.createElement('button');
-    pill.id = 'review-pill';
-    pill.textContent = 'Packs (P)';
-    pill.addEventListener('click', () => this.toggle());
-    document.body.appendChild(pill);
-
     const el = this.el = document.createElement('div');
     el.id = 'review';
     el.className = 'hidden';
@@ -89,7 +84,6 @@ export class PackReview {
 
   toggle(on = this.el.classList.contains('hidden')) {
     this.el.classList.toggle('hidden', !on);
-    this.pill.classList.toggle('hidden', on);
   }
 
   render() {

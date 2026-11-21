@@ -1,17 +1,19 @@
-// On-screen controls for phones and tablets, plus an optional tilt aim.
+// On-screen controls for phones and tablets.
 //
 // Nothing here talks to the game directly. Buttons press and release the same
 // keys the keyboard does (a synthetic KeyboardEvent on window, so main.js's key
-// handler, `held` set and hand-off logic all apply unchanged), and the aim pad,
-// power strip and tilt hand main.js a small aim delta each frame through
-// take(), which it feeds to game.adjustAim exactly like the held A/D/W/S/Q/E keys.
+// handler, `held` set and hand-off logic all apply unchanged), and the aim pad
+// and power strip hand main.js a small aim delta each frame through take(),
+// which it feeds to game.adjustAim exactly like the held A/D/W/S/Q/E keys. The
+// weapon button opens the game's own weapon bar as a pop-up above it.
+//
+// Tilt aim (lean and grip modes) was tried and dropped for now; it is in git
+// history before this comment, and docs/mobile.md says what was learned.
 //
 // Shown on touch-first devices (pointer: coarse) or with ?mobile=1; ?mobile=0
 // turns it off. See docs/mobile.md for the design and what to try next.
 
 import { TANK } from './core/tank.js';
-
-const DEG = 180 / Math.PI;
 
 export const coarsePointer = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
@@ -33,24 +35,6 @@ export function mobilePerf(renderer, sky) {
 const PAD = { yaw: 0.22, elev: 0.14, power: 0.16, fine: 0.2 };   // per CSS pixel
 const accel = (pxPerMs) => 1 + Math.min(2, Math.max(0, (pxPerMs - 0.25) * 3));
 
-// Two tilt modes, picked by tapping Tilt (off -> lean -> grip -> off):
-//
-// Lean, tilt as a joystick: lean the right edge down to turn right, tip the
-// top edge away from you to raise the barrel (Inv flips that). Angles are from
-// the pose zeroed at the start of each aim (or with Zero). Inside the deadzone
-// nothing moves; past it the rate grows with the square of the lean, to full
-// speed at TILT.full degrees.
-//
-// Grip, tilt as a mouse: only while a thumb rests on the aim pad, the phone's
-// change in lean and pitch moves the aim directly, GRIP degrees per degree.
-// Lift the thumb, re-centre the phone, grip again (like lifting a mouse), so a
-// shot behind you never means turning round in your chair.
-const TILT = { dead: 3, full: 22, rate: 0.75, smooth: 0.08 };
-const GRIP = { yaw: 2.2, elev: 1.2 };
-const MODES = ['off', 'lean', 'grip'];
-const MODE_LABEL = { off: 'Tilt', lean: 'Lean', grip: 'Grip' };
-const INVERT_KEY = 'craterfall.tiltInvert';
-
 const vibe = (pattern) => { try { navigator.vibrate?.(pattern); } catch { /* not allowed yet */ } };
 // Keep the finger's moves and release on this element even if it slides off.
 const capture = (el, id) => { try { el.setPointerCapture(id); } catch { /* a synthetic or already-gone pointer */ } };
@@ -61,18 +45,14 @@ function key(type, k) {
 
 export class TouchControls {
   // online() says whether this is a networked game (Chat is shown only then);
-  // muted() whether the sound is off, for the Mute button's label.
-  constructor({ parent, unlockAudio, online = () => false, muted = () => false }) {
+  // weaponBar is the game's weapon list, shown here as the weapon pop-up.
+  constructor({ parent, unlockAudio, weaponBar, online = () => false }) {
     this.acc = { yaw: 0, elev: 0, power: 0 };
     this.fine = false;
     this.live = false;
     this.online = online;
-    this.muted = muted;
-    let inv = false;
-    try { inv = globalThis.localStorage?.getItem(INVERT_KEY) === '1'; } catch { /* private mode */ }
-    this.tilt = { on: false, mode: 'off', invert: inv, zero: null, u: null, at: 0, seen: false, last: null };
+    this.weaponBar = weaponBar;
     this.shown = {};
-    this.onOrient = this.onOrient.bind(this);
     document.body.classList.add('touch');
 
     const root = this.root = document.createElement('div');
@@ -88,21 +68,16 @@ export class TouchControls {
         </div>
       </div>
       <div class="t-mid">
-        <div class="t-btn t-small" data-act="tilt">Tilt</div>
-        <div class="t-btn t-small" data-act="zero">Zero</div>
-        <div class="t-btn t-small" data-act="invert">Inv</div>
         <div class="t-btn t-small" data-act="fine">Fine</div>
         <div class="t-btn t-small" data-key="f">Find</div>
         <div class="t-btn t-small" data-key="v">View</div>
-        <div class="t-btn t-small" data-act="mute">Mute</div>
         <div class="t-btn t-small" data-act="chat">Chat</div>
-        <div class="t-btn t-small" data-act="full">&#x26F6;</div>
       </div>
       <div class="t-right">
         <div class="t-power"><i></i><b></b><span>PWR</span></div>
         <div class="t-pad"><span class="t-read"></span><small>drag: &#8596; turret &nbsp; &#8597; elevation</small></div>
         <div class="t-col">
-          <div class="t-btn t-weapon" data-key="Tab"></div>
+          <div class="t-btn t-weapon" data-act="weapons"></div>
           <div class="t-btn t-fire" data-key=" ">FIRE</div>
         </div>
       </div>
@@ -112,15 +87,9 @@ export class TouchControls {
     const $ = (s) => root.querySelector(s);
     this.el = {
       pad: $('.t-pad'), read: $('.t-read'), power: $('.t-power'), powerFill: $('.t-power i'), powerNum: $('.t-power b'),
-      fire: $('.t-fire'), weapon: $('.t-weapon'), note: $('.t-note'),
-      tilt: $('[data-act=tilt]'), zero: $('[data-act=zero]'), fineBtn: $('[data-act=fine]'), full: $('[data-act=full]'),
-      invert: $('[data-act=invert]'), mute: $('[data-act=mute]'), chat: $('[data-act=chat]'),
+      fire: $('.t-fire'), weapon: $('.t-weapon'), note: $('.t-note'), mid: $('.t-mid'),
+      fineBtn: $('[data-act=fine]'), chat: $('[data-act=chat]'),
     };
-    const fs = document.documentElement;
-    if (!fs.requestFullscreen && !fs.webkitRequestFullscreen) this.el.full.style.display = 'none';   // iPhone Safari
-    this.el.zero.classList.add('off');
-    this.el.invert.classList.add('off');
-    this.el.invert.classList.toggle('on', this.tilt.invert);
     this.el.chat.style.display = 'none';
 
     // Every tap is a chance to start (or resume) the audio: mobile browsers only
@@ -131,21 +100,11 @@ export class TouchControls {
 
     for (const b of root.querySelectorAll('[data-key]')) this.tapKey(b, b.dataset.key);
     for (const b of root.querySelectorAll('[data-hold]')) this.holdKey(b, b.dataset.hold);
-    this.el.tilt.addEventListener('click', () => this.toggleTilt());
-    this.el.zero.addEventListener('click', () => { this.tilt.zero = null; this.note('Tilt zeroed'); vibe(10); });
     this.el.fineBtn.addEventListener('click', () => { this.fine = !this.fine; this.el.fineBtn.classList.toggle('on', this.fine); });
-    this.el.full.addEventListener('click', () => this.fullscreen());
-    this.el.invert.addEventListener('click', () => {
-      const t = this.tilt;
-      t.invert = !t.invert;
-      try { globalThis.localStorage?.setItem(INVERT_KEY, t.invert ? '1' : '0'); } catch { /* private mode */ }
-      this.el.invert.classList.toggle('on', t.invert);
-      this.note(t.invert ? 'Tilt inverted: top toward you raises' : 'Tilt: top away from you raises');
-    });
-    // M and Enter, as on the keyboard. Chat on click, not pointerdown: the chat
-    // box takes focus, and phones only raise the keyboard for a full tap.
-    this.el.mute.addEventListener('pointerdown', (e) => { e.preventDefault(); key('keydown', 'm'); key('keyup', 'm'); });
+    // Enter, as on the keyboard. On click, not pointerdown: the chat box takes
+    // focus, and phones only raise the keyboard for a full tap.
     this.el.chat.addEventListener('click', () => { key('keydown', 'Enter'); key('keyup', 'Enter'); });
+    this.weaponMenu();
     this.drag(this.el.pad, (dx, dy, speed) => {
       const k = (this.fine ? PAD.fine : 1) * accel(speed);
       this.acc.yaw += dx * PAD.yaw * k;
@@ -154,8 +113,31 @@ export class TouchControls {
     this.drag(this.el.power, (dx, dy, speed) => {
       this.acc.power -= dy * PAD.power * (this.fine ? PAD.fine : 1) * accel(speed);
     });
-    screen.orientation?.addEventListener?.('change', () => { this.tilt.zero = null; });
   }
+
+  // The weapon button opens the weapon bar as a list above it; picking one (the
+  // bar's own click handler in main.js selects it) or tapping elsewhere closes it.
+  weaponMenu() {
+    const bar = this.weaponBar, btn = this.el.weapon;
+    if (!bar) return;
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      vibe(8);
+      this.openWeapons(!bar.classList.contains('open'));
+    });
+    bar.addEventListener('click', (e) => { if (e.target.closest('.wb-item')) this.openWeapons(false); });
+    window.addEventListener('pointerdown', (e) => {
+      if (bar.classList.contains('open') && !bar.contains(e.target) && !btn.contains(e.target)) this.openWeapons(false);
+    }, true);
+  }
+
+  openWeapons(on) {
+    this.weaponBar?.classList.toggle('open', on);
+    this.el.weapon.classList.toggle('on', on);
+  }
+
+  // Put another control (the settings button) in the middle row.
+  dock(el) { this.el.mid.appendChild(el); }
 
   // One press of a key (Space, Tab, J, F, V): down and straight back up.
   tapKey(el, k) {
@@ -217,99 +199,17 @@ export class TouchControls {
     el.addEventListener('lostpointercapture', up);
   }
 
-  // Off -> lean -> grip -> off.
-  async toggleTilt() {
-    const t = this.tilt;
-    const next = MODES[(MODES.indexOf(t.mode) + 1) % MODES.length];
-    if (next === 'off') {
-      t.on = false;
-      t.mode = 'off';
-      window.removeEventListener('deviceorientation', this.onOrient);
-      this.sync();
-      this.note('Tilt off');
-      return;
-    }
-    if (t.on) {
-      // Already reading the sensor: just change how it steers.
-      Object.assign(t, { mode: next, zero: null, last: null });
-      this.sync();
-      this.note('Tilt grip: hold the aim pad and tilt to steer, lift to re-centre');
-      return;
-    }
-    const DOE = window.DeviceOrientationEvent;
-    if (!DOE) { this.note('This device has no tilt sensor'); return; }
-    if (!window.isSecureContext) { this.note('Tilt needs https'); return; }
-    // iOS 13+: must be asked from inside the tap, before any other await.
-    if (typeof DOE.requestPermission === 'function') {
-      let answer = 'denied';
-      try { answer = await DOE.requestPermission(); } catch { /* not from a gesture */ }
-      if (answer !== 'granted') { this.note('Motion access was not allowed'); return; }
-    }
-    Object.assign(t, { on: true, mode: next, zero: null, u: null, seen: false, last: null });
-    window.addEventListener('deviceorientation', this.onOrient);
-    this.sync();
-    this.note(`Tilt lean: lean right / left to turn, top ${t.invert ? 'toward' : 'away from'} you to raise`);
-    setTimeout(() => { if (t.on && !t.seen) this.note('No tilt readings from this device'); }, 1500);
-  }
-
-  // The device's up vector in screen axes (x right, y up, z out of the glass),
-  // low-passed. From the W3C Z-X'-Y'' angles: up = (-cosβ sinγ, sinβ, cosβ cosγ)
-  // in device axes, then rotated by the screen's orientation angle.
-  onOrient(e) {
-    if (e.beta == null || e.gamma == null) return;
-    const t = this.tilt;
-    t.seen = true;
-    const b = e.beta / DEG, g = e.gamma / DEG;
-    const ux = -Math.cos(b) * Math.sin(g), uy = Math.sin(b), uz = Math.cos(b) * Math.cos(g);
-    const a = (screen.orientation?.angle ?? window.orientation ?? 0) / DEG;
-    const s = { x: Math.cos(a) * ux - Math.sin(a) * uy, y: Math.sin(a) * ux + Math.cos(a) * uy, z: uz };
-    const k = t.u ? 1 - Math.exp(-Math.max(0, e.timeStamp - t.at) / 1000 / TILT.smooth) : 1;
-    t.at = e.timeStamp;
-    t.u = t.u ? { x: t.u.x + (s.x - t.u.x) * k, y: t.u.y + (s.y - t.u.y) * k, z: t.u.z + (s.z - t.u.z) * k } : s;
-  }
-
-  // Lean (how far the right edge is below the left) and pitch (0 upright, 90 flat on its back), in degrees.
-  pose() {
-    const u = this.tilt.u;
-    return { lean: -Math.asin(Math.max(-1, Math.min(1, u.x))) * DEG, pitch: Math.atan2(u.z, u.y) * DEG };
-  }
-
   // Called by main.js every frame with the tank being aimed here (or null).
   // Returns the aim change to apply this frame, or null.
   take(dt, p) {
     const live = this.live = !!p;
     this.root.classList.toggle('idle', !live);
-    const t = this.tilt;
-    if (live && !this.wasLive) t.zero = null;   // each new aim starts from however you hold it
-    this.wasLive = live;
-    let { yaw, elev, power } = this.acc;
+    const { yaw, elev, power } = this.acc;
     this.acc.yaw = this.acc.elev = this.acc.power = 0;
-    if (!live) return null;
-
-    // Pitch grows as the top edge tips away; that raises the barrel unless inverted.
-    const up = t.invert ? -1 : 1;
-    if (t.on && t.u && t.mode === 'lean') {
-      const now = this.pose();
-      if (!t.zero) t.zero = now;
-      const axis = (deg) => {
-        const n = Math.min(1, Math.max(0, (Math.abs(deg) - TILT.dead) / (TILT.full - TILT.dead)));
-        return Math.sign(deg) * n * n * TILT.rate * (this.fine ? PAD.fine : 1);
-      };
-      yaw += axis(now.lean - t.zero.lean) * TANK.turretSpeed * dt;
-      elev += axis(now.pitch - t.zero.pitch) * up * TANK.elevationSpeed * dt;
+    if (!live) {
+      if (this.weaponBar?.classList.contains('open')) this.openWeapons(false);
+      return null;
     }
-    if (t.on && t.u && t.mode === 'grip') {
-      if (this.el.pad.classList.contains('pressed')) {
-        const now = this.pose();
-        if (t.last) {
-          const k = this.fine ? PAD.fine : 1;
-          yaw += (now.lean - t.last.lean) * GRIP.yaw * k;
-          elev += (now.pitch - t.last.pitch) * up * GRIP.elev * k;
-        }
-        t.last = now;
-      } else t.last = null;
-    }
-
     this.show(p);
     return yaw || elev || power ? { yaw, elev, power } : null;
   }
@@ -324,17 +224,8 @@ export class TouchControls {
     // Mirror main.js's own labels rather than reach into the game for them.
     set('fire', this.el.fire, /lock/.test(document.getElementById('help-fire')?.textContent) ? 'LOCK IN' : 'FIRE');
     set('weapon', this.el.weapon, document.getElementById('ro-weapon')?.textContent || 'Weapon');
-    set('mute', this.el.mute, this.muted() ? 'Sound' : 'Mute');
     const on = this.online();
     if (s.online !== on) { s.online = on; this.el.chat.style.display = on ? '' : 'none'; }
-  }
-
-  sync() {
-    const t = this.tilt;
-    this.el.tilt.classList.toggle('on', t.on);
-    this.el.tilt.textContent = MODE_LABEL[t.mode];
-    this.el.zero.classList.toggle('off', t.mode !== 'lean');
-    this.el.invert.classList.toggle('off', !t.on);
   }
 
   note(text) {
@@ -342,14 +233,6 @@ export class TouchControls {
     this.el.note.classList.add('show');
     clearTimeout(this.noteTimer);
     this.noteTimer = setTimeout(() => this.el.note.classList.remove('show'), 2200);
-  }
-
-  fullscreen() {
-    const d = document, el = d.documentElement;
-    if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen)?.call(d); return; }
-    const go = el.requestFullscreen?.({ navigationUI: 'hide' }) ?? el.webkitRequestFullscreen?.();
-    // Android Chrome can then pin landscape; elsewhere this rejects and that is fine.
-    Promise.resolve(go).then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   }
 
   buzz(pattern) { vibe(pattern); }
