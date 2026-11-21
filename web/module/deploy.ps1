@@ -16,6 +16,7 @@
 .EXAMPLE
     ./deploy.ps1
     ./deploy.ps1 -HostUrl https://modules.blogfor.net
+    ./deploy.ps1 -Id craterfall-packs -Project ../packsmodule     (the resource packs; see packsmodule/)
 #>
 [CmdletBinding()]
 param(
@@ -24,6 +25,9 @@ param(
 
     # The module host. Defaults to $env:MODULE_HOST_URL, then https://modules.blogfor.net.
     [string]$HostUrl = $(if ($env:MODULE_HOST_URL) { $env:MODULE_HOST_URL } else { "https://modules.blogfor.net" }),
+
+    # The module project to publish: this folder, or ../packsmodule for the resource packs.
+    [string]$Project = $PSScriptRoot,
 
     # How long to wait for the host to restart and report the drop.
     [int]$TimeoutSeconds = 180
@@ -58,10 +62,11 @@ $headers = @{ "X-Api-Key" = $key }
 $HostUrl = $HostUrl.TrimEnd('/')
 
 # 1. Publish
-$out = Join-Path $PSScriptRoot "out"
+$Project = (Resolve-Path $Project).Path
+$out = Join-Path $Project "out"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
-Write-Host "Publishing to $out"
-dotnet publish $PSScriptRoot -c Release -o $out --nologo
+Write-Host "Publishing $Project to $out"
+dotnet publish $Project -c Release -o $out --nologo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
 # 2. Zip (forward-slash entry names on every platform)

@@ -42,6 +42,13 @@ Mark items keep or drop and **Save picks**: they go to `docs/pack-picks.json`
 for the resource oracle. Packs are never hot-linked from the live game; the ones
 kept are copied into the repo.
 
+To review on a phone, open the live game with `?packs` (blogfor.net/Craterfall/?packs).
+It loads the packs marked redistributable from a phone-sized mirror (1k skies,
+512 px materials) that `tools/packmirror.py` builds into `packmirror/` (not in
+git). The mirror is its own module drop, `packsmodule/`, deployed only when the
+packs change: `cd module && ./deploy.ps1 -Id craterfall-packs -Project ../packsmodule`.
+There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
+
 ## Controls
 
 | Key | Action |

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The shareable resource packs for reviewing Craterfall on a phone (blogfor.net/Craterfall/?packs),
+    as their own module drop so game deploys stay small. The files come from web/packmirror/, built
+    by tools/packmirror.py (not in git). Deploy only when the packs change:
+      python tools/packmirror.py
+      ../module/deploy.ps1 -Id craterfall-packs -Project .
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CraterfallPacks</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="SharedTools.Web" Version="3.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\packmirror\**" Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

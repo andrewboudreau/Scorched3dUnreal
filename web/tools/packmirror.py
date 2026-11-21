@@ -8,8 +8,10 @@ of at most 50 MB, so:
   - materials drop the displacement map and are scaled to 512 px,
   - sounds are copied as they are.
 packmirror/index.json is the same shape as the dev server's /api/packs.
+The mirror is its own module drop (packsmodule/), so game deploys stay small:
 
     python tools/packmirror.py [library]      (default: the NAS library)
+    cd module && ./deploy.ps1 -Id craterfall-packs -Project ../packsmodule
 """
 import json
 import os
