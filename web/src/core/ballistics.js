@@ -24,12 +24,26 @@ export function launchVelocity(yawDeg, elevDeg, power) {
 
 // Semi-implicit Euler with gravity and a horizontal wind acceleration. A
 // projectile may carry its own gravity `g` and wind share `windK` (round
-// modifiers and perks); without them it flies under the defaults.
+// modifiers and perks); without them it flies under the defaults. On the
+// floating isles it also carries the moons' `wells`, each pulling it toward
+// its centre with mu / d^2 (no stronger than at the moon's surface).
 export function stepProjectile(p, wind, dt = SIM_DT) {
   const k = p.windK ?? 1;
   p.vel[0] += wind[0] * k * dt;
   p.vel[1] -= (p.g ?? GRAVITY) * dt;
   p.vel[2] += wind[1] * k * dt;
+  if (p.wells) {
+    for (const w of p.wells) {
+      const dx = w.x - p.pos[0];
+      const dy = w.y - p.pos[1];
+      const dz = w.z - p.pos[2];
+      const d2 = Math.max(dx * dx + dy * dy + dz * dz, w.r * w.r);
+      const a = (w.mu / (d2 * Math.sqrt(d2))) * dt;
+      p.vel[0] += dx * a;
+      p.vel[1] += dy * a;
+      p.vel[2] += dz * a;
+    }
+  }
   p.prev[0] = p.pos[0]; p.prev[1] = p.pos[1]; p.prev[2] = p.pos[2];
   p.pos[0] += p.vel[0] * dt;
   p.pos[1] += p.vel[1] * dt;
@@ -45,6 +59,20 @@ export function makeProjectile(pos, vel) {
 export function groundContact(p, terrain) {
   const [x, y, z] = p.pos;
   if (!terrain.inBounds(x, z)) return null;
+  if (terrain.under) {
+    // Floating isles: open sky below and between them, so the shell is in the
+    // ground only between an isle's top and its underside.
+    if (!terrain.inside(x, y, z)) return null;
+    let a = [...p.prev];
+    let b = [...p.pos];
+    for (let k = 0; k < 10; k++) {
+      const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+      if (terrain.inside(m[0], m[1], m[2])) b = m; else a = m;
+    }
+    const top = terrain.heightAt(b[0], b[2]);
+    const under = terrain.underAt(b[0], b[2]);
+    return [b[0], top - b[1] <= b[1] - under ? top : under, b[2]];
+  }
   const g = terrain.heightAt(x, z);
   if (y > g) return null;
   // Bisect between prev (above) and pos (below) for a clean impact point.
@@ -57,21 +85,45 @@ export function groundContact(p, terrain) {
   return [b[0], terrain.heightAt(b[0], b[2]), b[2]];
 }
 
+// Did this step hit one of the moons? Returns the point on its surface or null.
+export function wellContact(p) {
+  for (const w of p.wells) {
+    const dx = p.pos[0] - w.x;
+    const dy = p.pos[1] - w.y;
+    const dz = p.pos[2] - w.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d <= w.r) {
+      const k = w.r / Math.max(d, 1e-6);
+      return [w.x + dx * k, w.y + dy * k, w.z + dz * k];
+    }
+  }
+  return null;
+}
+
 // Full flight to the ground. `targets` is an optional list of {x,y,z,r}
 // spheres (tanks); hitting one ends the flight there.
-export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1 }) {
+// With `level`, a lost shot also reports `cross`: where it first came down
+// through that height (the AI's measure of a shot that fell past an isle).
+export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, level = null }) {
   const p = makeProjectile(pos, vel);
   p.g = gravity;
   p.windK = windK;
+  if (terrain.wells?.length) p.wells = terrain.wells;
   const path = recordPath ? [[...p.pos]] : null;
+  let cross = null;
+  const lost = () => ({ kind: 'lost', point: [...p.pos], time: p.time, path, cross });
   while (p.time < maxTime) {
     stepProjectile(p, wind);
+    if (level != null && !cross && p.pos[1] < level && p.prev[1] >= level) cross = [...p.pos];
     if (path && Math.round(p.time / SIM_DT) % 6 === 0) path.push([...p.pos]);
     const [x, y, z] = p.pos;
+    const moon = p.wells && wellContact(p);
+    if (moon) return { kind: 'moon', point: moon, time: p.time, path };
     if (!terrain.inBounds(x, z)) {
-      if (y < terrain.bedrock) return { kind: 'lost', point: [...p.pos], time: p.time, path };
+      if (y < terrain.bedrock) return lost();
       continue; // still flying outside the arena; may blow back in
     }
+    if (y < terrain.bedrock) return lost();   // down into the void
     for (const t of targets) {
       if ((x - t.x) ** 2 + (y - t.y) ** 2 + (z - t.z) ** 2 <= t.r * t.r) {
         return { kind: 'target', target: t, point: [x, y, z], time: p.time, path };
@@ -83,7 +135,7 @@ export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], r
       return { kind: 'ground', point: hit, time: p.time, path };
     }
   }
-  return { kind: 'lost', point: [...p.pos], time: p.time, path };
+  return lost();
 }
 
 // ---- rolling (the Roller weapon) ----
@@ -135,7 +187,8 @@ export function stepRoller(r, terrain, dt = SIM_DT) {
   const x = r.pos[0] + vx * dt;
   const z = r.pos[2] + vz * dt;
   r.time += dt;
-  if (!terrain.inBounds(x, z)) {
+  if (!terrain.solidAt(x, z)) {   // the arena's edge, or an isle's
+    if (terrain.under) return 'edge';
     r.pos[0] = Math.max(-terrain.half, Math.min(terrain.half, x));
     r.pos[2] = Math.max(-terrain.half, Math.min(terrain.half, z));
     r.pos[1] = terrain.heightAt(r.pos[0], r.pos[2]) + ROLL.radius;

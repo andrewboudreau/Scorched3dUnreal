@@ -1,6 +1,6 @@
 import { makeRng } from './rng.js';
-import { Heightfield } from './terrain.js';
-import { makeProjectile, stepProjectile, groundContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
+import { Heightfield, ISLES } from './terrain.js';
+import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon } from './ai.js';
@@ -47,6 +47,7 @@ export class Game {
     terrainSize = 800,
     resolution = 256,
     hills = 45,
+    world = 'meadow',   // 'meadow', or 'isles': floating isles in open sky, with moons that pull on shells
     maxTurnsPerRound = 40,
     twists = true,      // perk drafts and round modifiers (core/perks.js)
     firing = 'turns',   // 'turns', or 'volley': everyone plans, then all fire together
@@ -55,7 +56,7 @@ export class Game {
     // screen. The other humans plan elsewhere; their plans arrive by message.
     local = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, maxTurnsPerRound, twists, firing, local, fog };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog };
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
     this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
@@ -130,12 +131,12 @@ export class Game {
     const mod = this.modifier = this.cfg.twists ? pickModifier(this.rogue, this.modifier.id) : MODIFIER_BY_ID.clear;
     this.gravity = GRAVITY * (mod.gravity || 1);
     this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
-    t.generate({ seed: this.cfg.seed + this.round * 7919, amplitude: this.cfg.hills });
-    this.placeTanks();
+    const starts = this.placeTanks();
+    this.makeGround(this.round, starts);
     this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });
     // Everything that reshapes the ground this round, so another copy of the
     // game can rebuild it exactly (see rebuildGround).
-    this.ground = { starts: this.padOrder.map((i) => [i, this.players[i].x, this.players[i].z]), ops: [] };
+    this.ground = { starts, ops: [] };
     for (const p of this.players) {
       p.y = t.heightAt(p.x, p.z);
       p.aim = {};
@@ -155,6 +156,7 @@ export class Game {
       p.alive = true;
       p.falling = false;
       p.vy = 0;
+      p.blamed = null;
       p.weapon = 'shell';
       p.power = 60;
       p.elev = 45;
@@ -184,15 +186,29 @@ export class Game {
       [order[i], order[j]] = [order[j], order[i]];
     }
     this.padOrder = order;   // pads are flattened in this order; overlaps depend on it
-    order.forEach((pi, k) => {
+    return order.map((pi, k) => {
       const a = base + (k / n) * Math.PI * 2 + this.rng.range(-0.25, 0.25);
       const r = ring * this.rng.range(0.8, 1.15);
-      const p = this.players[pi];
-      p.x = Math.cos(a) * r;
-      p.z = Math.sin(a) * r;
-      t.flatten(p.x, p.z, TANK.padRadius);
-      p.y = t.heightAt(p.x, p.z);
+      return [pi, Math.cos(a) * r, Math.sin(a) * r];
     });
+  }
+
+  get isles() { return this.cfg.world === 'isles'; }
+
+  // The round's ground from its seed, then a flat pad under each tank, in pad
+  // order (`starts` is [player index, x, z]). The isles are laid out around
+  // the pads, so every tank starts on an isle of its own.
+  makeGround(round, starts) {
+    const t = this.terrain;
+    const seed = this.cfg.seed + round * 7919;
+    if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    else t.generate({ seed, amplitude: this.cfg.hills });
+    for (const [i, x, z] of starts) {
+      const p = this.players[i];
+      p.x = x; p.z = z;
+      t.flatten(x, z, TANK.padRadius);
+      p.y = t.heightAt(x, z);
+    }
   }
 
   randomWind() {
@@ -732,6 +748,7 @@ export class Game {
     pr.splitDone = false;
     pr.g = this.gravity;
     pr.windK = this.windShare(this.players[owner]);
+    if (this.terrain.wells.length) pr.wells = this.terrain.wells;
     const steer = (WEAPON_BY_ID[weaponId].flight || []).find((f) => f.type === 'steer');
     if (steer) pr.steer = { rate: steer.rate, fuel: steer.fuel, input: 0 };
     this.projectiles.push(pr);
@@ -832,7 +849,9 @@ export class Game {
         if ((x - s.x) ** 2 + (y - s.y) ** 2 + (z - s.z) ** 2 <= s.r * s.r) { hitTank = s.tank; break; }
       }
       if (hitTank) { this.detonate(pr, [x, y, z], hitTank); continue; }
-      if (!t.inBounds(x, z)) {
+      const moon = pr.wells && wellContact(pr);
+      if (moon) { this.detonate(pr, moon, null, true); continue; }
+      if (!t.inBounds(x, z) || y < t.bedrock) {
         if (y < t.bedrock || pr.time > MAX_FLIGHT) this.lose(pr);
         continue;
       }
@@ -849,10 +868,10 @@ export class Game {
     this.emit({ type: 'lost', id: pr.id, pos: [...pr.pos] });
   }
 
-  detonate(pr, point, directHit) {
+  detonate(pr, point, directHit, moon = false) {
     const w = WEAPON_BY_ID[pr.weapon];
     // A rolling weapon that lands on open ground starts its run instead.
-    if (rollPart(w) && !directHit && !pr.roller) {
+    if (rollPart(w) && !directHit && !pr.roller && !moon) {
       pr.roller = makeRoller(point, pr.vel, this.terrain);
       pr.pos = pr.roller.pos;
       this.emit({ type: 'rollStart', id: pr.id, pos: point });
@@ -861,7 +880,7 @@ export class Game {
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
     for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit, pr.shot);
-    if (pr.weapon === 'shell' && !directHit) this.throwShrapnel(pr, point);
+    if (pr.weapon === 'shell' && !directHit && !moon) this.throwShrapnel(pr, point);
   }
 
   // Shrapnel perk: a plain Shell that hits the ground lobs bomblets onward.
@@ -939,6 +958,8 @@ export class Game {
       this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
       for (const p of this.players) {
         if (!p.alive) continue;
+        // Whoever blows the ground out from under a tank on the isles gets the credit for its fall.
+        if (this.isles && Math.hypot(p.x - bx, p.z - bz) < radius * 1.5) p.blamed = owner;
         const s = hitSphere(p);
         const dist = p === directHit ? 0 : Math.max(0, Math.hypot(s.x - bx, s.y - by, s.z - bz) - TANK.hitRadius * 0.5);
         const dmg = blastDamage(dist, radius, damage);
@@ -982,11 +1003,26 @@ export class Game {
 
   // Dig a crater and let the scenery react to it.
   carve(x, y, z, radius, depth) {
+    const top = this.topBlast(x, y, z, radius);
     const region = this.terrain.carveCrater(x, y, z, radius, depth);
     this.ground?.ops.push(['c', x, y, z, radius, depth]);
     this.emit({ type: 'terrain', region });
-    this.scenery.afterBlast(x, z, radius);
+    this.sceneryBlast(top, x, z, radius);
     this.relayScenery();
+  }
+
+  // Did a blast go off on the ground's top, where the scenery stands? Always
+  // on an ordinary field. On the isles, not under an isle or high over it.
+  topBlast(x, y, z, radius) {
+    const t = this.terrain;
+    if (!t.under) return true;
+    const h = t.heightAt(x, z);
+    return t.solidAt(x, z) && y > h - radius * 0.6 && y < h + radius;
+  }
+
+  sceneryBlast(top, x, z, radius) {
+    if (top) this.scenery.afterBlast(x, z, radius);
+    else this.scenery.settle(x, z, radius + 6 + this.terrain.cell);   // only what fell through a hole
   }
 
   relayScenery() {
@@ -995,6 +1031,7 @@ export class Game {
 
   liftBuried() {
     for (const p of this.players) {
+      if (!this.terrain.solidAt(p.x, p.z)) continue;
       const g = this.terrain.heightAt(p.x, p.z);
       if (g > p.y) p.y = g;
     }
@@ -1051,16 +1088,14 @@ export class Game {
   // and mound since, in order.
   rebuildGround(round, ground) {
     const t = this.terrain;
-    t.generate({ seed: this.cfg.seed + round * 7919, amplitude: this.cfg.hills });
-    for (const [i, x, z] of ground.starts) {
-      const p = this.players[i];
-      p.x = x; p.z = z;
-      t.flatten(x, z, TANK.padRadius);
-      p.y = t.heightAt(x, z);
-    }
+    this.makeGround(round, ground.starts);
     this.scenery.generate({ seed: this.cfg.seed + round * 104729, tanks: this.players });
     for (const op of ground.ops) {
-      if (op[0] === 'c') { t.carveCrater(op[1], op[2], op[3], op[4], op[5]); this.scenery.afterBlast(op[1], op[3], op[4]); }
+      if (op[0] === 'c') {
+        const top = this.topBlast(op[1], op[2], op[3], op[4]);
+        t.carveCrater(op[1], op[2], op[3], op[4], op[5]);
+        this.sceneryBlast(top, op[1], op[3], op[4]);
+      }
       else { t.raiseMound(op[1], op[2], op[3], op[4]); this.scenery.afterMound(op[1], op[2], op[3]); }
     }
     this.scenery.drainEvents();
@@ -1068,8 +1103,19 @@ export class Game {
 
   // Tanks drop into craters dug beneath them and take fall damage on landing.
   updateFalling(dt) {
+    const t = this.terrain;
     for (const p of this.players) {
-      const g = this.terrain.heightAt(p.x, p.z);
+      // Over open sky (the ground blown out from under it) a tank falls for good.
+      const g = t.solidAt(p.x, p.z) ? t.heightAt(p.x, p.z) : -Infinity;
+      if (g === -Infinity && p.y < ISLES.voidY - 20) {
+        if (p.alive) {
+          this.emit({ type: 'void', player: p.id, pos: [p.x, p.y, p.z] });
+          this.damage(p, p.hp + p.armor, p.blamed ?? null);
+        }
+        p.falling = false;
+        p.vy = 0;
+        continue;
+      }
       if (g > p.y) { p.y = g; p.falling = false; p.vy = 0; continue; }
       if (p.y > g + 0.02) {
         if (!p.falling) { p.falling = true; p.vy = 0; p.fallFrom = p.y; }

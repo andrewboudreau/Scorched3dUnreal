@@ -43,9 +43,10 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev),
       vel: launchVelocity(yaw, elev, power),
-      wind, terrain, gravity, windK,
+      wind, terrain, gravity, windK, level: target[1] - 1,
     });
-    const [ix, , iz] = shot.point;
+    // A shell that fell past an isle is judged by where it came down through the target's height.
+    const [ix, , iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
     const miss = Math.hypot(ix - tx, iz - tz);
     if (miss < best.miss) best = { yaw, elev, power, miss };
     if (miss <= tolerance) break;

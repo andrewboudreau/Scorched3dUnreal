@@ -13,6 +13,13 @@ const GOLD = {
   sun: new THREE.Color('#ffc078'), skyLight: new THREE.Color('#ffdcc0'), groundLight: new THREE.Color('#70503a'),
   top: new THREE.Color('#2a62d0'), mid: new THREE.Color('#86b2e6'), horizon: new THREE.Color('#f8c890'), cloud: new THREE.Color('#ffe6c8'),
 };
+// The floating isles hang in open space: a dark sky with a violet glow low
+// down, stars all round (below as well), and a ringed planet.
+const SPACE = {
+  skyLight: new THREE.Color('#aab8ff'), groundLight: new THREE.Color('#8a74b0'),
+  top: new THREE.Color('#03040d'), mid: new THREE.Color('#0b0d26'), horizon: new THREE.Color('#2a1f4d'), bottom: new THREE.Color('#05061a'),
+  sun: new THREE.Color('#fff4e6'),
+};
 const CLOUD_SPAN = 1500;
 
 const M = new THREE.Matrix4();
@@ -42,11 +49,32 @@ export class Sky {
           bottom: { value: new THREE.Color('#a39276') },
           sun: { value: this.sunDir },
           glow: { value: new THREE.Color('#ffd99a') },
+          space: { value: 0 },
         },
         vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-        fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; varying vec3 vDir;
+        fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; uniform float space; varying vec3 vDir;
+          float sh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+          float sn(vec3 p) {
+            vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(mix(sh(i), sh(i + vec3(1,0,0)), f.x), mix(sh(i + vec3(0,1,0)), sh(i + vec3(1,1,0)), f.x), f.y),
+                       mix(mix(sh(i + vec3(0,0,1)), sh(i + vec3(1,0,1)), f.x), mix(sh(i + vec3(0,1,1)), sh(i + vec3(1,1,1)), f.x), f.y), f.z);
+          }
           void main(){
             float h = vDir.y;
+            if (space > 0.5) {
+              // Deep space: a violet band low all round, darker overhead and
+              // underfoot, and drifting nebula clouds.
+              vec3 c = mix(horizon, h > 0.0 ? top : bottom, pow(min(1.0, abs(h) * 1.6), 0.6));
+              float n = sn(vDir * 3.0) * 0.55 + sn(vDir * 7.0) * 0.3 + sn(vDir * 15.0) * 0.15;
+              float neb = smoothstep(0.5, 0.9, n) * (0.6 + 0.4 * sn(vDir * 2.0 + 5.0));
+              c += mix(vec3(0.30, 0.10, 0.42), vec3(0.08, 0.22, 0.45), sn(vDir * 1.5 + 2.0)) * neb * 0.3;
+              float s = max(dot(vDir, sun), 0.0);
+              c += vec3(1.0, 0.95, 0.85) * (pow(s, 900.0) * 6.0 + pow(s, 40.0) * 0.18);
+              gl_FragColor = vec4(c, 1.0);
+              #include <tonemapping_fragment>
+              #include <colorspace_fragment>
+              return;
+            }
             // Three stops: the horizon colour is a narrow band over the hills,
             // then clear blue. Blending a warm horizon straight into the deep
             // top made a wide lavender-grey wash, and the camera mostly looks
@@ -76,7 +104,60 @@ export class Sky {
     this.probe = new THREE.Object3D();
 
     this.buildClouds(scene);
+    this.buildSpace(scene);
+    this.space = false;
     this.setDay(0);
+  }
+
+  // Stars and a ringed planet, shown only over the floating isles.
+  buildSpace(scene) {
+    const n = 2400;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const c = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      const u = Math.random() * 2 - 1;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      pos.set([Math.cos(a) * r * 4000, u * 4000, Math.sin(a) * r * 4000], i * 3);
+      c.setHSL(0.55 + Math.random() * 0.2 - (Math.random() < 0.2 ? 0.5 : 0), 0.5, 0.6 + Math.random() * 0.4).multiplyScalar(0.4 + Math.random() ** 3 * 1.2);
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    this.stars = new THREE.Points(geo, new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false }));
+    this.stars.frustumCulled = false;
+    this.stars.visible = false;
+    this.dome.renderOrder = -2;   // the stars draw over the dome, which writes no depth
+    const planet = new THREE.Group();
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(380, 48, 24),
+      new THREE.MeshStandardMaterial({ color: '#c08a6a', roughness: 1, fog: false, emissive: '#2a1830', emissiveIntensity: 0.6 }),
+    );
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(520, 760, 96, 1),
+      new THREE.MeshBasicMaterial({ color: '#d9c3a6', transparent: true, opacity: 0.45, side: THREE.DoubleSide, fog: false, depthWrite: false }),
+    );
+    ring.rotation.x = Math.PI / 2 - 0.35;
+    ring.rotation.y = 0.25;
+    planet.add(ball, ring);
+    planet.position.set(-1900, 900, -2600);
+    planet.visible = false;
+    this.planet = planet;
+    scene.add(this.stars, planet);
+  }
+
+  // Over the floating isles (true) or the meadows (false).
+  setSpace(on) {
+    if (on === this.space) return;
+    this.space = on;
+    this.stars.visible = this.planet.visible = on;
+    this.cloudMesh.visible = !on;
+    if (on) for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
+    const d = this.day;
+    this.day = -1;
+    this.setDay(d < 0 ? 0 : d);
   }
 
   // Low-poly clouds: every cloud is a handful of flattened blobs, and all the
@@ -131,6 +212,20 @@ export class Sky {
     this.dome.material.uniforms.mid.value.lerpColors(DAY.mid, GOLD.mid, w);
     this.horizon.lerpColors(DAY.horizon, GOLD.horizon, w);
     this.cloudMaterial.color.lerpColors(DAY.cloud, GOLD.cloud, w);
+    const U = this.dome.material.uniforms;
+    U.space.value = this.space ? 1 : 0;
+    U.bottom.value.set(this.space ? SPACE.bottom : '#a39276');
+    if (this.space) {
+      // The sun still swings round, but space keeps its own colours.
+      this.sun.color.copy(SPACE.sun);
+      this.sun.intensity = 2.4;
+      this.hemi.color.copy(SPACE.skyLight);
+      this.hemi.groundColor.copy(SPACE.groundLight);
+      this.hemi.intensity = 1.0;   // the undersides see only this light
+      U.top.value.copy(SPACE.top);
+      U.mid.value.copy(SPACE.mid);
+      this.horizon.copy(SPACE.horizon);
+    }
     this.place();
   }
 
@@ -161,6 +256,10 @@ export class Sky {
 
   update(dt, wind) {
     if (this.frozen) return;      // an HDRI sky from the pack review: no clouds
+    if (this.space) {
+      for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
+      return;
+    }
     const mesh = this.cloudMesh;
     const sx = this.sunDir.x / this.sunDir.y;
     const sz = this.sunDir.z / this.sunDir.y;

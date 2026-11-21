@@ -68,7 +68,15 @@ export class Scenery {
   drainEvents() { const e = this.events; this.events = []; return e; }
 
   slopeAt(x, z) { return 1 - this.terrain.normalAt(x, z)[1]; }
-  dry(x, z, margin = 0) { return this.terrain.heightAt(x, z) > this.terrain.waterLevel + margin; }
+  // Out of the water, and on the isles, standing on an isle well clear of its lip.
+  dry(x, z, margin = 0) {
+    const t = this.terrain;
+    if (t.under) {
+      const m = 2 + margin;
+      if (!t.solidAt(x, z) || !t.solidAt(x + m, z) || !t.solidAt(x - m, z) || !t.solidAt(x, z + m) || !t.solidAt(x, z - m)) return false;
+    }
+    return t.heightAt(x, z) > t.waterLevel + margin;
+  }
 
   // The height a prop rests at. A standing building sits on the lowest point
   // of its footprint (its foundation covers the rest).
@@ -216,7 +224,7 @@ export class Scenery {
       const z = rng.range(-1, 1) * (t.half - 5);
       const r = rng.next();
       const h = t.heightAt(x, z);
-      if (h < t.waterLevel + 0.6 || blocked(x, z)) continue;
+      if (h < t.waterLevel + 0.6 || blocked(x, z) || (t.under && !this.dry(x, z, -1))) continue;
       const s = this.slopeAt(x, z);
       const b = band(h);
       const g = grove(x * 0.011, z * 0.011);
@@ -261,6 +269,7 @@ export class Scenery {
   // Flood the lowest few percent of the field, but never a tank.
   chooseWaterLevel(tanks) {
     const t = this.terrain;
+    if (t.under) { t.waterLevel = -Infinity; return; }   // the isles have no lakes
     const sorted = Float32Array.from(t.heights).sort();
     let level = sorted[Math.floor(sorted.length * 0.07)];
     for (const k of tanks) level = Math.min(level, t.heightAt(k.x, k.z) - 4);
@@ -363,6 +372,7 @@ export class Scenery {
     const t = this.terrain;
     for (const p of this.props) {
       if (p.state === 'gone' || Math.hypot(p.x - cx, p.z - cz) > reach) continue;
+      if (!t.solidAt(p.x, p.z)) { this.remove(p, 'fell'); continue; }   // the isle blown out from under it
       let g = this.seat(p);
       const shift = g - p.y;
       if (shift > 1.2) { this.remove(p, 'buried'); continue; }
@@ -376,7 +386,11 @@ export class Scenery {
       } else if (isTree(p) && p.state === 'ok' && shift < -2.5) this.topple(p, this.rng.range(0, Math.PI * 2));
       p.y = g;
     }
-    for (const w of this.walkers) if (w.alive) w.y = t.heightAt(w.x, w.z);
+    for (const w of this.walkers) {
+      if (!w.alive) continue;
+      if (t.solidAt(w.x, w.z)) w.y = t.heightAt(w.x, w.z);
+      else { w.alive = false; this.note(w, 'gone'); }
+    }
   }
 
   // Knock `amount` hit points off a building, the blow coming from (fromX, fromZ).

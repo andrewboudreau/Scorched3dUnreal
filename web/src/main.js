@@ -16,6 +16,7 @@ import { TankMesh } from './render/tankMesh.js';
 import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
+import { Moons } from './render/moons.js';
 import { Birds } from './render/birds.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
@@ -41,6 +42,7 @@ $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const sky = new Sky(scene);   // sun, sky light, fog, clouds
+const moons = new Moons(scene);   // the floating isles' moons
 if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 6000);
@@ -216,6 +218,9 @@ function disposeMatch() {
   pips.length = 0;
   heroId = null;
   $('labels').innerHTML = '';
+  moons.set([]);
+  sky.setSpace(false);
+  floor.visible = birds.bodies.visible = birds.wings.visible = true;
 }
 
 function startMatch(config) {
@@ -319,7 +324,16 @@ function handleEvents() {
         }
         break;
       case 'terrain':
-        if (e.full) { dirty.length = 0; terrainMesh.rebuild(); sceneryMesh.rebuild(); terrainMesh.setPaths(game.scenery.paths); }
+        if (e.full) {
+          dirty.length = 0;
+          terrainMesh.rebuild();
+          sceneryMesh.rebuild();
+          terrainMesh.setPaths(game.scenery.paths);
+          sky.setSpace(!!game.terrain.under);
+          floor.visible = !game.terrain.under;   // nothing under the isles but space
+          birds.bodies.visible = birds.wings.visible = !game.terrain.under;
+          moons.set(game.terrain.wells);
+        }
         else addDirty(e.region);
         break;
       case 'turn': {
@@ -416,7 +430,7 @@ function handleEvents() {
           }
         } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
-        if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner('Out of the arena', '', 900);
+        if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
         break;
       }
       case 'explosion':
@@ -454,6 +468,11 @@ function handleEvents() {
         // Name the victim on the shooter's pip.
         const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
         if (pip) pip.el.querySelector('span').textContent = `${game.players[e.by].name} hit ${e.player === heroId ? 'you' : game.players[e.player].name}`;
+        break;
+      }
+      case 'void': {
+        const q = game.players[e.player];
+        banner(`${q.id === heroId ? 'You' : q.name} fell into the void`, '', 1800);
         break;
       }
       case 'landed': {
@@ -521,7 +540,7 @@ function doJump() {
   const p = game.current;
   if (!p || p.ai || game.phase !== 'aim' || hops.has(p.id)) return;
   const r = game.jump();
-  const why = JUMP_NOTES[r];
+  const why = r === 'edge' && game.isles ? 'No ground to land on' : JUMP_NOTES[r];
   if (why) driveNote = { text: why, until: performance.now() + 1400 };
 }
 
@@ -1359,7 +1378,8 @@ function applyHeldKeys(dt) {
   if ((go || turn) && !hops.has(game.current.id)) {
     // Driving with the camera far away (or zoomed right out) brings it back to the tank.
     if (!camGoal && !overview && !pinned && camera.position.distanceTo(controls.target) > 260) aimCameraAt(game.current);
-    const why = DRIVE_NOTES[game.drive(go, turn, dt)];
+    const r = game.drive(go, turn, dt);
+    const why = r === 'edge' && game.isles ? 'Edge of the isle' : DRIVE_NOTES[r];
     if (why) driveNote = { text: why, until: performance.now() + 1200 };
   }
 }
@@ -1707,6 +1727,12 @@ $('remove-player').onclick = () => {
   if (setupRows.length > 2) { setupRows.pop(); renderSetup(); }
 };
 
+// The Terrain menu: how hilly the meadows are, or the floating isles.
+function terrainChoice() {
+  const v = $('opt-hills').value;
+  return v === 'isles' ? { hills: 45, world: 'isles' } : { hills: Number(v), world: 'meadow' };
+}
+
 $('start').onclick = () => {
   sound.ensure();
   if (session) {
@@ -1716,7 +1742,7 @@ $('start').onclick = () => {
     session.start({
       rounds: Number($('opt-rounds').value),
       maxWind: Number($('opt-wind').value),
-      hills: Number($('opt-hills').value),
+      ...terrainChoice(),
       twists: $('opt-twists').value === '1',
       fog: $('opt-fog').value === '1',
     }, lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
@@ -1728,7 +1754,7 @@ $('start').onclick = () => {
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
     rounds: Number($('opt-rounds').value),
     maxWind: Number($('opt-wind').value),
-    hills: Number($('opt-hills').value),
+    ...terrainChoice(),
     twists: $('opt-twists').value === '1',
     firing: $('opt-firing').value,
     fog: $('opt-fog').value === '1',
@@ -2302,6 +2328,7 @@ function tick(dt, draw = true) {
   day = dayLock ?? day + Math.max(-dt * 0.5, Math.min(dt * 0.012, dayGoal - day));
   sky.setDay(day);
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
+  moons.update(performance.now() / 1000);
   birds.update(dt);
   soundScape(dt);
   music.update(dt, game ? timeScale : 1);

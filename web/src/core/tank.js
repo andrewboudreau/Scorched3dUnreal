@@ -42,11 +42,21 @@ export const JET = {
 
 const DEG = Math.PI / 180;
 
+// On the floating isles: is there ground under the whole tank, not just its
+// middle? (Always, on an ordinary field.)
+export function onIsle(terrain, x, z) {
+  if (!terrain.under) return true;
+  const r = 3;
+  return terrain.solidAt(x, z) && terrain.solidAt(x + r, z) && terrain.solidAt(x - r, z)
+    && terrain.solidAt(x, z + r) && terrain.solidAt(x, z - r);
+}
+
 // Can a tank stand at x/z? Inside the arena, out of the water, and clear of
 // every other tank and standing house (`others`, like driveStep's).
 function standable(tank, terrain, others, x, z) {
   const edge = terrain.half - 6;
   if (Math.abs(x) > edge || Math.abs(z) > edge) return 'edge';
+  if (!onIsle(terrain, x, z)) return 'edge';
   if (terrain.heightAt(x, z) < terrain.waterLevel + 0.3) return 'water';
   for (const o of others) {
     if (o === tank || o.alive === false) continue;
@@ -124,6 +134,7 @@ export function driveStep(tank, terrain, dir, dt, others = []) {
   const z = tank.z + uz * step;
   const edge = terrain.half - 6;
   if (Math.abs(x) > edge || Math.abs(z) > edge) return 'edge';
+  if (!onIsle(terrain, x, z) && onIsle(terrain, tank.x, tank.z)) return 'edge';   // never off an isle's lip
   const h = terrain.heightAt(x, z);
   // No wading in, but a tank already standing in a flooded crater may climb out.
   if (h < terrain.waterLevel + 0.3 && h <= here) return 'water';

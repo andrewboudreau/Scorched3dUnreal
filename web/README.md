@@ -204,6 +204,17 @@ second column beside the first. On a phone the players box sits top right.
   first shot is a rough guess and the error shrinks with every shot at the same
   target. It grows back when the target or shooter moves or the wind swings.
   Easy stays wild, Normal usually lands on shot 2 to 4, Hard on shot 1 to 2.
+- **Floating isles** (Terrain menu). Instead of one stretch of ground, a dozen
+  or so isles hang in open space, each with grass on top and rock beneath. Every
+  tank starts on an isle of its own. Two or three small moons hang among them and pull
+  on every shell that passes (gravity that falls off with distance, so a shell
+  near a moon swings round it, and one that hits a moon is spent there). Shots
+  can come at an isle from below: a blast in the underside eats upward, and once
+  the rock between top and underside is gone the ground is open sky. A tank
+  over a hole falls, and a tank that falls into the void is lost (the kill goes
+  to whoever blew the ground out). A shell that misses everything drops away into the void. You
+  cannot drive or jump off an isle's edge. There are no lakes, and the sky is
+  deep space: stars all round, a nebula and a ringed planet.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
   its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
@@ -299,7 +310,8 @@ second column beside the first. On a phone the players box sits top right.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
-  clouds (`sky.js`) and the flocks (`birds.js`).
+  clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
+  (`moons.js`) and the flocks (`birds.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own

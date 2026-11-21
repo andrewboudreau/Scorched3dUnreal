@@ -93,6 +93,7 @@ export function planPaths({ terrain: t, hamlets = [], houses = [], bridge = null
       h[k] = t.heightAt(x, z);
       toll[k] = 1.4 + 0.9 * wander(x * 0.016, z * 0.016);
       shut[k] = h[k] < water + 0.8
+        || !t.solidAt(x, z) || !t.solidAt(x + 4, z) || !t.solidAt(x - 4, z) || !t.solidAt(x, z + 4) || !t.solidAt(x, z - 4)
         || tanks.some((p) => Math.hypot(p.x - x, p.z - z) < PATH.keepTank)
         || houses.some((p) => Math.hypot(p.x - x, p.z - z) < PATH.keepHouse + Math.max(0, (p.reach ?? 4.6) - 4.6)) ? 1 : 0;
     }

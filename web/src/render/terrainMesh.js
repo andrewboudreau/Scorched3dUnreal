@@ -22,6 +22,11 @@ const C = {
   dirt: new THREE.Color('#6b4a2e'),
   side: new THREE.Color('#5a3d26'),
   sideDeep: new THREE.Color('#2e2117'),
+  // The floating isles' undersides: earth under the grass, banded rock below,
+  // darkening to the tip.
+  soil: new THREE.Color('#6a4a30'),
+  stone: new THREE.Color('#7a6d62'),
+  stoneDeep: new THREE.Color('#4a4152'),
 };
 
 // Faint cloud shadows: render/sky.js writes each cloud's shadow here as
@@ -235,6 +240,8 @@ function gridFor(field) {
   return g;
 }
 
+const TMP = new THREE.Color();
+
 export class TerrainMesh {
   constructor(field) {
     this.field = field;
@@ -292,6 +299,61 @@ export class TerrainMesh {
     this.group.add(this.mesh, this.skirt);
     this.hMin = 0;
     this.hMax = 1;
+    this.sharedIndex = geo.index;
+    this.under = null;   // the floating isles' undersides (ensureUnder), built for the first isles field
+    this.openMask = null;
+  }
+
+  // Floating isles: a second sheet of the same grid hangs under the first at
+  // the field's underside heights, facing down. Both draw only the quads that
+  // touch an isle, so open sky stays open, and they meet at each isle's rim.
+  ensureUnder() {
+    if (this.under) { this.under.mesh.visible = true; return; }
+    const f = this.field;
+    const count = f.n * f.n;
+    const geo = new THREE.BufferGeometry();
+    const pos = gridFor(f).xz.slice();
+    const nrm = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    // A faint glow of its own: the sun never reaches an underside.
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true, emissive: '#3a2c48', emissiveIntensity: 0.6 }));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+    this.under = { geo, pos, nrm, col, mesh };
+    this.openMask = new Uint8Array(count);
+  }
+
+  // Draw only the quads with a corner on an isle: the top as the grid winds,
+  // the underside turned over.
+  rebuildIndex() {
+    const f = this.field;
+    const n = f.n;
+    const open = this.openMask;
+    const top = new Uint32Array(f.res * f.res * 6);
+    const bot = new Uint32Array(f.res * f.res * 6);
+    let w = 0;
+    for (let j = 0; j < f.res; j++) {
+      for (let i = 0; i < f.res; i++) {
+        const a = j * n + i;
+        const b = a + 1;
+        const c = a + n;
+        const d = c + 1;
+        if (open[a] && open[b] && open[c] && open[d]) continue;
+        const t = (i + j) & 1 ? [a, c, d, a, d, b] : [a, c, b, b, c, d];
+        for (let q = 0; q < 6; q += 3) {
+          top[w] = t[q]; top[w + 1] = t[q + 1]; top[w + 2] = t[q + 2];
+          bot[w] = t[q]; bot[w + 1] = t[q + 2]; bot[w + 2] = t[q + 1];
+          w += 3;
+        }
+      }
+    }
+    this.geometry.setIndex(new THREE.BufferAttribute(top.slice(0, w), 1));
+    this.under.geo.setIndex(new THREE.BufferAttribute(bot.slice(0, w), 1));
+    this.under.geo.computeBoundingSphere();
   }
 
   // Paint these paths (core/paths.js) onto the ground, replacing any before.
@@ -389,6 +451,7 @@ export class TerrainMesh {
 
   dispose() {
     this.geometry.dispose();
+    if (this.under) { this.under.geo.dispose(); this.under.mesh.material.dispose(); }
     this.skirtGeometry.dispose();
     this.material.dispose();
     // The path mask (and its GPU copy) goes back to the pool for the next match.
@@ -398,18 +461,33 @@ export class TerrainMesh {
   }
 
   rebuild() {
-    const h = this.field.heights;
+    const f = this.field;
+    const h = f.heights;
     let lo = Infinity;
     let hi = -Infinity;
-    for (let k = 0; k < h.length; k++) { if (h[k] < lo) lo = h[k]; if (h[k] > hi) hi = h[k]; }
+    for (let k = 0; k < h.length; k++) {
+      if (f.isOpen(k)) continue;   // the height bands are the isles', not the void's
+      if (h[k] < lo) lo = h[k];
+      if (h[k] > hi) hi = h[k];
+    }
+    if (lo === Infinity) { lo = 0; hi = 1; }
     this.hMin = lo;
     this.hMax = Math.max(lo + 1, hi);
-    this.updateRegion({ i0: 0, i1: this.field.res, j0: 0, j1: this.field.res });
+    this.skirt.visible = !f.under;
+    if (f.under) this.ensureUnder();
+    else {
+      if (this.under) this.under.mesh.visible = false;
+      if (this.geometry.index !== this.sharedIndex) this.geometry.setIndex(this.sharedIndex);
+    }
+    this.updateRegion({ i0: 0, i1: f.res, j0: 0, j1: f.res }, true);
     this.geometry.computeBoundingSphere();
   }
 
-  updateRegion(r) {
+  updateRegion(r, fresh = false) {
     const f = this.field;
+    const U = f.under;
+    const ud = U && this.under;
+    let reindex = fresh && !!U;
     const n = f.n;
     const i0 = Math.max(0, r.i0 - 1);
     const i1 = Math.min(f.res, r.i1 + 1);
@@ -463,10 +541,21 @@ export class TerrainMesh {
         // alone makes them, which keeps the relief readable in flat light.
         const hollow = (hl + hr + hd + hu) / 4 - y;
         const v = (1 + this.jitter[k] * 0.12) * Math.min(1.1, Math.max(0.72, 1 - hollow * 0.22));
+        const open = ud ? (f.isOpen(k) ? 1 : 0) : 0;
+        if (open) tmp.copy(C.soil);   // an isle's rim: the earth under the turf
         this.colors[k * 3] = tmp.r * v;
         this.colors[k * 3 + 1] = tmp.g * v;
         this.colors[k * 3 + 2] = tmp.b * v;
+        if (ud) {
+          if (this.openMask[k] !== open) { this.openMask[k] = open; reindex = true; }
+          this.colorUnder(k, i, j, open);
+        }
       }
+    }
+    if (ud) {
+      const a = this.under.geo.attributes;
+      a.position.needsUpdate = a.normal.needsUpdate = a.color.needsUpdate = true;
+      if (reindex) this.rebuildIndex();
     }
     const g = this.geometry;
     const full = i0 === 0 && j0 === 0 && i1 === f.res && j1 === f.res;
@@ -480,6 +569,36 @@ export class TerrainMesh {
       a.needsUpdate = true;
     }
     if (i0 === 0 || j0 === 0 || i1 === f.res || j1 === f.res) this.updateSkirt();
+  }
+
+  // One vertex of the underside: its height, a downward normal and a colour
+  // from soil under the rim, through banded rock, to the dark tip.
+  colorUnder(k, i, j, open) {
+    const f = this.field;
+    const n = f.n;
+    const U = f.under;
+    const u = U[k];
+    const S = this.under;
+    S.pos[k * 3 + 1] = u;
+    const ul = U[j * n + Math.max(0, i - 1)];
+    const ur = U[j * n + Math.min(f.res, i + 1)];
+    const uu = U[Math.max(0, j - 1) * n + i];
+    const uw = U[Math.min(f.res, j + 1) * n + i];
+    let nx = ur - ul;
+    let ny = -2 * f.cell;
+    let nz = uw - uu;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    S.nrm[k * 3] = nx / len; S.nrm[k * 3 + 1] = ny / len; S.nrm[k * 3 + 2] = nz / len;
+    const tmp = TMP;
+    const depth = open ? 0 : f.heights[k] - u;
+    tmp.copy(C.soil).lerp(C.stone, Math.min(1, depth / 6));
+    tmp.lerp(C.stoneDeep, Math.min(1, Math.max(0, (depth - 14) / 30)));
+    // Strata: bands that follow the height, wobbled so they do not ring true.
+    const band = 0.88 + 0.14 * Math.sin(u * 0.85 + this.jitter[k] * 4);
+    const v = band * (1 + this.jitter[k] * 0.1);
+    S.col[k * 3] = tmp.r * v;
+    S.col[k * 3 + 1] = tmp.g * v;
+    S.col[k * 3 + 2] = tmp.b * v;
   }
 
   updateSkirt() {
