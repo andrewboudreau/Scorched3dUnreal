@@ -7,11 +7,11 @@ import { groundShade, MAX_CLOUD_SHADOWS } from './terrainMesh.js';
 
 const DAY = {
   sun: new THREE.Color('#fff0d8'), skyLight: new THREE.Color('#cfe1ff'), groundLight: new THREE.Color('#6b5638'),
-  top: new THREE.Color('#2c6fd8'), horizon: new THREE.Color('#d8dcd6'), cloud: new THREE.Color('#ffffff'),
+  top: new THREE.Color('#1c63e8'), mid: new THREE.Color('#6fa8ee'), horizon: new THREE.Color('#b4d4f2'), cloud: new THREE.Color('#ffffff'),
 };
 const GOLD = {
   sun: new THREE.Color('#ffc078'), skyLight: new THREE.Color('#ffdcc0'), groundLight: new THREE.Color('#70503a'),
-  top: new THREE.Color('#3f6fc4'), horizon: new THREE.Color('#f6cf9c'), cloud: new THREE.Color('#ffe6c8'),
+  top: new THREE.Color('#2a62d0'), mid: new THREE.Color('#86b2e6'), horizon: new THREE.Color('#f8c890'), cloud: new THREE.Color('#ffe6c8'),
 };
 const CLOUD_SPAN = 1500;
 
@@ -37,16 +37,23 @@ export class Sky {
         fog: false,
         uniforms: {
           top: { value: DAY.top.clone() },
+          mid: { value: DAY.mid.clone() },
           horizon: { value: this.horizon },
           bottom: { value: new THREE.Color('#a39276') },
           sun: { value: this.sunDir },
           glow: { value: new THREE.Color('#ffd99a') },
         },
         vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-        fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; varying vec3 vDir;
+        fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; varying vec3 vDir;
           void main(){
             float h = vDir.y;
-            vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.55)) : mix(horizon, bottom, pow(-h, 0.4));
+            // Three stops: the horizon colour is a narrow band over the hills,
+            // then clear blue. Blending a warm horizon straight into the deep
+            // top made a wide lavender-grey wash, and the camera mostly looks
+            // at those first few degrees of sky.
+            vec3 c = h > 0.0
+              ? mix(mix(horizon, mid, smoothstep(0.0, 0.16, h)), top, smoothstep(0.08, 0.85, h))
+              : mix(horizon, bottom, pow(-h, 0.4));
             float s = max(dot(vDir, sun), 0.0);
             c += glow * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.25 + pow(s, 3.0) * 0.08);
             gl_FragColor = vec4(c, 1.0);
@@ -92,7 +99,7 @@ export class Sky {
     }
     this.cloudMaterial = new THREE.MeshStandardMaterial({
       color: DAY.cloud.clone(), roughness: 1, flatShading: true, fog: false,
-      emissive: '#8fa3bd', emissiveIntensity: 0.55,
+      emissive: '#c3d3e6', emissiveIntensity: 0.6,
     });
     this.cloudMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), this.cloudMaterial, blobs);
     this.cloudMesh.frustumCulled = false;
@@ -120,6 +127,7 @@ export class Sky {
     this.hemi.groundColor.lerpColors(DAY.groundLight, GOLD.groundLight, w);
     this.hemi.intensity = 0.8 + 0.12 * w;
     this.dome.material.uniforms.top.value.lerpColors(DAY.top, GOLD.top, w);
+    this.dome.material.uniforms.mid.value.lerpColors(DAY.mid, GOLD.mid, w);
     this.horizon.lerpColors(DAY.horizon, GOLD.horizon, w);
     this.cloudMaterial.color.lerpColors(DAY.cloud, GOLD.cloud, w);
     this.place();
