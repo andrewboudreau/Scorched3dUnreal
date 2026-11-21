@@ -1234,7 +1234,7 @@ window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => held.clear());
 window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
-const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure() }) : null;
+const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), online: () => !!session, muted: () => sound.muted }) : null;
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);

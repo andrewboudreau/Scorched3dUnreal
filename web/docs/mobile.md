@@ -28,7 +28,7 @@ sideways" card over the game (menus can stay portrait-friendly).
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap to cycle | Space, Tab |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
 | Left thumb | **Jet** | J |
-| Bottom middle | Small: Tilt, Zero, Fine, Find, View, Fullscreen | F, V; Fine scales pad and tilt by 0.2 like Shift |
+| Bottom middle | Small: Tilt (off / Lean / Grip), Zero, Inv, Fine, Find, View, Mute, Chat (online only), Fullscreen | F, V, M, Enter; Fine scales pad and tilt by 0.2 like Shift |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so
 reaching 47.3° means nudging and waiting; a drag sets a *change*, so a 3 px move is a
@@ -47,18 +47,22 @@ Things the prototype does not do yet, worth trying next:
 
 Optional, off by default, a toggle in the aim HUD. Two models are worth comparing:
 
-1. **Tilt as a joystick** (prototype). Zero the pose; lean the right edge down to
-   turn right, pull the top edge toward you to raise the barrel. A 3° deadzone,
+1. **Tilt as a joystick** (built: **Lean**). Zero the pose; lean the right edge down to
+   turn right, tip the top edge away from you to raise the barrel (**Inv** flips
+   that; the choice is kept in localStorage). A 3° deadzone,
    full speed at 22°, a squared response so small leans are fine control, and a
    0.08 s low-pass on the readings. Works lying on a couch, and the turret can
    swing all the way round without you turning your body. It re-zeros on its own
    at the start of every aim (however you hold the phone then is neutral) and with
    the **Zero** button, and after a screen rotation.
-2. **Gyro as a mouse** (Splatoon style; try second). Integrate
-   `devicemotion.rotationRate` and turn the phone's turn into the turret's turn, 1:1 or
-   scaled. More precise and more fun for the last few degrees, but a 180° shot means
-   physically turning round, so it wants a "clutch": the gyro only steers while a
-   thumb rests on the aim pad. Drag for the big moves, gyro for the fine ones.
+2. **Gyro as a mouse** (built: **Grip**). While a thumb rests on the aim pad, each
+   frame's change in lean moves the turret 2.2° per degree and the change in pitch
+   moves the barrel 1.2° per degree (Fine scales both by 0.2). Lift the thumb and the
+   phone can be re-centred without moving the aim, like lifting a mouse, so a 180°
+   shot never means turning round. Dragging the pad still works at the same time:
+   drag for the big moves, tilt for the last few degrees. It reads the same
+   low-passed `deviceorientation` pose as Lean rather than `devicemotion`, so one
+   permission and one code path cover both.
 
 Platform notes:
 
@@ -86,13 +90,12 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
 - `requestFullscreen` + `screen.orientation.lock('landscape')` works on Android
   Chrome. The prototype has a ⛶ button that does both.
 - **iPhone Safari has no element fullscreen** (iPad has `webkitRequestFullscreen`).
-  The real fix on iPhone is "Add to Home Screen": a web app manifest with
-  `"display": "fullscreen"`, `"orientation": "landscape"` and an icon, plus
-  `apple-mobile-web-app-capable`. That is the next cheap win, and it also hides
-  Safari's bottom bar, which otherwise eats about 50 px.
-- Later: `viewport-fit=cover` and `env(safe-area-inset-*)` paddings, so the
-  controls clear the notch and home bar in landscape. Not done yet, because without
-  `cover` Safari letterboxes the notch for us.
+  The fix on iPhone is "Add to Home Screen" (done): `manifest.webmanifest` with
+  `"display": "fullscreen"`, `"orientation": "landscape"` and icons in `img/`, plus
+  `apple-mobile-web-app-capable` and an `apple-touch-icon`. It also hides Safari's
+  bottom bar, which otherwise eats about 50 px.
+- `viewport-fit=cover` with `env(safe-area-inset-*)` margins on the thumb clusters,
+  the middle row and the top-left cards, so they clear the notch and home bar.
 
 ## HUD, menus and the armory at small sizes
 

@@ -44,7 +44,12 @@ each other.
 
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
-the left, and an optional tilt aim. See `docs/mobile.md`.
+the left, an optional tilt aim, and Mute (and Chat, online) buttons. Tap
+**Tilt** to cycle off, **Lean** (tilt steers like a joystick) and **Grip** (tilt
+steers only while your thumb rests on the aim pad, like a mouse you lift to
+re-centre); **Inv** flips which way tipping the phone raises the barrel. "Add to
+Home Screen" installs it as an app that opens fullscreen in landscape. See
+`docs/mobile.md`.
 
 ## How it plays
 
