@@ -23,6 +23,7 @@
     <Content Include="..\index.html" Link="wwwroot\index.html" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\css\**" Link="wwwroot\css\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\src\**" Link="wwwroot\src\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\img\**" Link="wwwroot\img\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\vendor\**" Link="wwwroot\vendor\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
