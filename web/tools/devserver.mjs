@@ -1,6 +1,8 @@
 // Local server for trying online play: serves the game from web/ and the same
-// rooms API as module/Rooms.cs (keep the two in step), under /api/rooms.
+// rooms API as module/Rooms.cs (keep the two in step), under /api/rooms, and
+// the player id API as module/Players.cs, under /api/me (records in memory only).
 //   node tools/devserver.mjs [port]      then open http://localhost:8080/
+// Port 0 picks a free one; the first line printed says which.
 //
 // It also mounts the resource-pack library (CRATERFALL_PACKS, default the NAS
 // library) at /packs/, lists it at /api/packs and saves review picks from the
@@ -14,7 +16,7 @@ import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.argv[2]) || 8080;
+const port = process.argv[2] != null && process.argv[2] !== '' ? Number(process.argv[2]) : 8080;
 const HOLD = 20000, GONE_AFTER = 45000, MAX_SEATS = 6;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
@@ -53,6 +55,64 @@ async function packs(req, res, url) {
   return json(res, 404, {});
 }
 
+// ---- who is playing (module/Players.cs): a random id in a cookie, and a small
+// record per id. The id is an identifier, not a secret. Here the game is served
+// from /, so the cookie's path is / rather than /Craterfall.
+const COOKIE = 'craterfall_id';
+const MAX_PLAYERS = 20000;
+const players = new Map();       // id -> { name, firstSeen, lastSeen, played, won }
+
+const isId = (s) => typeof s === 'string' && /^[A-Za-z0-9_-]{22}$/.test(s);
+const newId = () => randomBytes(16).toString('base64url');
+function cookieId(req) {
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === COOKIE && isId(v.join('='))) return v.join('=');
+  }
+  return null;
+}
+// The caller's id, issuing one if it has none; the cookie is renewed every time.
+function identify(req, res) {
+  const id = cookieId(req) || newId();
+  const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+  res.setHeader('set-cookie', `${COOKIE}=${id}; Path=/; Max-Age=${365 * 24 * 3600}; HttpOnly; SameSite=Lax${secure}`);
+  return id;
+}
+function touch(id) {
+  const now = new Date().toISOString();
+  let r = players.get(id);
+  if (!r) {
+    if (players.size >= MAX_PLAYERS) {
+      // Full: drop a record that never set a name or played, else the one seen longest ago.
+      const kept = (q) => (q.name || q.played ? 1 : 0);
+      let worst = null;
+      for (const [k, q] of players) {
+        const w = worst && players.get(worst);
+        if (!w || kept(q) < kept(w) || (kept(q) === kept(w) && q.lastSeen < w.lastSeen)) worst = k;
+      }
+      players.delete(worst);
+    }
+    r = { name: '', firstSeen: now, lastSeen: now, played: 0, won: 0 };
+    players.set(id, r);
+  }
+  r.lastSeen = now;
+  return r;
+}
+const me = (id, r) => ({ id, name: r.name, played: r.played, won: r.won });
+
+async function profileApi(req, res) {
+  if (req.method === 'GET') { const id = identify(req, res); return json(res, 200, me(id, touch(id))); }
+  if (req.method === 'POST') {
+    const b = await readBody(req);
+    if (!b) return json(res, 400, {});
+    const id = identify(req, res);
+    const r = touch(id);
+    if (typeof b.name === 'string') r.name = clip(b.name);
+    return json(res, 200, me(id, r));
+  }
+  return json(res, 404, {});
+}
+
 const rooms = new Map();
 const menu = new Map();          // visitor id -> { name, seen }
 const MENU_FOR = 20000;
@@ -79,16 +139,38 @@ function sweep(room) {
   });
 }
 
-function join(room, name) {
-  const token = randomBytes(16).toString('hex');
-  room.seats.push({ token, name, seen: Date.now(), gone: false });
+const newToken = () => randomBytes(16).toString('hex').toUpperCase();
+
+// A seat belongs to a player id and a tab key (as Rooms.cs): two tabs of one
+// browser are two seats, told apart by name ("Ana", "Ana 2").
+function join(room, name, pid = null, tab = null) {
+  if (pid) {
+    const taken = new Set(room.seats.filter((s) => s.pid === pid && !s.gone).map((s) => s.name.toLowerCase()));
+    for (let k = 2; taken.has(name.toLowerCase()) && k <= MAX_SEATS + 1; k++) {
+      const tail = ` ${k}`;
+      let cut = Math.min(name.length, 14 - tail.length);
+      if (cut < name.length && /[\uD800-\uDBFF]/.test(name[cut - 1])) cut--;
+      const next = name.slice(0, cut).trimEnd() + tail;
+      if (!taken.has(next.toLowerCase())) { name = next; break; }
+    }
+  }
+  const token = newToken();
+  room.seats.push({ token, name, pid, tab, seen: Date.now(), gone: false });
   const seat = room.seats.length - 1;
   append(room, -1, { t: 'join', seat, name });
   return { code: room.code, seat, token };
 }
 
-const clip = (s) => String(s ?? '').trim().slice(0, 14);
-const nameOf = (b) => clip(b?.name) || 'Player';
+// As Players.CleanName: no control or invisible formatting characters, trimmed,
+// at most 14 UTF-16 units without splitting a surrogate pair.
+function clip(s) {
+  let t = String(s ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim();
+  if (t.length > 14) t = t.slice(0, /[\uD800-\uDBFF]/.test(t[13]) ? 13 : 14).trimEnd();
+  return t;
+}
+// The name sent, else the player's saved name, else "Player".
+const tabOf = (b) => (typeof b?.tab === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(b.tab) ? b.tab : null);
+const nameOf = (b, pid) => clip(b?.name) || (pid && players.get(pid)?.name) || 'Player';
 
 function list(id, name) {
   const now = Date.now();
@@ -110,7 +192,7 @@ const json = (res, code, body) => { res.writeHead(code, { 'content-type': 'appli
 const readBody = (req) => new Promise((ok) => {
   let s = '';
   req.on('data', (c) => { s += c; });
-  req.on('end', () => { try { const v = JSON.parse(s); ok(v && typeof v === 'object' ? v : null); } catch { ok(null); } });
+  req.on('end', () => { try { const v = JSON.parse(s); ok(v && typeof v === 'object' && !Array.isArray(v) ? v : null); } catch { ok(null); } });
 });
 
 async function api(req, res, url) {
@@ -118,10 +200,12 @@ async function api(req, res, url) {
   const code = parts[2]?.toUpperCase();
   const action = parts[3];
   if (req.method === 'GET' && parts.length === 2) return json(res, 200, list(url.searchParams.get('id'), url.searchParams.get('name')));
+  const pid = cookieId(req);
   if (req.method === 'POST' && parts.length === 2) {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
-    return json(res, 200, join(makeRoom(b.private === true), nameOf(b)));
+    if (pid) touch(pid);
+    return json(res, 200, join(makeRoom(b.private === true), nameOf(b, pid), pid, tabOf(b)));
   }
   const room = rooms.get(code);
   if (!room) return json(res, 404, { error: 'No room with that code.' });
@@ -129,9 +213,36 @@ async function api(req, res, url) {
   if (req.method === 'POST' && action === 'join') {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
+    if (pid) touch(pid);
+    // This id and tab's seat is still here: hand it back, with a fresh token.
+    const tab = tabOf(b);
+    const mine = pid && tab ? room.seats.findIndex((s) => s.pid === pid && s.tab === tab && !s.gone) : -1;
+    if (mine >= 0) {
+      const s = room.seats[mine];
+      s.token = newToken();
+      s.seen = Date.now();
+      return json(res, 200, { code: room.code, seat: mine, token: s.token, rejoin: true });
+    }
     if (room.started) return json(res, 409, { error: 'That game has already started.' });
     if (room.seats.filter((s) => !s.gone).length >= MAX_SEATS) return json(res, 409, { error: 'That room is full.' });
-    return json(res, 200, join(room, nameOf(b)));
+    if (pid && tab) for (const s of room.seats) if (s.pid === pid && s.tab === tab) s.tab = null;   // a gone seat: let go
+    return json(res, 200, join(room, nameOf(b, pid), pid, tab));
+  }
+  if (req.method === 'POST' && action === 'result') {
+    // The host's report of the match's end; trusted as it is, like every client for now.
+    const b = await readBody(req);
+    if (!b) return json(res, 400, {});
+    if (seatOf(b.token) !== 0) return json(res, 403, {});
+    if (!room.started || !room.matchIds) return json(res, 409, {});
+    if (!room.reported) {
+      room.reported = true;
+      const winner = Number.isInteger(b.winner) ? b.winner : null;
+      // One match per player, even with two tabs (two seats) in it.
+      const won = new Map();
+      for (const [seat, id] of room.matchIds) won.set(id, won.get(id) || seat === winner);
+      for (const [id, w] of won) { const r = touch(id); r.played++; if (w) r.won++; }
+    }
+    return json(res, 200, {});
   }
   if (req.method === 'POST' && action === 'leave') {
     const b = await readBody(req);
@@ -146,7 +257,11 @@ async function api(req, res, url) {
     const seat = seatOf(b.token);
     if (seat < 0) return json(res, 403, {});
     if (b.msg.t === 'join' || b.msg.t === 'gone') return json(res, 400, {});
-    if (b.msg.t === 'start') { if (seat !== 0) return json(res, 403, {}); room.started = true; }
+    if (b.msg.t === 'start') {
+      if (seat !== 0) return json(res, 403, {});
+      room.started = true;
+      room.matchIds = room.seats.map((s, i) => [i, s]).filter(([, s]) => !s.gone && s.pid).map(([i, s]) => [i, s.pid]);
+    }
     room.seats[seat].seen = Date.now();
     append(room, seat, b.msg);
     return json(res, 200, { n: room.log.length });
@@ -173,9 +288,10 @@ async function api(req, res, url) {
   return json(res, 404, {});
 }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/rooms')) return api(req, res, url);
+  if (url.pathname === '/api/me') return profileApi(req, res);
   if (url.pathname.startsWith('/api/packs')) return packs(req, res, url);
   const fromPacks = url.pathname.startsWith('/packs/');
   const base = fromPacks ? PACKS : root;
@@ -190,7 +306,9 @@ http.createServer(async (req, res) => {
     res.writeHead(404);
     res.end();
   }
-}).listen(port, () => {
+});
+server.listen(port, () => {
+  const { port } = server.address();
   console.log(`Craterfall dev server on http://localhost:${port}/`);
   // For a phone on the same Wi-Fi (Windows Firewall must let the port in).
   for (const [name, addrs] of Object.entries(networkInterfaces())) {
