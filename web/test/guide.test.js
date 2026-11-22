@@ -28,7 +28,7 @@ test('modRows and perkRows tolerate missing fields', () => {
   assert.equal(mods.length, MODS.length + 2);
   assert.match(mods.find((m) => m.name === 'Survey Satellite').meta, /recon/);
   assert.equal(mods.find((m) => m.name === 'Bare').meta, '');
-  assert.equal(mods.find((m) => m.name === 'Odd').meta, '$5');
+  assert.equal(mods.find((m) => m.name === 'Odd').meta, 'armory $5');
   const perks = perkRows([...PERKS, { name: 'No text' }, { desc: 'No name' }, { name: 'Late', desc: 'Later.', fromRound: 3, needsMod: true }]);
   assert.equal(perks.length, perkRows(PERKS).length + 1);
   assert.equal(perks.at(-1).meta, 'from round 3 · needs a mod');

@@ -143,13 +143,17 @@ test('the satellite looks at the enemy nearest the turret line, else down it', (
 });
 
 test('the lab decides who has a satellite; the armory sells it a level at a time', () => {
-  assert.deepEqual(normalizeLab(null), { satellite: 'shop', level: 1, labels: 'some' });
+  assert.deepEqual(normalizeLab(null), { satellite: 'perk', level: 1, labels: 'some' });
   assert.deepEqual(normalizeLab({ satellite: 'all', level: 9, labels: 'odd' }), { satellite: 'all', level: 3, labels: 'some' });
   assert.equal(satelliteLevel({ satellite: 'all', level: 2 }, { satellite: 0 }), 2);
   assert.equal(satelliteLevel({ satellite: 'off' }, { satellite: 3 }), 0);
   assert.equal(satellitePrice({ satellite: 'all' }, {}), Infinity);
+  assert.equal(satellitePrice({}, {}), Infinity, 'by default it comes from the perk draft, not the armory');
+  assert.equal(satelliteLevel({ satellite: 'shop' }, { satellite: 2 }), 2, 'an armory match keeps what it bought');
+  assert.equal(satelliteLevel({}, { satellite: 2 }), 0);
 
-  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 4, resolution: 64, twists: false });
+  // A match saved with the old value 'shop' is an armory match.
+  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 4, resolution: 64, twists: false, lab: { satellite: 'shop' } });
   g.start();
   const p = g.players[0];
   assert.equal(g.satelliteLevel(p), 0);
@@ -162,7 +166,7 @@ test('the lab decides who has a satellite; the armory sells it a level at a time
   assert.equal(g.priceOf(p, 'satellite'), Infinity);
   assert.equal(g.buy(0, 'satellite'), false);
   // It travels in the snapshot, so online screens agree.
-  const h = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 4, resolution: 64, twists: false });
+  const h = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 4, resolution: 64, twists: false, lab: { satellite: 'shop' } });
   h.start();
   h.restore(g.snapshot());
   assert.equal(h.satelliteLevel(h.players[0]), SURVEY.maxLevel);

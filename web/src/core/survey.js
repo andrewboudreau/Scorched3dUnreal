@@ -4,8 +4,8 @@
 // is a map of "what aim lands where", solved through the same simulator the
 // shells fly on, never a new physics model.
 //
-// Levels (bought one at a time in the armory, or handed to everyone by the
-// host's Lab options):
+// Levels (gained in the perk draft by default, or bought one at a time in the
+// armory, or handed to everyone, as the host's Lab options say):
 //   1  the solutions ignore wind and any moon's pull
 //   2  they include this turn's wind (times the owner's wind share) and the moons
 //   3  as 2, with more of the sites labelled
@@ -32,12 +32,13 @@ export const SURVEY = {
   reachMiss: 4,              // m: worse than this and the site is out of reach
 };
 
-// The host's Lab options, filled in: who has a satellite ('shop': bought in
-// the armory; 'all': everyone, at `level`; 'off': nobody), and how many sites
+// The host's Lab options, filled in: who has a satellite ('perk', the
+// default: gained and levelled in the perk draft; 'shop': bought in the
+// armory; 'all': everyone, at `level`; 'off': nobody), and how many sites
 // carry labels.
 export function normalizeLab(lab) {
   const l = lab || {};
-  const satellite = ['shop', 'all', 'off'].includes(l.satellite) ? l.satellite : 'shop';
+  const satellite = ['perk', 'shop', 'all', 'off'].includes(l.satellite) ? l.satellite : 'perk';
   const level = Math.max(1, Math.min(SURVEY.maxLevel, Math.round(Number(l.level) || 1)));
   const labels = SURVEY.labels[l.labels] != null ? l.labels : 'some';
   return { satellite, level, labels };
@@ -52,7 +53,7 @@ export function satelliteLevel(lab, p) {
   const l = normalizeLab(lab);
   if (l.satellite === 'off') return 0;
   if (l.satellite === 'all') return l.level;
-  return Math.min(SURVEY.maxLevel, bought(p));
+  return l.satellite === 'shop' ? Math.min(SURVEY.maxLevel, bought(p)) : 0;
 }
 
 // What the next level costs `p` before any discount, or Infinity when it is

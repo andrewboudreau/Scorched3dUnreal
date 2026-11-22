@@ -13,10 +13,37 @@ export const DIFFICULTY = {
   // yaw (degrees) and power (fraction): spread of the first shot at a target
   // learn: share of the error left after each shot (lower learns faster)
   // jitterYaw / jitterPower: unsteadiness that never goes away
-  easy:   { yaw: 6.0, power: 0.085, learn: 0.62, jitterYaw: 0.9,  jitterPower: 0.015 },
-  normal: { yaw: 3.2, power: 0.055, learn: 0.45, jitterYaw: 0.3,  jitterPower: 0.005 },
-  hard:   { yaw: 1.4, power: 0.022, learn: 0.30, jitterYaw: 0.08, jitterPower: 0.0015 },
+  // orbit: how badly it reads an enemy Gravity Orbiter, by orbiter level 1-3
+  //   (see misjudgeField): `clock` seconds out on where the wells will be,
+  //   `pull` share out on how hard they pull, and `yaw` degrees / `power`
+  //   share of extra scatter on the shot. Easy CPUs ignore orbiters altogether
+  //   (game.orbitField).
+  easy:   { yaw: 6.0, power: 0.085, learn: 0.62, jitterYaw: 0.9,  jitterPower: 0.015, orbit: null },
+  normal: { yaw: 3.2, power: 0.055, learn: 0.45, jitterYaw: 0.3,  jitterPower: 0.005,
+    orbit: { clock: [0.35, 0.5, 0.7], pull: [0.2, 0.3, 0.4], yaw: [0.25, 0.35, 0.42], power: [0.005, 0.007, 0.008] } },
+  hard:   { yaw: 1.4, power: 0.022, learn: 0.30, jitterYaw: 0.08, jitterPower: 0.0015,
+    orbit: { clock: [0.25, 0.35, 0.5], pull: [0.15, 0.2, 0.3], yaw: [0.12, 0.18, 0.28], power: [0.0022, 0.0033, 0.005] } },
 };
+
+// A CPU never reads an enemy orbiter exactly. The wells it flies its trial
+// shots through (`field` at clock `t0`, as for simulateShot) are where it
+// thinks they will be and as strong as it thinks, and the shot it picks
+// scatters more (`scatter`, for planShot), all of it growing with `level`
+// (the strongest enemy orbiter up). It is drawn fresh for every shot: the
+// wells keep moving between shots, so unlike its ordinary aiming error this
+// one is never learned away.
+export function misjudgeField({ field, t0 = 0, level = 0, difficulty = 'normal', rng }) {
+  const o = (DIFFICULTY[difficulty] || DIFFICULTY.normal).orbit;
+  if (!field || !o || !(level > 0)) return { field, t0 };
+  const k = Math.min(3, level) - 1;
+  const late = rng.gauss() * o.clock[k];
+  const pull = Math.max(0.2, 1 + rng.gauss() * o.pull[k]);
+  return {
+    field: (t) => field(t).map((w) => ({ ...w, mu: w.mu * pull })),
+    t0: t0 + late,
+    scatter: { yaw: rng.gauss() * o.yaw[k], power: rng.gauss() * o.power[k] },
+  };
+}
 
 const RAD = 180 / Math.PI;
 const wrap180 = (a) => ((a + 540) % 360) - 180;
@@ -83,7 +110,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
 // target id -> the aiming error it still carries against that target. The
 // first shot gets a full-sized error; every later shot keeps only part of it.
 // A target or shooter that has moved, or a change in the wind, puts some back.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, field = null, t0 = 0 }) {
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, field = null, t0 = 0, scatter = null }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
   const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, field, t0 });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
@@ -105,8 +132,8 @@ export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'no
   m.shooter = [shooter.x, shooter.y, shooter.z];
   m.wind = [wind[0], wind[1]];
 
-  const yaw = sol.yaw + m.yaw + rng.gauss() * cfg.jitterYaw;
-  const power = sol.power * (1 + m.power + rng.gauss() * cfg.jitterPower);
+  const yaw = sol.yaw + m.yaw + rng.gauss() * cfg.jitterYaw + (scatter?.yaw || 0);
+  const power = sol.power * (1 + m.power + rng.gauss() * cfg.jitterPower + (scatter?.power || 0));
   const out = {
     yaw: ((yaw % 360) + 360) % 360,
     elev: sol.elev,

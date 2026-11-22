@@ -12,7 +12,8 @@
 //     state,       'ready'  fitted, waiting to be deployed
 //                  'up'     deployed and working
 //                  'down'   shot down (or its tank was); a new one is
-//                           fitted next round
+//                           fitted at the owner's next turn (refitMods),
+//                           or next round if its tank was destroyed
 //                  'spent'  worn out (its turns ran out); likewise
 //     hp, maxHp,   what it can take before it breaks up
 //     turns,       lifetime left once up: the owner's turns (volleys), across rounds
@@ -25,7 +26,9 @@
 // volley it is the locked-in plan, `{ deploy: id }`). In return it persists:
 // an up mod carries into the next round (moved over its owner's new spot)
 // and stays until it is shot down, its tank is destroyed, or its turns run
-// out. Anything else the tank owns is fitted fresh each round, 'ready'.
+// out. Anything else the tank owns is fitted fresh each round, 'ready'. A
+// mod lost mid-round is ready again on its owner's next turn: putting it back
+// up costs that turn, and that is all losing one costs.
 //
 // Shells and blasts reach mods through `modTargets` (spheres at the game clock)
 // and the game's blast code; Flak bursts on its nearest pass by one and hurts
@@ -67,7 +70,7 @@ export const MODS = [
     hp: [30, 40, 50],
     turns: [6, 7, 8],
     levels: ['one small well', 'stronger, faster', 'two wells: a three-body slingshot'],
-    desc: 'A small gravity well circles your tank and bends enemy shells that pass it. Your own shells fly through untouched. Deploying it takes your turn; it stays up into later rounds until it is shot (Flak is best) or wears out.',
+    desc: 'A small gravity well circles your tank and bends enemy shells that pass it. Your own shells fly through untouched. Deploying it takes your turn; it stays up into later rounds until it is shot (Flak is best) or wears out, and then a new one is ready on your next turn.',
   },
   {
     id: 'satellite', name: 'Survey Satellite', tag: 'SAT', family: 'recon', maxLevel: SURVEY.maxLevel,
@@ -75,7 +78,7 @@ export const MODS = [
     hp: [20, 25, 30],
     turns: [5, 6, 7],          // its battery
     levels: ['no wind', 'with wind', 'more labels'],
-    desc: 'Deploy it into the sky over your area: it projects a grid of cells over the enemy, some labelled with the turret and power that land there. Level 2 counts the wind, moons and enemy orbiters; level 3 labels more. Deploying it takes your turn; it stays up into later rounds until it is shot down (Flak is best) or its battery runs out.',
+    desc: 'Deploy it into the sky over your area: it projects a grid of cells over the enemy, some labelled with the turret and power that land there. Level 2 counts the wind, moons and enemy orbiters; level 3 labels more. Deploying it takes your turn; it stays up into later rounds until it is shot down (Flak is best) or its battery runs out, and then a new one is ready on your next turn.',
   },
 ];
 
@@ -83,20 +86,26 @@ export const MOD_BY_ID = Object.fromEntries(MODS.map((m) => [m.id, m]));
 
 // ---------- who has what ----------
 
-// The host's Lab setting for one mod: { mode: 'shop' | 'all' | 'off', level }.
+// The host's Lab setting for one mod: { mode, level }, where mode is
+//   'perk'  (the default) gained and levelled through the perk draft only
+//   'shop'  sold in the armory a level at a time, and the draft too
+//   'all'   everyone has it at `level` from the start; the draft can level it up
+//   'off'   nobody has it
 // The satellite keeps its original fields (`satellite`, `level`); any other
 // mod reads `lab[id]` and `lab[id + 'Level']`.
+export const MOD_MODES = ['perk', 'shop', 'all', 'off'];
+
 export function modLab(lab, id) {
   const l = lab || {};
   const raw = l[id];
-  const mode = ['shop', 'all', 'off'].includes(raw) ? raw : 'shop';
+  const mode = MOD_MODES.includes(raw) ? raw : 'perk';
   const max = MOD_BY_ID[id]?.maxLevel || 1;
   const level = Math.max(1, Math.min(max, Math.round(Number(id === 'satellite' ? l.level : l[`${id}Level`]) || 1)));
   return { mode, level };
 }
 
 // The Lab fields for every mod but the satellite (core/survey.js normalizeLab
-// has its own), filled in: { orbiter: 'shop', orbiterLevel: 1, ... }.
+// has its own), filled in: { orbiter: 'perk', orbiterLevel: 1, ... }.
 export function normalizeModLab(lab) {
   const out = {};
   for (const m of MODS) {
@@ -126,7 +135,7 @@ export function modLevel(lab, p, id) {
   if (!m) return 0;
   const { mode, level } = modLab(lab, id);
   if (mode === 'off') return 0;
-  const base = mode === 'all' ? level : boughtLevels(p, id);
+  const base = mode === 'all' ? level : mode === 'shop' ? boughtLevels(p, id) : 0;
   return Math.min(m.maxLevel, base + perkLevels(p, id));
 }
 
@@ -174,6 +183,25 @@ export function fitMods(lab, p) {
       turns: level ? def.turns[level - 1] + perkSum(p, 'modTurns') : 0,
     };
   }
+}
+
+// The start of `p`'s turn (or of a volley's planning): a mod that was shot
+// down or wore out since its last turn is fitted fresh, ready to go up again.
+// Putting it up costs that turn, which is the whole price of losing one.
+// Returns the ids refitted.
+export function refitMods(lab, p) {
+  const out = [];
+  if (!p?.mods || p.alive === false) return out;
+  for (const def of MODS) {
+    const m = p.mods[def.id];
+    if (!m || (m.state !== 'down' && m.state !== 'spent')) continue;
+    const level = modLevel(lab, p, def.id);
+    if (!level) continue;
+    const hp = healthAt(p, def, level);
+    p.mods[def.id] = { bought: m.bought || 0, level, state: 'ready', hp, maxHp: hp, turns: def.turns[level - 1] + perkSum(p, 'modTurns') };
+    out.push(def.id);
+  }
+  return out;
 }
 
 // Where a mod that hangs still goes over `p` (the satellite): `ground(x, z)`

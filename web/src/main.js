@@ -1630,7 +1630,7 @@ function setPerks(el, p, long) {
   const key = p.id + p.perks.join();
   if (el.dataset.key === key) return;
   el.dataset.key = key;
-  el.innerHTML = p.perks.map((id) => perkChip(id, long)).join('');
+  el.innerHTML = [...new Set(p.perks)].map((id) => perkChip(id, long)).join('');   // a stacked perk shows once
 }
 
 // The HUD's fixed elements, looked up once.
@@ -2041,7 +2041,7 @@ function openDraftFor(pid) {
   $('draft-swatch').style.background = p.color;
   $('draft-player').textContent = whose(p, 'perk draft');
   $('draft-step').textContent = hotseatStep(p, 'pick one, it lasts the whole match');
-  $('draft-owned').innerHTML = p.perks.length ? `Already yours: ${p.perks.map((id) => perkChip(id, true)).join(' ')}` : 'Your first perk. They stack, round after round.';
+  $('draft-owned').innerHTML = p.perks.length ? `Already yours: ${[...new Set(p.perks)].map((id) => perkChip(id, true)).join(' ')}` : 'Your first perk. They stack, round after round.';
   $('draft-items').innerHTML = game.draft[pid].map((id) => {
     const k = PERK_BY_ID[id];
     return `<div class="shop-item draft-item">

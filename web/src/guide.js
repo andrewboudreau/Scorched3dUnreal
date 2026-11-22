@@ -76,7 +76,7 @@ export function modRows(mods) {
     if (hp) bits.push(hp);
     if (turns) bits.push(turns);
     const prices = spread(m.prices, '$');
-    if (prices) bits.push(prices);
+    if (prices) bits.push(`armory ${prices}`);   // only when the Lab sells mods; by default they come from perks
     rows.push({ name: m.name, tag: m.tag ? String(m.tag) : '', meta: bits.join(' · '), text: firstSentence(m.desc, 150), levels: isList(m.levels).filter((l) => typeof l === 'string') });
   }
   return rows;
@@ -90,6 +90,9 @@ export function perkRows(perks) {
     const meta = [];
     if (Number.isFinite(p.fromRound) && p.fromRound > 1) meta.push(`from round ${p.fromRound}`);
     if (p.needsMod) meta.push('needs a mod');
+    if (p.unlock) meta.push('unlocks a mod');
+    if (p.levelUp) meta.push('levels a mod up');
+    if (Number.isFinite(p.stack) && p.stack > 1) meta.push(`up to ${p.stack}×`);
     rows.push({ name: p.name, meta: meta.join(' · '), text: firstSentence(p.desc, 160) });
   }
   return rows;
@@ -120,7 +123,7 @@ export function labRows(mods) {
     const max = Number.isFinite(m.maxLevel) ? m.maxLevel : 1;
     rows.push({
       name: m.name,
-      text: `Choose how everyone gets it: the usual way (the perk draft or armory), handed to all at level ${max > 1 ? `1 to ${max}` : '1'}, or off.`,
+      text: `**Perks** (the default): won and levelled in the draft between rounds. **In the armory**: sold a level at a time (the draft still offers it). **Everyone** · ${max > 1 ? `L1 to L${max}` : 'L1'}: every tank starts with one at that level. **Off**: nobody has it.`,
     });
   }
   if (isList(mods).some((m) => m && m.id === 'satellite')) {
@@ -205,8 +208,8 @@ export function guideTabs({ weapons, items, mods, perks, pay } = {}) {
   const fams = familyRows(mods);
   tabs.push({ id: 'mods', title: 'Mods and perks', blocks: [
     { h: 'Mods' },
-    { p: 'Equipment you put up on the field, not a weapon. By default you gain mods through the **perk draft** between rounds; the host can turn them on for everyone in the Lab.' },
-    { p: '**Deploying a mod uses your turn** (no shot). It then stays up across rounds until it is shot down or wears out. Its health and turns left show on your player card.' },
+    { p: 'Equipment you put up on the field, not a weapon. By default you gain mods through the **perk draft** between rounds: an unlock card gives you one at level 1, then level-up cards raise it. The host can instead sell them in the armory, give everyone one, or turn them off in the Lab.' },
+    { p: '**Deploying a mod uses your turn** (no shot). It then stays up across rounds until it is shot down or wears out; a new one is ready on your next turn, and putting it up takes that turn. Its health and turns left show on your player card.' },
     modList.length ? { rows: modList } : { p: 'No mods in this build.' },
     { h: 'Rock, paper, scissors' },
     { p: 'Every mod belongs to a family, and each family beats one and loses to another.' },

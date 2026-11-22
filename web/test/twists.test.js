@@ -35,7 +35,7 @@ const plain = (players = two, extra = {}) => {
 // ---- perks ----
 
 test('perk data is well formed and a draft offers three the tank does not hold', () => {
-  assert.ok(PERKS.length >= 10 && PERKS.length <= 18);
+  assert.ok(PERKS.length >= 10 && PERKS.length <= 22);
   assert.equal(new Set(PERKS.map((p) => p.id)).size, PERKS.length);
   assert.equal(new Set(PERKS.map((p) => p.tag)).size, PERKS.length);
   const rng = makeRng(4);
@@ -46,7 +46,7 @@ test('perk data is well formed and a draft offers three the tank does not hold',
     assert.equal(new Set(offer).size, 3);
     assert.ok(offer.every((id) => PERK_BY_ID[id] && !me.perks.includes(id)));
   }
-  const nearlyAll = { perks: PERKS.slice(2).map((p) => p.id) };
+  const nearlyAll = { perks: PERKS.slice(2).flatMap((p) => Array(p.stack || 1).fill(p.id)) };
   assert.equal(draftOffer(nearlyAll, rng).length, 2);
   assert.equal(perkSum({ perks: ['hull', 'longtanks'] }, 'maxHp'), 20);
   assert.ok(hasPerk({ perks: ['shocks'] }, 'noFall'));

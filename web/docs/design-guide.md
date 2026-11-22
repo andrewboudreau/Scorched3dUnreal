@@ -57,11 +57,17 @@ sign in.
 | Kind | What it is | Spent how | Examples |
 | --- | --- | --- | --- |
 | **Weapons** | Ammo, fired one shot at a time | Each shot uses a round | Shell, Flak, Breacher, Guided Missile, Roller |
-| **Mods** | Equipment deployed onto the field or mounted on the tank. It has health and/or charges or a lifetime, can be shot down, and wears out | Deployed; then lost, destroyed or expired | Survey Satellite, Gravity Orbiter, Missile Defense, drones |
-| **Perks** | Roguelike advancements drafted between rounds. They change your numbers, unlock mods or level them up | Kept for the match | Heavy Rounds, Double Strike, Sat Recon II |
+| **Mods** | Equipment deployed onto the field or mounted on the tank. It has health and/or charges or a lifetime, can be shot down, and wears out. Gained and levelled through perks (the host's Lab can sell them in the armory, hand them to everyone, or turn them off) | Deployed; then lost, destroyed or expired, and ready again on the owner's next turn | Survey Satellite, Gravity Orbiter, Missile Defense, drones |
+| **Perks** | Roguelike advancements drafted between rounds. They change your numbers, unlock mods or level them up | Kept for the match | Heavy Rounds, Double Strike, Orbital Mechanic, Tighter Orbit |
 | **Abilities** (idea) | Active powers on a cooldown, usually granted by a perk or a mod | Cooldown in turns | Signal jam pulse, emergency hop |
 
 Mods are tracked in #10.
+
+**Mods come from perks.** The draft offers an unlock card for a mod you do
+not have, then level-up cards for one you do, up to its top level. A draft
+holds at most one mod card, and a tank takes at most four mod levels from
+perks in a match. By default the armory does not sell mods; the host's Lab
+can put them there, give everyone one at a set level, or turn them off.
 
 **Deploying a mod uses your turn**: you don't fire that turn. In return the
 mod persists. It carries over into the next round and stays until it is
@@ -69,6 +75,14 @@ destroyed or its battery runs out, counted in your turns. A deployed Survey
 Satellite is a range finder you keep, so the turn is its price. That makes
 the counters matter: shooting down a satellite costs its owner a turn as well
 as the advantage it gave.
+
+**A lost mod costs the redeploy turn.** Shot down or worn out, a new one is
+ready on its owner's next turn (next volley), and putting it up takes that
+turn. Losing it does not cost the rest of the round: a single Flak hit then
+trades a turn for a turn (plus the shooter's pay, and a turn in which every
+enemy shoots past no orbiter), rather than deciding the round, and the
+mod you drafted stays part of how you play. A mod lost with its tank comes
+back next round.
 
 ## Attributes: buffs and debuffs
 
@@ -127,8 +141,8 @@ If it beats everything, it's a perk number, not a mod.
 
 | Mod | Family | Status | Notes |
 | --- | --- | --- | --- |
-| Survey Satellite (L1–3) | Recon | Built as a mod (#10): deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense) |
-| Gravity Orbiter (L1–3) | Defense | Built (#10): 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt |
+| Survey Satellite (L1–3) | Recon | Built as a mod (#10): from perks (Sat Recon, then Sharper Optics), deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense). CPUs don't use it |
+| Gravity Orbiter (L1–3) | Defense | Built (#10): from perks (Orbital Mechanic, then Tighter Orbit), 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt. CPUs misread it, more at higher levels |
 | Missile Defense | Defense | Idea | Intercepts the first enemy shell entering a radius; a few charges per round |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
 | Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |

@@ -21,9 +21,16 @@
 //   doubleStrike  the owner may queue two shots in one turn (see game.js STRIKE)
 //   fromRound     only offered in the draft before this round or a later one
 //   mods          { mod id: levels } added to the owner's mods (core/mods.js)
+//   unlock        (with mods) only offered to a tank that does not own that mod yet
+//   levelUp       (with mods) only offered to a tank that owns it, below its top level
+//   stack         how many times one tank may take it in a match (default 1)
 //   modTurns      +turns every mod lasts once deployed
 //   modHp         +share of every mod's health
 //   needsMod      only offered to a tank that owns a mod
+//
+// Mods come from the draft (unless the host's Lab says otherwise): first an
+// unlock card, then level-up cards. A draft holds at most one mod card (see
+// MOD_DRAFT), and the game leaves out any that could do nothing (game.perkFits).
 
 export const PERKS = [
   { id: 'wideblast', tag: 'WB', name: 'Wide Blast', desc: 'Your blasts reach 15% further.', blastRadius: 0.15 },
@@ -41,11 +48,15 @@ export const PERKS = [
   { id: 'tracer', tag: 'TR', name: 'Tracer Rounds', desc: 'See the first 45 m of your shot while you aim.', tracer: 45 },
   { id: 'double', tag: 'DS', name: 'Double Strike', fromRound: 3, doubleStrike: true,
     desc: 'When you choose, queue two shots in one turn: they fire back to back. Your next turn is move only.' },
-  // Mods (core/mods.js): a level up, or level 1 of one you do not have.
-  { id: 'orbital', tag: 'OM', name: 'Orbital Mechanic', mods: { orbiter: 1 },
-    desc: 'Your Gravity Orbiter goes up a level (you get one at level 1 if you have none). Deploying it takes your turn.' },
-  { id: 'satrecon', tag: 'SR', name: 'Sat Recon', mods: { satellite: 1 },
-    desc: 'Your Survey Satellite goes up a level (you get one at level 1 if you have none). Deploying it takes your turn.' },
+  // Mods (core/mods.js): level 1 of one you do not have, then a level at a time.
+  { id: 'orbital', tag: 'OM', name: 'Orbital Mechanic', mods: { orbiter: 1 }, unlock: true,
+    desc: 'Gain a Gravity Orbiter (level 1): a small gravity well that circles your tank and bends enemy shells. Deploying it takes your turn.' },
+  { id: 'orbitalup', tag: 'O+', name: 'Tighter Orbit', mods: { orbiter: 1 }, levelUp: true, stack: 2,
+    desc: 'Your Gravity Orbiter goes up a level: level 2 pulls harder and turns faster, level 3 is two wells, a three-body slingshot.' },
+  { id: 'satrecon', tag: 'SR', name: 'Sat Recon', mods: { satellite: 1 }, unlock: true,
+    desc: 'Gain a Survey Satellite (level 1): it labels a grid of cells over the enemy with the aim that lands there. Deploying it takes your turn.' },
+  { id: 'satrecon2', tag: 'S+', name: 'Sharper Optics', mods: { satellite: 1 }, levelUp: true, stack: 2,
+    desc: 'Your Survey Satellite goes up a level: level 2 counts the wind, moons and enemy orbiters, level 3 labels more cells.' },
   { id: 'cells', tag: 'LC', name: 'Long-Life Cells', modTurns: 2, modHp: 0.25, needsMod: true,
     desc: 'Your mods last 2 turns longer and take 25% more damage before they break.' },
 ];
@@ -63,22 +74,47 @@ export function hasPerk(player, key) {
   return (player.perks || []).some((id) => PERK_BY_ID[id]?.[key]);
 }
 
-// Three perks the tank does not hold yet (fewer once it owns nearly all).
-// `round` is the round the pick is for: perks with a later `fromRound` sit out.
-// `allow(perk)` can leave out more (the game drops mod perks that could do
-// nothing: a mod the host's Lab turned off, or already at its top level).
-export function draftOffer(player, rng, count = 3, round = Infinity, allow = () => true) {
-  const pool = PERKS.filter((p) => !(player.perks || []).includes(p.id) && (p.fromRound || 0) <= round && allow(p));
+// How mod cards (any perk with `mods`, `modTurns` or `needsMod`) come up in
+// the draft: at most one per offer, there with chance `first` while the tank
+// owns no mod and `then` once it does; and a tank takes at most `cap` perks
+// that add mod levels in one match.
+export const MOD_DRAFT = { first: 0.7, then: 0.45, cap: 4 };
+
+export const isModPerk = (perk) => !!(perk.mods || perk.modTurns || perk.needsMod);
+
+// How many times `player` holds perk `id`.
+export const perkCount = (player, id) => (player.perks || []).filter((k) => k === id).length;
+
+// Three perks the tank can still take (fewer once it holds nearly all): a perk
+// it holds only comes round again if it `stack`s. `round` is the round the
+// pick is for: perks with a later `fromRound` sit out. `allow(perk)` can leave
+// out more (the game drops mod perks that could do nothing: a mod the host's
+// Lab turned off, one already at its top level, an unlock for a mod it owns).
+// `modChance` is the chance one of the cards is a mod card (MOD_DRAFT); it
+// goes in at a random place, so it is not always the first.
+export function draftOffer(player, rng, count = 3, round = Infinity, allow = () => true, modChance = MOD_DRAFT.then) {
+  const fits = PERKS.filter((p) => perkCount(player, p.id) < (p.stack || 1) && (p.fromRound || 0) <= round && allow(p));
+  const mods = fits.filter(isModPerk);
+  const pool = fits.filter((p) => !isModPerk(p));
   const out = [];
   while (out.length < count && pool.length) out.push(pool.splice(rng.int(0, pool.length - 1), 1)[0].id);
+  if (mods.length && (out.length < count || rng.next() < modChance)) {
+    const card = mods[rng.int(0, mods.length - 1)].id;
+    if (out.length >= count) out.splice(rng.int(0, out.length - 1), 1);
+    out.splice(rng.int(0, out.length), 0, card);
+  }
   return out;
 }
 
-// What a CPU takes from an offer: a favourite if one is there, else any.
-const AI_FAVOURITES = ['hull', 'wideblast', 'heavycharge', 'dugin', 'repairs', 'quartermaster'];
+// What a CPU takes from an offer: a favourite if one is there, else any but
+// what it would never use (CPUs do not fly satellites).
+const AI_FAVOURITES = ['hull', 'wideblast', 'heavycharge', 'dugin', 'repairs', 'quartermaster', 'orbital', 'orbitalup'];
+const AI_NEVER = ['satrecon', 'satrecon2'];
 export function aiPickPerk(offer, rng) {
-  const liked = offer.filter((id) => AI_FAVOURITES.includes(id));
-  return rng.pick(liked.length && rng.next() < 0.7 ? liked : offer);
+  const usable = offer.filter((id) => !AI_NEVER.includes(id));
+  const any = usable.length ? usable : offer;
+  const liked = any.filter((id) => AI_FAVOURITES.includes(id));
+  return rng.pick(liked.length && rng.next() < 0.7 ? liked : any);
 }
 
 // Modifier fields

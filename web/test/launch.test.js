@@ -18,7 +18,7 @@ test('Play starts you against two Normal CPUs with the default options', () => {
   assert.equal(m.firing, 'volley');
   assert.equal(m.twists, true);
   assert.equal(m.fog, false);
-  assert.deepEqual(m.lab, { satellite: 'shop', level: 1, labels: 'some' });
+  assert.deepEqual(m.lab, { satellite: 'perk', level: 1, labels: 'some', orbiter: 'perk', orbiterLevel: 1 }, 'mods come from the perk draft');
   assert.equal(defaultMatch('').players[0].name, 'You');
 });
 
@@ -45,6 +45,14 @@ test('damaged or hostile saved state is ignored piece by piece', () => {
   assert.equal(c.open, false);
   assert.deepEqual(c.opts, { 'opt-wind': '0' });
   assert.deepEqual(c.cpus, [{ name: 'B', type: 'easy' }]);
+});
+
+test('an old save\'s armory default for the mods gives way to Perks; a new save keeps the armory', () => {
+  const old = loadCustom(store({ [CUSTOM_KEY]: JSON.stringify({ opts: { 'opt-sat': 'shop', 'opt-orbiter': 'all2', 'opt-rounds': '5' } }) }));
+  assert.deepEqual(old.opts, { 'opt-orbiter': 'all2', 'opt-rounds': '5' });
+  const s = store();
+  saveCustom(s, { open: false, opts: { 'opt-sat': 'shop', 'opt-orbiter': 'perk' }, cpus: [] });
+  assert.deepEqual(loadCustom(s).opts, { 'opt-sat': 'shop', 'opt-orbiter': 'perk' });
 });
 
 test('at most five CPU rows come back (six tanks with you)', () => {

@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Game } from '../src/core/game.js';
+import { Game, DEPLOY_STYLES } from '../src/core/game.js';
 import { simulateShot, launchVelocity } from '../src/core/ballistics.js';
 import { muzzleOrigin } from '../src/core/tank.js';
-import { solveShot } from '../src/core/ai.js';
+import { solveShot, planShot } from '../src/core/ai.js';
 import { makeRng } from '../src/core/rng.js';
 import {
   MODS, MOD_BY_ID, ORBIT, SKY, MOD_PAY, modLab, normalizeModLab, modLevel, modPrice, fitMods,
   deployMod, tickMods, hurtMod, orbitPoints, modWells, modTargets, readyMods,
 } from '../src/core/mods.js';
-import { PERK_BY_ID } from '../src/core/perks.js';
+import { PERK_BY_ID, MOD_DRAFT, isModPerk, perkCount } from '../src/core/perks.js';
 
 // Mods: equipment a tank deploys (core/mods.js). The Gravity Orbiter and the
 // Survey Satellite.
@@ -36,24 +36,32 @@ test('mods: data, Lab options, prices and perks', () => {
     assert.equal(m.turns.length, m.maxLevel);
     assert.ok(['recon', 'defense', 'jamming'].includes(m.family));
   }
-  assert.deepEqual(normalizeModLab(null), { orbiter: 'shop', orbiterLevel: 1 });
+  // By default mods come from the perk draft; an unknown mode is the default,
+  // and the old value 'shop' still means the armory.
+  assert.deepEqual(normalizeModLab(null), { orbiter: 'perk', orbiterLevel: 1 });
+  assert.deepEqual(modLab({ orbiter: 'bogus' }, 'orbiter'), { mode: 'perk', level: 1 });
+  assert.deepEqual(modLab({ orbiter: 'shop' }, 'orbiter'), { mode: 'shop', level: 1 });
   assert.deepEqual(modLab({ orbiter: 'all', orbiterLevel: 9 }, 'orbiter'), { mode: 'all', level: 3 });
   assert.deepEqual(modLab({ satellite: 'all', level: 2 }, 'satellite'), { mode: 'all', level: 2 });
 
   const p = { id: 0, perks: [], mods: {} };
+  const shop = { orbiter: 'shop', satellite: 'shop' };
   assert.equal(modLevel({}, p, 'orbiter'), 0);
-  assert.equal(modPrice({}, p, 'orbiter'), MOD_BY_ID.orbiter.prices[0]);
+  assert.equal(modPrice({}, p, 'orbiter'), Infinity, 'not for sale by default');
+  assert.equal(modPrice(shop, p, 'orbiter'), MOD_BY_ID.orbiter.prices[0]);
   assert.equal(modLevel({ orbiter: 'all', orbiterLevel: 2 }, p, 'orbiter'), 2);
   assert.equal(modPrice({ orbiter: 'all' }, p, 'orbiter'), Infinity, 'not in the armory when the Lab hands it out');
   assert.equal(modLevel({ orbiter: 'off' }, { ...p, perks: ['orbital'] }, 'orbiter'), 0);
-  // A perk grants a level, or levels one up.
+  // Perks unlock one, then level it up.
   assert.deepEqual(PERK_BY_ID.orbital.mods, { orbiter: 1 });
   assert.equal(modLevel({}, { ...p, perks: ['orbital'] }, 'orbiter'), 1);
-  assert.equal(modLevel({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 3);
-  assert.equal(modPrice({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), Infinity, 'at the top level');
+  assert.equal(modLevel({}, { ...p, perks: ['orbital', 'orbitalup', 'orbitalup'] }, 'orbiter'), 3);
+  assert.equal(modLevel({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 1, 'nothing bought counts outside the armory');
+  assert.equal(modLevel(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 3);
+  assert.equal(modPrice(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), Infinity, 'at the top level');
 
-  // Bought in the game's armory, fitted at the next round's start.
-  const g = mk();
+  // Bought in the game's armory (when the Lab puts mods there), fitted at the next round's start.
+  const g = mk({ lab: shop });
   const a = g.players[0];
   a.money = 1000;
   assert.ok(g.buy(0, 'orbiter'));
@@ -78,14 +86,63 @@ test('mods: the Lab gives everyone one, and mod perks that could do nothing stay
     assert.equal(p.mods.orbiter.state, 'ready');
   }
   const p = g.players[0];
-  assert.equal(g.perkFits(p, PERK_BY_ID.orbital), true);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbital), false, 'it has one: no unlock');
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), true);
   assert.equal(g.perkFits(p, PERK_BY_ID.cells), true);
-  p.perks.push('orbital');
+  p.perks.push('orbitalup');
   assert.equal(g.modLevel(p, 'orbiter'), 3);
-  assert.equal(g.perkFits(p, PERK_BY_ID.orbital), false, 'already at the top level');
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), false, 'already at the top level');
   const off = mk({ lab: { orbiter: 'off', satellite: 'off' } });
   assert.equal(off.perkFits(off.players[0], PERK_BY_ID.orbital), false);
   assert.equal(off.perkFits(off.players[0], PERK_BY_ID.cells), false, 'no mod to make last longer');
+});
+
+test('mods: by default they come from the draft, an unlock card first, then level-ups', () => {
+  const g = mk();
+  const p = g.players[0];
+  p.money = 5000;
+  assert.equal(g.priceOf(p, 'orbiter'), Infinity, 'the armory does not sell them');
+  assert.equal(g.buy(0, 'orbiter'), false);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbital), true);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), false, 'nothing to level up yet');
+  assert.equal(g.perkFits(p, PERK_BY_ID.cells), false);
+  p.perks.push('orbital');
+  assert.equal(g.modLevel(p, 'orbiter'), 1);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbital), false);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), true);
+  p.perks.push('orbitalup');
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), true, 'it stacks');
+  p.perks.push('orbitalup');
+  assert.equal(g.modLevel(p, 'orbiter'), 3);
+  assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), false, 'top level: no more offers');
+  // A cap per match on mod levels from perks.
+  const q = g.players[1];
+  q.perks.push('orbital', 'satrecon', 'satrecon2', 'satrecon2');
+  assert.equal(g.modLevel(q, 'satellite'), 3);
+  assert.equal(g.perkFits(q, PERK_BY_ID.orbitalup), false, `capped at ${MOD_DRAFT.cap}`);
+
+  // The drafts: at most one mod card, only cards that fit, and the
+  // unlock shows up for most tanks over a three-round match.
+  let seen = 0, offers = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    const h = new Game({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }], rounds: 3, seed, resolution: 64, maxTurnsPerRound: 1 });
+    h.start();
+    for (let r = 1; r < 3; r++) {
+      h.endRound();
+      h.openShop();
+      for (const [pid, offer] of Object.entries(h.draft)) {
+        offers++;
+        const mods = offer.filter((id) => isModPerk(PERK_BY_ID[id]));
+        assert.ok(mods.length <= 1, `one mod card at most: ${offer}`);
+        assert.ok(offer.every((id) => h.perkFits(h.players[pid], PERK_BY_ID[id])));
+        if (mods.length) seen++;
+        h.pickPerk(Number(pid), mods[0] || offer[0]);
+      }
+      h.closeShop();
+    }
+    for (const p of h.players) assert.ok(perkCount(p, 'orbital') <= 1 && perkCount(p, 'orbitalup') <= 2);
+  }
+  assert.ok(seen / offers > 0.4 && seen / offers < 0.8, `mod cards in ${seen} of ${offers} offers`);
 });
 
 test('orbiter: its wells are a pure function of the game clock', () => {
@@ -176,6 +233,19 @@ test('mods: a direct hit brings the orbiter down and pays the shooter', () => {
   assert.deepEqual(g.orbiterWells(), []);
   // A blast high in the air leaves the ground alone.
   assert.deepEqual(g.terrain.heights, ground);
+  // A new one is ready on its owner's next turn; putting it up costs that turn.
+  assert.equal(g.current, a);
+  g.nextTurn();
+  assert.equal(g.current, b);
+  assert.equal(b.mods.orbiter.state, 'ready');
+  assert.equal(b.mods.orbiter.hp, b.mods.orbiter.maxHp);
+  // Likewise in a volley: ready for the next one.
+  const v = mk({ firing: 'volley', lab: { orbiter: 'all', orbiterLevel: 1 } });
+  v.deployFor(v.players[1], 'orbiter');
+  v.hurtModOf(1, 'orbiter', 999, 0);
+  assert.equal(v.players[1].mods.orbiter.state, 'down');
+  v.nextTurn();
+  assert.equal(v.players[1].mods.orbiter.state, 'ready');
   // Its owner's fire never touches it.
   const h = mk({ lab: { orbiter: 'all', orbiterLevel: 1 } });
   h.deployFor(h.players[1], 'orbiter');
@@ -211,7 +281,15 @@ test('mods: deploying takes the turn, and a mod wears out after its turns', () =
   assert.equal(p.mods.orbiter.state, 'spent');
   assert.equal(mine, life, `lasted ${mine} of its own turns`);
   assert.ok(drain(g).some((e) => e.type === 'mod' && e.what === 'expire' && e.player === p.id));
-  assert.equal(g.canDeploy(p), false, 'nothing left to deploy this round');
+  assert.equal(g.canDeploy(p), false, 'nothing to deploy on the other tank\'s turn');
+  // On its owner's next turn a fresh one is ready: the cost of losing it is the turn spent putting it back.
+  drain(g);
+  while (g.current !== p) g.nextTurn();
+  assert.equal(p.mods.orbiter.state, 'ready');
+  assert.equal(p.mods.orbiter.turns, life);
+  assert.equal(p.mods.orbiter.hp, p.mods.orbiter.maxHp);
+  assert.ok(g.canDeploy(p));
+  assert.ok(drain(g).some((e) => e.type === 'mod' && e.what === 'refit' && e.player === p.id));
   // tickMods on its own.
   const q = { mods: { satellite: { state: 'up', turns: 1 } } };
   assert.deepEqual(tickMods(q), ['satellite']);
@@ -240,7 +318,7 @@ test('mods: a deployed mod survives into the next round, over its owner\'s new s
   assert.equal(g.surveyLevel(a), 2);
   // The one that was never deployed is fitted fresh, ready.
   assert.equal(b.mods.orbiter.state, 'ready');
-  // A mod lost with its tank comes back fresh next round.
+  // A mod lost with its tank comes back fresh next round (a wreck has no turns).
   g.deployFor(b, 'orbiter');
   g.damage(b, 999, a.id);
   assert.equal(b.mods.orbiter.state, 'down');
@@ -327,12 +405,92 @@ test('mods: CPUs deploy their orbiter and an all-CPU match plays through', () =>
   }
 });
 
-test('mods: a CPU deploys when it has no good shot, and fires when it has one', () => {
+test('mods: each CPU times its deploy its own way', () => {
   const g = mk({ players: [{ name: 'A', ai: 'normal' }, { name: 'B' }], lab: { orbiter: 'all', orbiterLevel: 1 } });
   const [a, b] = g.players;
-  assert.equal(g.aiWantsDeploy(a, b), 'orbiter', 'no range on it yet');
-  a.aim[b.id] = { yaw: 0, power: 0, shots: 2 };
-  assert.equal(g.aiWantsDeploy(a, b), null, 'ranged in: shoot');
+  const as = (style) => { g.aiDeployStyle = () => style; };
+  assert.equal(g.aiWantsDeploy(a, null), 'orbiter', 'nothing to shoot at: put it up');
+  as('early');
+  assert.equal(g.aiWantsDeploy(a, b), 'orbiter');
+  as('ranging');
+  assert.equal(g.aiWantsDeploy(a, b), null, 'a ranging shot first');
+  a.aim[b.id] = { yaw: 2.5, power: 0, shots: 1 };
+  assert.equal(g.aiWantsDeploy(a, b), 'orbiter', 'still well off after ranging: no good shot');
+  a.aim[b.id] = { yaw: 0.2, power: 0.004, shots: 2 };
+  assert.equal(g.aiWantsDeploy(a, b), null, 'dialled in: shoot');
+  as('reactive');
+  assert.equal(g.aiWantsDeploy(a, b), null);
+  a.hp -= 10;
+  assert.equal(g.aiWantsDeploy(a, b), 'orbiter', 'hurt: now it does');
   deployMod(a, 'orbiter');
   assert.equal(g.aiWantsDeploy(a, null), null, 'nothing left to deploy');
+  // The style is fixed for a CPU and a match, and differs between them.
+  delete g.aiDeployStyle;
+  assert.equal(g.aiDeployStyle(a), g.aiDeployStyle(a));
+  const styles = new Set();
+  for (const seed of [1, 2, 3, 4, 5, 6]) for (const id of [0, 1, 2]) styles.add(new Game({ players: [{}, {}, {}], seed }).aiDeployStyle({ id }));
+  assert.deepEqual([...styles].sort(), [...DEPLOY_STYLES].sort());
+});
+
+test('mods: not every CPU deploys on its first turn', () => {
+  const first = { early: 0, later: 0, never: 0 };
+  for (const seed of [3, 4, 5, 6, 7, 8]) {
+    const g = new Game({ players: [{ name: 'A', ai: 'normal' }, { name: 'B', ai: 'hard' }, { name: 'C', ai: 'normal' }],
+      rounds: 1, seed, resolution: 64, twists: false, maxTurnsPerRound: 8, lab: { orbiter: 'all', orbiterLevel: 1 } });
+    g.start();
+    const turnsOf = [0, 0, 0];
+    const when = [null, null, null];
+    let frames = 0;
+    while (g.phase !== 'matchOver' && frames++ < 60000) {
+      g.update(1 / 30);
+      for (const e of g.drainEvents()) {
+        if (e.type === 'turn') turnsOf[e.player]++;
+        if (e.type === 'mod' && e.what === 'deploy' && when[e.player] == null) when[e.player] = turnsOf[e.player];
+      }
+    }
+    for (const w of when) first[w == null ? 'never' : w === 1 ? 'early' : 'later']++;
+  }
+  assert.ok(first.early > 0, `some deploy at once ${JSON.stringify(first)}`);
+  assert.ok(first.later + first.never > 0, `some wait ${JSON.stringify(first)}`);
+  assert.ok(first.later > 0, `some deploy later ${JSON.stringify(first)}`);
+});
+
+// A CPU's shots at B from A: `level` 0 for no orbiter. Hits land within 6 m of the tank.
+function cpuHits(ai, level, seeds = [5, 8, 13, 21], shots = 12) {
+  let hits = 0;
+  for (const seed of seeds) {
+    const g = mk({ seed, players: [{ name: 'A', ai }, { name: 'B' }], lab: level ? { orbiter: 'all', orbiterLevel: level } : { orbiter: 'off' } });
+    const [a, b] = g.players;
+    if (level) g.deployFor(b, 'orbiter');
+    a.aim = {};
+    for (let k = 0; k < shots; k++) {
+      g.clock = k * 0.83 + seed * 0.37;   // the wells sit somewhere else every shot
+      const sol = planShot({ shooter: a, target: b, wind: g.wind, terrain: g.terrain, rng: g.rng, difficulty: ai, memory: a.aim,
+        gravity: g.gravity, windK: g.windShare(a), ...g.orbitField(a) });
+      const shot = simulateShot({ pos: muzzleOrigin(a, sol.yaw, sol.elev), vel: launchVelocity(sol.yaw, sol.elev, sol.power),
+        wind: g.wind, terrain: g.terrain, gravity: g.gravity, windK: g.windShare(a), level: b.y, field: (t) => modWells(g.players, t, a.id), t0: g.clock });
+      if (shot.kind === 'orbiter') continue;
+      const [x, , z] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
+      if (Math.hypot(x - b.x, z - b.z) <= 6) hits++;
+    }
+  }
+  return hits;
+}
+
+// Against a level 3 orbiter a Normal CPU lands about half as many hits as
+// against a bare tank, a Hard one somewhat more. One set of 48 shots (4 seeds
+// x 12) swings a lot either way, so the bands are checked on six sets pooled.
+test('orbiter: CPUs misread it, more the higher its level; Hard less than Normal', () => {
+  const sets = [0, 1, 2, 3, 4].map((k) => [1, 2, 3, 4].map((s) => s + k * 4)).concat([[5, 8, 13, 21]]);
+  const rate = {};
+  for (const ai of ['normal', 'hard']) {
+    const tally = { 0: 0, 1: 0, 3: 0 };
+    for (const seeds of sets) for (const lv of [0, 1, 3]) tally[lv] += cpuHits(ai, lv, seeds);
+    rate[ai] = { none: tally[0], l1: tally[1] / tally[0], l3: tally[3] / tally[0] };
+    assert.ok(tally[0] >= sets.length * 20, `${ai} hits ${tally[0]}/${sets.length * 48} with no orbiter`);
+  }
+  const show = JSON.stringify(rate);
+  assert.ok(rate.normal.l3 >= 0.4 && rate.normal.l3 <= 0.6, `normal vs level 3: ${show}`);
+  assert.ok(rate.hard.l3 > rate.normal.l3 + 0.05 && rate.hard.l3 <= 0.85, `hard vs level 3: ${show}`);
+  for (const ai of ['normal', 'hard']) assert.ok(rate[ai].l1 > rate[ai].l3 && rate[ai].l1 >= 0.7, `${ai} grows with level: ${show}`);
 });
