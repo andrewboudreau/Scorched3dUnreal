@@ -63,6 +63,13 @@ sign in.
 
 Mods are tracked in #10.
 
+**Deploying a mod uses your turn**: you don't fire that turn. In return the
+mod persists. It carries over into the next round and stays until it is
+destroyed or its battery runs out, counted in your turns. A deployed Survey
+Satellite is a range finder you keep, so the turn is its price. That makes
+the counters matter: shooting down a satellite costs its owner a turn as well
+as the advantage it gave.
+
 ## Attributes: buffs and debuffs
 
 Mods and abilities mostly act by putting **status effects** on tanks or on
@@ -137,7 +144,6 @@ shape.
 
 ## Open questions
 
-- Does deploying a mod cost your turn, or is it a free action before you fire?
 - Can a mod be repaired or recharged, and is that a perk or a shop item?
 - Teams: do buffs like Uplinked share across allies?
 - How many statuses can one tank show before the marks get cluttered? A cap
