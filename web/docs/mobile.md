@@ -29,7 +29,7 @@ sideways" card over the game (menus can stay portrait-friendly).
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
 | Either half of the view | In flight, a finger held on the left or right half steers a Guided Missile (the Guidance gauge at the right edge shows the fuel) | A / D |
-| Left thumb | **Jet**, and **⚙ Settings** above it (Master / Effects / Music levels and mutes, music track, full screen, resource packs) | J; M and - / = for Master |
+| Left thumb | **Jet**, and **⚙ Settings** above it (Master / Effects / Music levels and mutes, music track, full screen, **Guide**, resource packs) | J; M and - / = for Master |
 | Bottom middle | Small: Fine, Find, View, Chat (online only). Find stays lit and holds the camera on an enemy; tap again for the next, and past the last (or the only one) it lets go | F, V, Enter; Fine scales the pad by 0.2 |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so
@@ -104,6 +104,18 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   the click handlers (`phoneFullscreen` in `src/launch.js`). iPhone Safari has
   no element full screen; Add to Home Screen covers it.
 - Labels, pips and edge arrows work as they are. Edge arrows are tappable.
+
+## The in-game guide
+
+Settings > Guide (`src/guide.js`, `css/guide.css`) is how a phone player learns the
+controls: tabs for Basics, Controls, Weapons, Mods and perks, and Lab. On a phone
+(`body.touch`, or any window under 520 px tall or 600 px wide) it fills the screen
+edge to edge: safe-area insets cleared, 44 px tabs that scroll sideways if they do
+not fit, a body that scrolls by itself, and a 44 px ✕ top right (in landscape the
+title, tabs and ✕ share one row to leave the height for text). On a desktop it is a
+centred panel. It is lazy-loaded, sits above every screen (so it opens from the
+launch screen and mid-match), and swallows keydown so typing in it cannot fire the
+tank. Controls lists the touch controls first, then the keys.
 
 ## Performance on mobile GPUs
 
