@@ -234,7 +234,10 @@ second column beside the first. On a phone the players box sits top right.
   or so isles hang in open space, each with grass on top and rock beneath. Every
   tank starts on an isle of its own. Two or three small moons hang among them and pull
   on every shell that passes (gravity that falls off with distance, so a shell
-  near a moon swings round it, and one that hits a moon is spent there). Shots
+  near a moon swings round it, and one that hits a moon is spent there). While a moon pulls a shell by more
+  than about an eighth of ordinary gravity, thin violet-and-cyan flux lines
+  fade in around it, with a few curving to the shell itself, and fade out again
+  once it is clear. Shots
   can come at an isle from below: a blast in the underside eats upward, and once
   the rock between top and underside is gone the ground is open sky. A tank
   over a hole falls, and a tank that falls into the void is lost (the kill goes
@@ -370,7 +373,8 @@ second column beside the first. On a phone the players box sits top right.
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
-  (`moons.js`), the flocks (`birds.js`), the isles' passing craft (`craft.js`)
+  (`moons.js`), the flux lines that show a moon pulling a shell (`gravityLines.js`,
+  driven by the pure `core/gravityPull.js`), the flocks (`birds.js`), the isles' passing craft (`craft.js`)
   and the Survey Satellite with its projected cell patch and labels
   (`satellite.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
