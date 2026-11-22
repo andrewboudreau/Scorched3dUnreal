@@ -220,7 +220,11 @@ export class TouchControls {
     const h = `${(p.power / TANK.maxPower) * 100}%`;
     if (s.h !== h) { s.h = h; this.el.powerFill.style.height = h; }
     // Mirror main.js's own labels rather than reach into the game for them.
-    set('fire', this.el.fire, /lock/.test(document.getElementById('help-fire')?.textContent) ? 'LOCK IN' : 'FIRE');
+    // (src/strike.js words it for a Double Strike: queue shot 1, both shots, or a pass while reloading.)
+    const hint = document.getElementById('help-fire')?.textContent || '';
+    const lock = /lock/.test(hint);
+    set('fire', this.el.fire, /pass/.test(hint) ? 'PASS' : /queue/.test(hint) ? 'SHOT 1' : /both/.test(hint) ? (lock ? 'LOCK ×2' : 'FIRE ×2') : lock ? 'LOCK IN' : 'FIRE');
+    this.el.fire.classList.toggle('pass', /pass/.test(hint));
     set('weapon', this.el.weapon, document.getElementById('ro-weapon')?.textContent || 'Weapon');
     const on = this.online();
     if (s.online !== on) { s.online = on; this.el.chat.style.display = on ? '' : 'none'; }
