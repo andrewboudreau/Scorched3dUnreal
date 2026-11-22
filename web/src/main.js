@@ -4,6 +4,7 @@ import { Game, PLAYER_COLORS, FOG } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
+import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
@@ -1824,7 +1825,7 @@ function escapeHtml(s) {
 }
 
 const setupRows = [
-  { name: 'You', type: 'human' },
+  { name: profile.name || 'You', type: 'human' },
   { name: 'Rook', type: 'normal' },
 ];
 const CPU_NAMES = ['Rook', 'Vex', 'Marlow', 'Kestrel', 'Bastion', 'Ivo'];
@@ -1954,6 +1955,7 @@ function showRoundResult(kind) {
     $('mo-table').innerHTML = standingsTable(sorted);
     $('mo-stats').innerHTML = statsTable(sorted);
     $('mo-awards').innerHTML = awards(game.players);
+    if (session?.isHost) link?.result(session.seatOf[sorted[0].id] ?? null);   // for the players' records
     $('matchover').classList.remove('hidden');
     return;
   }
@@ -2115,17 +2117,19 @@ async function goOnline(how) {
   const code = $('net-code').value.trim();
   if (how === 'join' && code.length !== 4) { $('net-note').textContent = 'Type the 4-letter room code first.'; return; }
   $('net-note').textContent = how === 'join' ? 'Joining…' : 'Making a room…';
-  localStorage.setItem('craterfall.name', netName());
+  if ($('net-name').value.trim()) profile.setName($('net-name').value);
   link = new RoomLink();
+  await profile.ready;   // so the request carries the player id cookie
+  let r;
   try {
-    if (how === 'create') await link.create(netName(), $('net-private').checked); else await link.join(code, netName());
+    r = how === 'create' ? await link.create(netName(), $('net-private').checked) : await link.join(code, netName());
   } catch (err) {
     link.close();
     link = null;
     $('net-note').textContent = err.message === 'Failed to fetch' ? 'Could not reach the server.' : err.message;
     return;
   }
-  enterRoom(false);
+  enterRoom(!!r.rejoin);   // this tab already had a seat there: read the room back
 }
 
 // `resume`: this tab had the seat before a reload; read the room back and carry on.
@@ -2395,7 +2399,19 @@ $('net-copy').onclick = async () => {
   const url = `${location.origin}${location.pathname}?room=${link.code}`;
   try { await navigator.clipboard.writeText(url); $('net-note').textContent = `Copied: ${url}`; } catch { $('net-note').textContent = url; }
 };
-$('net-name').value = localStorage.getItem('craterfall.name') || '';
+// Your name is the player's (profile.js): saved, and the first tank's unless renamed there.
+$('net-name').value = profile.name;
+const takeName = (was) => {
+  const row = setupRows[0];
+  if (row?.type !== 'human' || ![was, 'You', ''].includes(row.name)) return;
+  row.name = profile.name || 'You';
+  if (!session) renderSetup();
+};
+$('net-name').addEventListener('change', () => { const was = profile.name; profile.setName($('net-name').value); $('net-name').value = profile.name; takeName(was); });
+{
+  const was = profile.name;   // from localStorage; the server's may differ
+  profile.ready.then(() => { if ($('net-name').value === was) $('net-name').value = profile.name; takeName(was); });
+}
 {
   const code = new URLSearchParams(location.search).get('room');
   const saved = JSON.parse(sessionStorage.getItem(ROOM_KEY) || 'null');

@@ -1,12 +1,19 @@
 // The browser end of an online room: create or join one, send messages in
 // order, and long-poll the room's log. What the messages mean is up to
 // core/netplay.js; the server side is module/Rooms.cs.
+//
+// Creates and joins carry this tab's key (profile.js) and, as a cookie, the
+// player id: joining a room where they still have a seat gives it back
+// (`rejoin: true` in the reply) instead of taking a second one.
+
+import { tabKey } from './profile.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class RoomLink {
   constructor(base = new URL('api/rooms', location.href).href) {
     this.base = base;
+    this.tab = tabKey();
     this.code = null;
     this.seat = -1;
     this.token = null;
@@ -26,8 +33,12 @@ export class RoomLink {
     return data;
   }
 
-  async create(name, priv = false) { return this.attach(await this.post('', { name, private: priv })); }
-  async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name })); }
+  async create(name, priv = false) { return this.attach(await this.post('', { name, private: priv, tab: this.tab })); }
+  async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name, tab: this.tab })); }
+
+  // The host's screen at match end: `winner` is a seat, or null (a CPU won).
+  // Counts toward each player's record; sent once, failures ignored.
+  result(winner) { return this.post(`/${this.code}/result`, { token: this.token, winner }).catch(() => {}); }
 
   // Back into a seat this tab had before it reloaded: { code, seat, token }.
   resume(saved) { return this.attach(saved); }
