@@ -16,7 +16,7 @@ const GOLD = {
 // The floating isles hang in open space: a dark sky with a violet glow low
 // down, stars all round (below as well), and a ringed planet.
 const SPACE = {
-  skyLight: new THREE.Color('#aab8ff'), groundLight: new THREE.Color('#8a74b0'),
+  skyLight: new THREE.Color('#aab8ff'), groundLight: new THREE.Color('#a68fd2'),
   top: new THREE.Color('#03040d'), mid: new THREE.Color('#0b0d26'), horizon: new THREE.Color('#2a1f4d'), bottom: new THREE.Color('#05061a'),
   sun: new THREE.Color('#fff4e6'),
 };
@@ -221,7 +221,7 @@ export class Sky {
       this.sun.intensity = 2.4;
       this.hemi.color.copy(SPACE.skyLight);
       this.hemi.groundColor.copy(SPACE.groundLight);
-      this.hemi.intensity = 1.0;   // the undersides see only this light
+      this.hemi.intensity = 1.0;   // the undersides see only this light (its ground colour, a violet bounce)
       U.top.value.copy(SPACE.top);
       U.mid.value.copy(SPACE.mid);
       this.horizon.copy(SPACE.horizon);

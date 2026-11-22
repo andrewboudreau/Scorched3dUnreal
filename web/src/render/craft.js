@@ -19,13 +19,21 @@ function hullGeometry() {
   return g;
 }
 
-function makeCraft() {
+// Two colourways, handed out by turns: the cool silver-violet and a warmer
+// bronze with a rose dome. Same ship, a different crew.
+const WAYS = [
+  { hull: '#a29dbb', glowHull: '#3a3358', dome: '#7ff5e0', glowDome: '#3fd8c0', under: '#9ffff0' },
+  { hull: '#b8a49a', glowHull: '#4d3340', dome: '#ffb5a0', glowDome: '#e0724f', under: '#ffd2b0' },
+];
+
+function makeCraft(_, index = 0) {
+  const way = WAYS[index % WAYS.length];
   const group = new THREE.Group();
   const hull = new THREE.Mesh(hullGeometry(), new THREE.MeshStandardMaterial({
-    color: '#a29dbb', metalness: 0.45, roughness: 0.4, flatShading: true, emissive: '#3a3358', emissiveIntensity: 0.8,
+    color: way.hull, metalness: 0.45, roughness: 0.4, flatShading: true, emissive: way.glowHull, emissiveIntensity: 0.8,
   }));
   const dome = new THREE.Mesh(new THREE.SphereGeometry(2.4, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({
-    color: '#7ff5e0', emissive: '#3fd8c0', emissiveIntensity: 0.9, transparent: true, opacity: 0.75, roughness: 0.1, flatShading: true,
+    color: way.dome, emissive: way.glowDome, emissiveIntensity: 0.9, transparent: true, opacity: 0.75, roughness: 0.1, flatShading: true,
   }));
   dome.position.y = 1.2;
   const keel = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 0.6, 10), new THREE.MeshBasicMaterial({ color: '#ffcf6a' }));
@@ -43,7 +51,7 @@ function makeCraft() {
   }
   // A soft glow under the keel.
   const glow = new THREE.Mesh(new THREE.CircleGeometry(4.5, 20).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({
-    color: '#9ffff0', transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    color: way.under, transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   }));
   glow.position.y = -2.6;
   group.add(glow);
