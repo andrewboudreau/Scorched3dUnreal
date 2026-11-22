@@ -86,6 +86,15 @@ sits under the device's own volume (a web page cannot set that), so it starts at
 full. Also full screen where the browser allows it, and the resource-pack review
 where packs are served.
 
+**Guide** (Settings > Guide, from the launch screen or mid-match) is a short in-game
+page in tabs: Basics, Controls (touch first, then keys), Weapons, Mods and perks
+(with the rock-paper-scissors) and Lab. `src/guide.js` builds the weapon, mod and
+perk lists from `core/weapons.js`, `mods.js` and `perks.js`, reading every field
+defensively, so it follows the data and skips what it cannot describe. It is loaded
+the first time it opens (styles in `css/guide.css`). Keys typed in it never reach
+the game; Esc, the ✕ or a tap outside closes it. Its content builders are tested in
+`test/guide.test.js`.
+
 Everything sits in one column on the left: the player card (with the round and
 its modifier at its head), the players box with every tank's health, and the
 rangefinder when you have one. On a short screen the rangefinder wraps into a

@@ -1474,6 +1474,7 @@ settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', op
   get: () => music.trackId, set: (id) => { sound.ensure(); music.select(id); } });
 settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
+settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
