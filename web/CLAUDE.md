@@ -46,8 +46,11 @@ header comment is the reference for its API.
 
 **`Players.cs`** gives each player a random id in an HttpOnly cookie. It stores a
 small record (name, played, won) only once a player sets a name or finishes an
-online match. Records are saved to `players.json` on the host's `App_Data`
-volume, which survives deploys.
+online match. Records are saved to `players.json` in `_data/craterfall/` beside the drops,
+on the module host's volume. Don't keep anything inside the drop's own folder:
+the next upload moves it aside, which lost every record before this was found.
+The module host's container is read-only apart from that volume and has 384 MB
+of memory, shared with the other modules.
 
 **`Rooms.cs`** runs online rooms: an ordered message log per room, read by
 long-polling. Rooms live in memory only, so every deploy restarts the host and

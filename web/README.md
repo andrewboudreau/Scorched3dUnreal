@@ -491,13 +491,14 @@ memory on the server, so a redeploy ends any match in progress.
 `Players.cs` serves `/Craterfall/api/me`: a random player id in an HttpOnly
 cookie, and a small record per id (name, first and last seen, matches played
 and won). Records are saved as `players.json` in the folder named by
-`CRATERFALL_DATA` (env var, or config `Craterfall:DataPath`), else in the
-host's `App_Data/Craterfall` (a mounted volume that outlives drops), else in
-`data/` next to the module, which a new drop may replace; with none writable
+`CRATERFALL_DATA` (env var, or config `Craterfall:DataPath`); else, on the
+module-drops host, in `_data/craterfall/` beside the drops (on its volume, and
+left alone by uploads); else the host's `App_Data/Craterfall`; else `data/`
+next to the module, which the next upload moves aside. With none writable
 they stay in memory and the host logs a warning. A visit alone stores nothing:
 a record is made when a player sets a name or finishes an online match.
 Rooms have limits so a flood cannot take the host's memory: 128 KB a message,
-16 MB and 20000 entries a room, 256 MB across all rooms, 300 rooms. A room
+8 MB and 20000 entries a room, 64 MB across all rooms, 300 rooms. A room
 plays one match, and goes after half an hour with nobody polling it.
 `tools/devserver.mjs` is a copy of the same API for local testing; keep the two in step.
 

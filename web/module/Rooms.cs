@@ -17,8 +17,8 @@ namespace Craterfall;
 /// after a few idle hours.
 ///
 /// Limits, so one room or a flood of them cannot take the host's memory: a
-/// message is at most 128 KB, a room's log at most 20000 entries and 16 MB,
-/// all rooms together at most 256 MB (a send past these gets 507), and 300
+/// message is at most 128 KB, a room's log at most 20000 entries and 8 MB,
+/// all rooms together at most 64 MB (a send past these gets 507), and 300
 /// rooms (when full, rooms not started whose seats all stopped polling make
 /// way; else 503). A room plays one match: a second `start` gets 409.
 ///
@@ -59,8 +59,8 @@ public static class Rooms
     private const int MaxSeats = 6;
     private const int MaxEntries = 20000;
     private const int MaxBody = 128 * 1024;
-    private const long MaxRoomBytes = 16L * 1024 * 1024;
-    private const long MaxAllBytes = 256L * 1024 * 1024;
+    private const long MaxRoomBytes = 8L * 1024 * 1024;    // a long 6-player match logs a few MB
+    private const long MaxAllBytes = 64L * 1024 * 1024;    // the module host's container has 384 MB in all
     private static long AllBytes;   // message bytes held by every room's log
     private static readonly TimeSpan Hold = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(45);

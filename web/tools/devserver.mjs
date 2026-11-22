@@ -19,7 +19,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = process.argv[2] != null && process.argv[2] !== '' ? Number(process.argv[2]) : 8080;
 const HOLD = 20000, GONE_AFTER = 45000, MAX_SEATS = 6;
 // As Rooms.cs: body, log and memory limits, and when a room is let go.
-const MAX_BODY = 128 * 1024, MAX_ENTRIES = 20000, MAX_ROOM_BYTES = 16 * 1024 * 1024, MAX_ALL_BYTES = 256 * 1024 * 1024;
+const MAX_BODY = 128 * 1024, MAX_ENTRIES = 20000, MAX_ROOM_BYTES = 8 * 1024 * 1024, MAX_ALL_BYTES = 64 * 1024 * 1024;
 const MAX_ROOMS = 300, IDLE_AFTER = 3 * 3600e3, ABANDONED_AFTER = 30 * 60e3;
 let allBytes = 0;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';

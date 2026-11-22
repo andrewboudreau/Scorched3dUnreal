@@ -29,8 +29,12 @@ namespace Craterfall;
 /// nothing else is stored. A visit alone stores nothing: a record is made only
 /// when a player sets a name or finishes an online match, so the file holds
 /// players rather than every page load. Records are kept as JSON in a data folder
-/// (CRATERFALL_DATA, or config Craterfall:DataPath, else the host's App_Data/Craterfall, else data/ next to the
-/// module) with atomic writes, or only in memory when no folder is writable.
+/// with atomic writes, or only in memory when no folder is writable. The folder
+/// is the first writable one of: CRATERFALL_DATA (or config Craterfall:DataPath);
+/// on a module-drops host (modules.blogfor.net), _data/{module folder} beside the
+/// drops, which the loader skips and uploads leave alone; the host's
+/// App_Data/Craterfall; else data/ next to the module, which the next upload
+/// moves aside, so records there last only until then.
 /// Rooms.cs reads the id to tie seats to players. Keep tools/devserver.mjs in step.
 /// </summary>
 public static class Players
@@ -227,9 +231,18 @@ public static class Players
         var configured = Environment.GetEnvironmentVariable("CRATERFALL_DATA") ?? config["CRATERFALL_DATA"] ?? config["Craterfall:DataPath"];
         if (!string.IsNullOrWhiteSpace(configured)) candidates.Add(configured);
         // The host's App_Data is a mounted volume that outlives module uploads.
+        // A drops host keeps every module in {root}/{id}/ and its own state in {root}/_status/.
+        // An upload moves {id}/ to {id}.prev/ (and deletes the older one), so data must live outside it.
+        var here = Path.GetDirectoryName(typeof(Players).Assembly.Location);
+        var dropsRoot = string.IsNullOrEmpty(here) ? null : Path.GetDirectoryName(here);
+        string? beside = null;
+        if (dropsRoot is not null && Directory.Exists(Path.Combine(dropsRoot, "_status")))
+        {
+            beside = Path.Combine(dropsRoot, "_data", Path.GetFileName(here!));
+            candidates.Add(beside);
+        }
         var appData = Path.Combine(contentRoot, "App_Data");
         if (Directory.Exists(appData)) candidates.Add(Path.Combine(appData, "Craterfall"));
-        var here = Path.GetDirectoryName(typeof(Players).Assembly.Location);
         if (!string.IsNullOrEmpty(here)) candidates.Add(Path.Combine(here, "data"));
 
         foreach (var dir in candidates)
@@ -255,6 +268,22 @@ public static class Players
             return;
         }
         Log?.LogInformation("Craterfall: player records in {File}.", File_);
+        // Before records lived beside the drops they were in data/ inside the drop, which the
+        // last upload moved to {id}.prev/: carry the newest such file over, once.
+        if (beside is not null && File_ == Path.Combine(beside, "players.json") && !File.Exists(File_))
+        {
+            foreach (var old in new[] { Path.Combine(here!, "data", "players.json"), Path.Combine(here + ".prev", "data", "players.json") })
+            {
+                try
+                {
+                    if (!File.Exists(old)) continue;
+                    File.Copy(old, File_);
+                    Log?.LogInformation("Craterfall: carried player records over from {Old}.", old);
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
         try
         {
             if (File.Exists(File_))
