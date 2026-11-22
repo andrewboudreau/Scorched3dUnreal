@@ -27,6 +27,13 @@ const C = {
   soil: new THREE.Color('#6a4a30'),
   stone: new THREE.Color('#7a6d62'),
   stoneDeep: new THREE.Color('#4a4152'),
+  // The undersides get their own, lighter palette: they are lit only by the
+  // space hemisphere light's violet bounce, and read as dark mud in the dark tones.
+  underSoil: new THREE.Color('#a47a58'),
+  underStone: new THREE.Color('#bdb0b4'),
+  underDeep: new THREE.Color('#9484ac'),
+  underBand: new THREE.Color('#4e3d68'),
+  underBed: new THREE.Color('#d2bca2'),
 };
 
 // Faint cloud shadows: render/sky.js writes each cloud's shadow here as
@@ -319,7 +326,14 @@ export class TerrainMesh {
     geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     // A faint glow of its own: the sun never reaches an underside.
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true, emissive: '#3a2c48', emissiveIntensity: 0.6 }));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true, emissive: '#2c2240', emissiveIntensity: 0.4 });
+    // The rock also glows in its own colours (a share of the vertex colour added
+    // as emission), so the strata keep their bands instead of fading to one violet.
+    mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      totalEmissiveRadiance += diffuseColor.rgb * 0.17;`);
+    };
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.group.add(mesh);
@@ -591,11 +605,16 @@ export class TerrainMesh {
     S.nrm[k * 3] = nx / len; S.nrm[k * 3 + 1] = ny / len; S.nrm[k * 3 + 2] = nz / len;
     const tmp = TMP;
     const depth = open ? 0 : f.heights[k] - u;
-    tmp.copy(C.soil).lerp(C.stone, Math.min(1, depth / 6));
-    tmp.lerp(C.stoneDeep, Math.min(1, Math.max(0, (depth - 14) / 30)));
+    tmp.copy(C.underSoil).lerp(C.underStone, Math.min(1, depth / 6));
+    tmp.lerp(C.underDeep, Math.min(1, Math.max(0, (depth - 14) / 30)));
     // Strata: bands that follow the height, wobbled so they do not ring true.
-    const band = 0.88 + 0.14 * Math.sin(u * 0.85 + this.jitter[k] * 4);
-    const v = band * (1 + this.jitter[k] * 0.1);
+    // The wave is squared off a little so the layers read as distinct beds,
+    // with a darker seam between them.
+    const wave = Math.sin(u * 0.8 + this.jitter[k] * 3);
+    const bed = Math.max(-1, Math.min(1, wave * 2.2));
+    tmp.lerp(C.underBand, Math.max(0, -bed) * 0.85);
+    tmp.lerp(C.underBed, Math.max(0, bed) * 0.3);
+    const v = (1.03 + 0.16 * bed) * (1 + this.jitter[k] * 0.1);
     S.col[k * 3] = tmp.r * v;
     S.col[k * 3 + 1] = tmp.g * v;
     S.col[k * 3 + 2] = tmp.b * v;
