@@ -497,6 +497,30 @@ body.touch #gunner-btn { display: none; }
   text-shadow: 0 1px 2px #000; backdrop-filter: blur(2px); }
 #touch .t-fire.pass { background: linear-gradient(135deg, #8a96a6, #5d6878); }
 
+/* Mods (src/modsui.js): a deploy button per ready mod (two taps: arm, then deploy),
+   status chips in the player card, and the armory's Mods section. */
+.mod-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+.mod-bar:has(.mod-btn:not(.hidden)) { margin-top: 8px; }
+.mod-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r); border: 1px solid rgba(157, 184, 255, .6);
+  background: rgba(60, 80, 140, .35); color: #dfe8ff; font-size: 12px; font-weight: 700; cursor: pointer; pointer-events: auto; user-select: none; }
+.mod-btn b { font-size: 10px; color: var(--muted); }
+.mod-btn.on { border-color: var(--accent); background: rgba(255, 181, 71, .3); color: #ffd79a; animation: mod-armed .9s ease-in-out infinite alternate; }
+@keyframes mod-armed { to { box-shadow: 0 0 0 3px rgba(255, 181, 71, .35); } }
+.mod-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.mod-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--r); font-size: 11px; font-weight: 700;
+  background: rgba(14, 18, 24, .5); border: 1px dashed rgba(157, 184, 255, .5); color: #b8c8f0; font-variant-numeric: tabular-nums; }
+.mod-chip.up { border-style: solid; border-color: rgba(157, 184, 255, .8); color: #e6edff; }
+.mod-chip i { display: inline-block; width: 26px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .15);
+  background-image: linear-gradient(90deg, #8fe39b var(--hp), transparent var(--hp)); }
+/* On a phone the buttons stack at the top of the Fire column, thumb-sized. */
+#touch .t-mods { flex-direction: column; gap: 8px; }
+#touch .mod-btn { margin: 0; width: 84px; height: 34px; padding: 0; justify-content: center; gap: 2px; font-size: 13px; border-radius: var(--r-lg); }
+#touch .mod-btn small { font-size: 10px; opacity: .8; margin-left: 2px; }
+#touch .mod-btn.on { background: rgba(255, 181, 71, .45); color: #fff; }
+.shop-section { grid-column: 1 / -1; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--edge); font-size: 15px; font-weight: 800; }
+.shop-section small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 2px; }
+.shop-item.mod { border-color: rgba(157, 184, 255, .45); background: rgba(90, 110, 190, .08); }
+
 /* The Lab options on the setup screen: a small group of house rules. */
 .options .lab { display: flex; gap: 16px 20px; flex-wrap: wrap; margin: 0; padding: 4px 10px 8px; border: 1px dashed rgba(114, 230, 255, .35); border-radius: var(--r); }
 .options .lab legend { padding: 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #72e6ff; }

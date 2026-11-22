@@ -3,8 +3,8 @@ import {
   SURVEY, surveySites, labelledSites, labelShare, surveyConditions, surveyFocus, patchCentre, solveSite, SurveyCache,
 } from '../core/survey.js';
 
-// The Survey Satellite, drawn: a small low-poly satellite high over the
-// enemy, a projector beam down from it, and the patch of Voronoi cells it
+// The Survey Satellite, drawn: a small low-poly satellite (once deployed, where
+// the mod hangs: render/mods.js draws it), a projector beam down from it, and the patch of Voronoi cells it
 // paints on the ground (thin glowing borders, a radar-like sweep). Some cell
 // sites carry a small label, the turret and power that land there from where
 // the planner stands (core/survey.js does the placing and solving).
@@ -100,7 +100,7 @@ const BEAM_FRAG = /* glsl */`
 
 // The satellite itself: a foil-wrapped body, two solar wings on struts, a
 // projector underneath and a whip antenna. About 20 m across.
-function buildSatellite() {
+export function buildSatellite() {
   const g = new THREE.Group();
   // Lit from below as often as above, so each part glows a little and never reads as a black blot.
   const foil = new THREE.MeshStandardMaterial({ color: '#d8b050', emissive: '#5a4310', metalness: 0.4, roughness: 0.45, flatShading: true });
@@ -231,8 +231,10 @@ export class SatelliteView {
   }
 
   // Each frame. `p` is the planner (null: nothing to show), `level` its
-  // satellite level, `foes` the enemies as this screen believes them ({ x, z }).
-  update({ game, p, level, camera, foes, time, dt, compact }) {
+  // satellite level, `foes` the enemies as this screen believes them ({ x, z }),
+  // `at` where the deployed satellite hangs ({ x, y, z }; its body is drawn by
+  // render/mods.js, so this draws only the beam from it).
+  update({ game, p, level, camera, foes, time, dt, compact, at = null }) {
     if (!p || !level) { if (this.active || this.group.visible) this.hide(); return; }
     const t = game.terrain;
     this.active = true;
@@ -251,9 +253,12 @@ export class SatelliteView {
     // Sites and their solutions. The key holds everything a solution depends on.
     const seed = (game.cfg.seed + game.round * 7919) | 0;
     const sites = surveySites({ cx: c.x, cz: c.z, seed }).sort((a, b) => a.d - b.d).slice(0, MAX_SITES);
-    const cond = surveyConditions(level, { wind: game.wind, windK: game.windShare(p), gravity: game.gravity, wells: t.wells });
+    // Enemy Gravity Orbiters: the clock stands still while you plan, so their wells do too.
+    const orbit = game.orbitField ? game.orbitField(p) : {};
+    const cond = surveyConditions(level, { wind: game.wind, windK: game.windShare(p), gravity: game.gravity, wells: t.wells, ...orbit });
+    const orbKey = cond.field ? `${cond.t0.toFixed(3)}:${game.orbiterWells().length}` : '';
     const groundKey = `${game.round}.${game.ground?.ops.length || 0}`;
-    this.cache.setKey([p.x, p.y, p.z].map((n) => n.toFixed(2)).join() + `|${p.elev.toFixed(1)}|${level}|${cond.wind.join()}|${cond.windK}|${cond.gravity}|${groundKey}`);
+    this.cache.setKey([p.x, p.y, p.z].map((n) => n.toFixed(2)).join() + `|${p.elev.toFixed(1)}|${level}|${cond.wind.join()}|${cond.windK}|${cond.gravity}|${groundKey}|${orbKey}`);
     const share = labelShare(game.cfg.lab, level);
     const marked = labelledSites(sites, share, SURVEY.radius + SURVEY.spacing * 0.5);
     this.cache.step(marked, SOLVES_PER_FRAME, (s, guess) => solveSite({
@@ -274,10 +279,12 @@ export class SatelliteView {
     // beam leans in, turning slowly; the beam follows the drifting patch.
     const gy = t.solidAt(c.x, c.z) ? t.heightAt(c.x, c.z) : p.y;
     const toMe = Math.atan2(p.z - this.focus.z, p.x - this.focus.x);
-    this.sat.position.set(this.focus.x + Math.cos(toMe) * 45, Math.max(gy, p.y) + 150 + Math.sin(time * 0.6) * 2, this.focus.z + Math.sin(toMe) * 45);
+    this.sat.visible = !at;
+    if (at) this.sat.position.set(at.x, at.y, at.z);   // the deployed mod: the beam leaves from it
+    else this.sat.position.set(this.focus.x + Math.cos(toMe) * 45, Math.max(gy, p.y) + 150 + Math.sin(time * 0.6) * 2, this.focus.z + Math.sin(toMe) * 45);
     this.sat.rotation.set(0.15 * Math.sin(time * 0.4), time * 0.08, 0.1);
     const apex = _v.copy(this.sat.position);
-    apex.y -= 2.72 * this.sat.scale.y;   // the projector's lens
+    apex.y -= at ? 2 : 2.72 * this.sat.scale.y;   // the projector's lens
     _dir.set(c.x, gy, c.z).sub(apex);
     const len = _dir.length();
     this.beam.position.copy(apex);

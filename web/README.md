@@ -61,6 +61,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | ← / → | turn the hull (free) |
 | J | jump jet: hop about 25 m the way the hull faces (does not use the shot or fuel) |
 | X | Double Strike (with the perk): arm a double, or drop it again |
+| B | deploy a ready mod: press once to arm, again to deploy (it takes your turn) |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
 | Space | fire (in a volley: lock in your shot) |
 | F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
@@ -242,8 +243,36 @@ second column beside the first. On a phone the players box sits top right.
   high across the sky, pausing to hover, where birds would be. A shell that misses everything drops away into the void. You
   cannot drive or jump off an isle's edge. There are no lakes, and the sky is
   deep space: stars all round, a nebula and a ringed planet.
-- **Survey Satellite** (armory, a level at a time: 200, then 260, then 300).
-  While you plan, a small satellite hangs high over the enemy nearest your
+- **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
+  they have their own Mods section at the end of the armory, bought a level
+  at a time, and a perk can grant or level one. A mod you own is *ready*.
+  Deploying it is your whole turn: on a phone, tap its button at the top of
+  the Fire column (ORB / SAT) and tap again to confirm; on a desktop press B
+  twice, or use the button in the player card. In a volley, deploying is the
+  action you lock in, and it goes up when the volley fires. Once up, a mod
+  has hit points and a lifetime counted in your turns, and it stays up
+  across rounds (it moves with you to your new spot) until it is shot down
+  or wears out. Then it is ready again next round. Small chips in the player
+  card show each mod's level, health and turns left. Shells can hit a mod
+  directly, blasts hurt any mod in reach, and **Flak** is the anti-air
+  answer: it also bursts by an enemy mod and its burst hurts every enemy mod
+  near it. Shooting one down pays like damage. CPU tanks (not Easy) buy an
+  orbiter when they have money to spare, and deploy when they have no good
+  shot to take yet.
+- **Gravity Orbiter** (mod; 180, then 220, then 260; lasts 6, 7 or 8 turns; 30 to 50 hp). Small
+  gravity wells circle your tank about 13 m out and 9 m up, and bend every
+  enemy shell that passes near (your own shells fly through them). A shell that
+  hits an orb is spent there and hurts it. Level 1 is one well, level 2 a
+  stronger, faster one, level 3 a binary pair that spins round itself as it
+  orbits, which scrambles shots rather than blocking them. The wells' places
+  are a pure function of the match clock, which only runs while shells fly,
+  so every screen and the CPU agree on them. CPU tanks other than Easy (and
+  a Survey Satellite at level 2+) count the wells in when they solve a shot;
+  Easy CPUs fire as if they were not there.
+- **Survey Satellite** (mod; 200, then 260, then 300). Deploy it and it goes
+  up 70 m over your tank, where it stays (a battery of 5, 6 or 7 turns, 20 to 30 hp) until
+  shot down or spent; Flak or a direct hit brings it down. While it
+  is up and you plan, it shines its beam down on the enemy nearest your
   turret line (as you know it, under fog of war; with none known, over the
   ground your aim reaches) and its projector paints a patch of Voronoi cells
   on the ground, about 160 m across, that drifts slowly round it with a
@@ -254,13 +283,14 @@ second column beside the first. On a phone the players box sits top right.
   is in). The aims are solved with the same simulator the shells fly on, and
   solved again when you move, change elevation, the wind turns or the ground
   is cratered (the old labels dim until then). Level 1 leaves the wind and
-  moons out, level 2 counts them, level 3 labels more cells. At most 5
+  moons out, level 2 counts them and enemy orbiters, level 3 labels more cells. At most 5
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
   only on their own aim. The CPU does not buy it.
 - **Lab** (setup screen, host only; travels in the match config online).
-  *Satellite*: in the armory (default), everyone gets one at level 1, 2 or
-  3 (and the armory stops selling it), or off. *Sat labels*: few, some or many.
+  *Satellite* and *Orbiter*: in the armory (default), everyone gets one ready
+  at level 1, 2 or 3 (and the armory stops selling it), or off. *Sat labels*:
+  few, some or many.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
   its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
@@ -325,6 +355,8 @@ second column beside the first. On a phone the players box sits top right.
   | Heavy Rounds | wind pushes your shots 35% less |
   | Shrapnel | plain Shells throw two bomblets onward from where they land |
   | Tracer Rounds | see the first 45 m of your shot while you aim |
+  | Orbital Mechanic | your Gravity Orbiter goes up a level (level 1 if you have none) |
+  | Sat Recon | your Survey Satellite goes up a level (level 1 if you have none) |
 | Double Strike | from round 3's draft on: queue two shots in one turn (see below) |
 
 - **Double Strike** (a perk, drafted from the round 3 pick on). On a turn, or
@@ -370,9 +402,12 @@ second column beside the first. On a phone the players box sits top right.
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
-  (`moons.js`), the flocks (`birds.js`), the isles' passing craft (`craft.js`)
-  and the Survey Satellite with its projected cell patch and labels
-  (`satellite.js`).
+  (`moons.js`), the flocks (`birds.js`), the isles' passing craft (`craft.js`),
+  the Survey Satellite's projected cell patch and labels (`satellite.js`) and
+  the deployed mods: orbiter orbs with their trails, satellites, break-ups
+  (`mods.js`).
+- `src/modsui.js` is the mods' deploy buttons, status chips and armory section;
+  `src/strike.js` is Double Strike's.
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own

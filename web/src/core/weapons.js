@@ -48,7 +48,7 @@ export const WEAPONS = [
   },
   {
     id: 'flak', name: 'Flak', price: 220, bundle: 2,
-    desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Passing nobody, it bursts just above the ground.',
+    desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Anti-air: it also bursts by an enemy orbiter or satellite and can bring it down. Passing nobody, it bursts just above the ground.',
     // On the way down it bursts at its nearest pass over an enemy tank (within
     // `range` across, `low`..`high` above it), or `floor` over the ground.
     // Fragments keep `carry` of the shell's sideways speed and fan out `spread`
