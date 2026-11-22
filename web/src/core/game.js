@@ -1,12 +1,13 @@
 import { makeRng } from './rng.js';
 import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstVelocities } from './weapons.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
-import { normalizeLab, satelliteLevel, satellitePrice } from './survey.js';
+import { normalizeLab } from './survey.js';
+import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -66,10 +67,12 @@ export class Game {
     // Online play (core/netplay.js): the ids of the tanks played on this
     // screen. The other humans plan elsewhere; their plans arrive by message.
     local = null,
-    // The host's Lab options (core/survey.js normalizeLab): who has the Survey Satellite, and its labels.
+    // The host's Lab options (core/survey.js normalizeLab, core/mods.js
+    // normalizeModLab): who has the Survey Satellite and its labels, and who has
+    // each other mod ('shop', 'all' at a level, or 'off').
     lab = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog, lab: normalizeLab(lab) };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog, lab: { ...normalizeLab(lab), ...normalizeModLab(lab) } };
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
     this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
@@ -89,7 +92,8 @@ export class Game {
       wins: 0,
       inventory: { ...START_INVENTORY, ...(local ? { guided: 0 } : {}) },   // no steering online
       jets: START_JETS,
-      satellite: 0,      // Survey Satellite level bought in the armory (core/survey.js)
+      mods: {},          // equipment: id -> { bought, level, state, hp, turns, ... } (core/mods.js)
+      status: [],        // status effects to come ({ kind, source, strength, turns }); none yet
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
@@ -121,6 +125,10 @@ export class Game {
     this.strike = null;     // Double Strike being planned now: { player, first: shot 1 or null }
     this.followUps = [];    // second shots waiting to go: { owner, plan, at (sim step), delay }
     this.simStep = 0;       // fixed simulation steps run so far (times the second shots)
+    // The game clock, in simulated seconds: it runs only while something is in
+    // the air, one fixed step at a time, and travels in snapshots, so every
+    // screen agrees on it. Orbiting mods are a pure function of it (mods.js orbitPoints).
+    this.clock = 0;
   }
 
   emit(e) { this.events.push(e); }
@@ -180,6 +188,8 @@ export class Game {
       p.elev = 45;
       p.roundDamage = 0;
       p.reloading = false;
+      fitMods(this.cfg.lab, p);   // an up mod carries on; the rest are fitted fresh
+      anchorMod(p, 'satellite', (x, z) => this.groundAt(x, z));   // over its owner's new spot
     }
     this.strike = null;
     this.followUps = [];
@@ -374,7 +384,7 @@ export class Game {
         continue;
       }
       const plan = this.planAiShot(p);
-      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.second ? { second: plan.second } : {}) };
+      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.second ? { second: plan.second } : {}), ...(plan.deploy ? { deploy: plan.deploy } : {}) };
     }
     this.aiPlan = null;
     this.emit({ type: 'volley', players: Object.keys(v.plans).map(Number) });
@@ -395,6 +405,7 @@ export class Game {
       p.reloading = false;   // this volley was its reload, if it had one
       const plan = this.volley.plans[p.id];
       if (!plan || !p.alive || reloaded) continue;
+      if (plan.deploy) { this.deployFor(p, plan.deploy); continue; }   // its action this volley
       this.aimAt(p, plan);
       const delay = k++ * VOLLEY.stagger;
       if (plan.second && hasPerk(p, 'doubleStrike')) this.launchDouble(p, plan.second, delay);
@@ -442,10 +453,21 @@ export class Game {
     });
   }
 
+  // The enemy orbiters a shot by `p` would fly through, for the solvers
+  // ({ field, t0 }, see ballistics.simulateShot): none when nobody has one up.
+  // `later` is how long after now the shot leaves. Easy CPUs ignore orbiters.
+  orbitField(p, later = 0) {
+    if (p.ai === 'easy' || !this.players.some((q) => q !== p && modUp(q, 'orbiter'))) return {};   // easy CPUs fire blind
+    return { field: (t) => modWells(this.players, t, p.id), t0: this.clock + later };
+  }
+
   planAiShot(p) {
     // Reloading after a Double Strike: nothing to aim, Fire only passes.
     if (p.reloading) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, pass: true, think: 0.6 });
     const target = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
+    // No good shot yet: spend the turn putting the orbiter up instead.
+    const deploy = this.aiWantsDeploy(p, target);
+    if (deploy) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy, think: 0.6 });
     if (!target) return null;
     // In the fog, a CPU that only has a rough fix sends a scout there first, now and then.
     const scout = target.rough && p.inventory.scout > 0 && this.rng.next() < 0.45;
@@ -459,11 +481,12 @@ export class Game {
       memory: p.aim,
       gravity: this.gravity,
       windK: this.windShare(p),
+      ...this.orbitField(p),
     });
     const plan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
     if (!scout && hasPerk(p, 'doubleStrike') && wantsDouble({ target, memory: p.aim, difficulty: p.ai, rng: this.rng })) {
       const again = planShot({ shooter: p, target, wind: this.wind, terrain: this.terrain, rng: this.rng, difficulty: p.ai,
-        memory: p.aim, gravity: this.gravity, windK: this.windShare(p) });
+        memory: p.aim, gravity: this.gravity, windK: this.windShare(p), ...this.orbitField(p, STRIKE.gap) });
       plan.second = { yaw: again.yaw, elev: again.elev, power: again.power, weapon: chooseSecondWeapon(p, plan.weapon, this.rng) };
     }
     return (this.aiPlan = plan);
@@ -482,14 +505,14 @@ export class Game {
   // The live enemies `p` knows of, as it knows them: the real tanks without
   // fog; with it, stand-ins at its intel (`rough` when only roughly placed).
   knownFoes(p) {
-    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive);
+    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (modUp(q, 'orbiter') ? { ...q, shielded: true } : q));
     const out = [];
     for (const q of this.players) {
       const i = this.intel[p.id]?.[q.id];
       if (q === p || !q.alive || !i) continue;
       const t = this.terrain;
       const y = t.inBounds(i.x, i.z) ? t.heightAt(i.x, i.z) : q.y;
-      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0 });
+      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0, shielded: i.r === 0 && modUp(q, 'orbiter') });
     }
     return out;
   }
@@ -537,8 +560,127 @@ export class Game {
   // How much of the wind this tank's shots feel.
   windShare(p) { return Math.max(0, 1 + perkSum(p, 'windScale')); }
 
-  // The Survey Satellite level `p` has in orbit: bought, or the host's Lab gives everyone one.
-  satelliteLevel(p) { return satelliteLevel(this.cfg.lab, p); }
+  // ---------- mods (core/mods.js) ----------
+
+  // The level of a mod `p` owns: bought, or the host's Lab gives everyone one, plus perks.
+  modLevel(p, id) { return modLevel(this.cfg.lab, p, id); }
+
+  // The Survey Satellite level `p` owns (deployed or not).
+  satelliteLevel(p) { return this.modLevel(p, 'satellite'); }
+
+  // The satellite level working for `p` right now: only while it is up.
+  surveyLevel(p) { return modUp(p, 'satellite') ? p.mods.satellite.level : 0; }
+
+  // Every Gravity Orbiter well up now, at the game clock, as moon-shaped wells
+  // ({ x, y, z, r, mu }, plus soft and owner) for the renderer (gravity lines).
+  orbiterWells() { return anyUp(this.players) ? modWells(this.players, this.clock) : []; }
+
+  // Height of the ground at x/z, or null over open space.
+  groundAt(x, z) {
+    const t = this.terrain;
+    return t.inBounds(x, z) && t.solidAt(x, z) ? t.heightAt(x, z) : null;
+  }
+
+  // Could the current human deploy a mod now? Not while reloading after a
+  // Double Strike (that turn is move only).
+  canDeploy(p = this.current) {
+    return this.phase === 'aim' && !!p && p.alive && !p.ai && !p.reloading && readyMods(p).length > 0;
+  }
+
+  // Put one of `p`'s ready mods up, now.
+  deployFor(p, id) {
+    if (!p.alive || !deployMod(p, id, (x, z) => this.groundAt(x, z))) return false;
+    this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: id });
+    return true;
+  }
+
+  // The current human spends this turn deploying a mod (the first one ready,
+  // without `id`) instead of firing. Taking turns, it goes up now and the turn
+  // ends; in a volley it is the locked-in plan and goes up as the volley
+  // fires (launchVolley). Returns the id, or null.
+  deploy(id = null) {
+    const p = this.current;
+    if (!this.canDeploy(p)) return null;
+    const which = id || readyMods(p)[0];
+    if (!readyMods(p).includes(which)) return null;
+    this.strike = null;
+    if (this.volleyMode) {
+      this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy: which };
+      this.volley.done.push(p.id);
+      Object.assign(p, this.volley.shown);
+      this.emit({ type: 'locked', player: p.id, deploy: which });
+      this.nextPlanner();
+      return which;
+    }
+    this.deployTurn(p, which);
+    return which;
+  }
+
+  // Taking turns: the mod goes up and that was the turn.
+  deployTurn(p, id) {
+    this.deployFor(p, id);
+    this.strike = null;
+    this.aiPlan = null;
+    this.phase = 'settle';
+    this.phaseTime = 0;
+  }
+
+  // Should a CPU spend this turn deploying its orbiter rather than firing?
+  // When it has no good shot: no target, a target it has not ranged yet (the
+  // first shot at it would be a wild guess) or only a rough fix in the fog.
+  // Easy CPUs just do it now and then. Returns the mod id or null.
+  aiWantsDeploy(p, target) {
+    if (p.reloading || !readyMods(p).includes('orbiter')) return null;
+    if (!target) return 'orbiter';
+    if (p.ai === 'easy') return this.rng.next() < 0.35 ? 'orbiter' : null;
+    return !p.aim[target.id] || target.rough ? 'orbiter' : null;
+  }
+
+  // Up mods wear down by a turn; any that run out are spent.
+  wearMods(p) {
+    if (!p.alive) return;
+    for (const id of tickMods(p)) this.emit({ type: 'mod', what: 'expire', player: p.id, mod: id });
+  }
+
+  // A destroyed tank's mods go with it.
+  dropMods(p) {
+    for (const def of MODS) {
+      const m = p.mods?.[def.id];
+      if (m?.state !== 'up') continue;
+      m.state = 'down';
+      m.hp = 0;
+      this.emit({ type: 'mod', what: 'down', player: p.id, mod: def.id, hp: 0, by: null, pos: def.id === 'satellite' ? [m.x, m.y, m.z] : null, tank: true });
+    }
+  }
+
+  // `amount` of damage to `owner`'s mod, from tank `from` (or null).
+  hurtModOf(owner, mod, amount, from) {
+    const p = this.players[owner];
+    const r = hurtMod(p, mod, amount);
+    if (!r) return;
+    const m = p.mods[mod];
+    const pos = mod === 'satellite' ? [m.x, m.y, m.z] : null;
+    this.emit({ type: 'mod', what: r, player: owner, mod, hp: m.hp, by: from ?? null, pos });
+    if (r === 'down' && from != null && from !== owner) this.players[from].money += Math.round(MOD_PAY * (this.modifier.pay || 1));
+  }
+
+  // A blast at `point` reaches the enemy mods near it, like it reaches tanks.
+  // `struck` is the mod target the shell hit squarely, if any.
+  blastMods(point, radius, damage, owner, struck = null) {
+    if (!anyUp(this.players)) return;
+    const worst = new Map();   // one hit per mod, from its nearest part
+    for (const m of modTargets(this.players, this.clock)) {
+      if (m.owner === owner) continue;
+      const d = struck && struck.owner === m.owner && struck.mod === m.mod ? 0
+        : Math.max(0, Math.hypot(m.x - point[0], m.y - point[1], m.z - point[2]) - m.r * 0.5);
+      const k = `${m.owner}:${m.mod}`;
+      if (!worst.has(k) || d < worst.get(k).d) worst.set(k, { m, d });
+    }
+    for (const { m, d } of worst.values()) {
+      const dmg = blastDamage(d, radius, damage);
+      if (dmg > 0) this.hurtModOf(m.owner, m.mod, dmg, owner);
+    }
+  }
 
   // ---------- driving ----------
 
@@ -628,6 +770,9 @@ export class Game {
 
   // The turn (or the volley) is over. The round limit counts whichever it was.
   nextTurn() {
+    // Up mods wear down by the turn that just ended (every tank's, after a volley).
+    if (this.volleyMode) for (const p of this.players) this.wearMods(p);
+    else if (this.current) this.wearMods(this.current);
     const alive = this.alivePlayers();
     this.turnsThisRound++;
     const limit = this.cfg.maxTurnsPerRound * (this.volleyMode ? 1 : this.players.length);
@@ -672,7 +817,7 @@ export class Game {
     this.shopped = [];                          // online: humans whose shopping is in
     for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
-      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1) : [];
+      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k)) : [];
       if (!offer.length) continue;
       if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
       else this.draft[p.id] = offer;
@@ -680,6 +825,18 @@ export class Game {
     for (const p of this.players) if (p.ai) this.aiShop(p);
     this.emit({ type: 'shop' });
     if (!this.humans.length) this.closeShop();
+  }
+
+  // Leave mod perks out of the draft when they could do nothing for `p`: a mod
+  // the host's Lab turned off or one already at its top level, or (needsMod)
+  // a tank that owns no mod at all.
+  perkFits(p, perk) {
+    if (perk.needsMod && !MODS.some((d) => this.modLevel(p, d.id) > 0)) return false;
+    for (const id of Object.keys(perk.mods || {})) {
+      const def = MOD_BY_ID[id];
+      if (!def || modLab(this.cfg.lab, id).mode === 'off' || this.modLevel(p, id) >= def.maxLevel) return false;
+    }
+    return true;
   }
 
   pickPerk(playerId, id) {
@@ -701,8 +858,8 @@ export class Game {
   // What this tank pays for an armory item (perks can lower it).
   priceOf(p, id) {
     const it = WEAPON_BY_ID[id] || ITEMS.find((x) => x.id === id);
-    if (!it || !(it.price > 0)) return Infinity;
-    const base = id === 'satellite' ? satellitePrice(this.cfg.lab, p) : it.price;   // priced per level
+    if (!MOD_BY_ID[id] && (!it || !(it.price > 0))) return Infinity;
+    const base = MOD_BY_ID[id] ? modPrice(this.cfg.lab, p, id) : it.price;   // a mod is priced per level
     if (!Number.isFinite(base)) return Infinity;
     return Math.round((base * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;
   }
@@ -718,11 +875,14 @@ export class Game {
     else if (id === 'armor') p.pendingArmor += 30;
     else if (id === 'fuel') p.pendingFuel += TANK.fuelCan;
     else if (id === 'jet') p.jets += ITEMS.find((x) => x.id === 'jet').bundle;
-    else if (id === 'satellite') p.satellite = (p.satellite || 0) + 1;
+    else if (MOD_BY_ID[id]) buyLevel(p, id);   // fitted at the round start (fitMods)
     return true;
   }
 
+  // A CPU that is not easy first saves up for a Gravity Orbiter (and its
+  // next level), keeping some money back for ammunition.
   aiShop(p) {
+    if (p.ai !== 'easy' && p.money >= this.priceOf(p, 'orbiter') + 150) this.buy(p.id, 'orbiter');
     const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
     for (const id of wishlist) this.buy(p.id, id);
   }
@@ -963,6 +1123,7 @@ export class Game {
     const plan = this.aiPlan;
     p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
     if (this.phaseTime < plan.think) return;
+    if (plan.deploy) { this.deployTurn(p, plan.deploy); return; }   // this turn goes on a mod
     if (this.swingToward(p, plan, dt)) {
       p.yaw = ((plan.yaw % 360) + 360) % 360;
       p.elev = plan.elev;
@@ -979,11 +1140,26 @@ export class Game {
   stepWorld(dt) {
     const t = this.terrain;
     this.simStep++;
+    const flying = this.projectiles.length > 0 || this.followUps.length > 0;   // the clock runs
     if (this.followUps.length) this.fireFollowUps();
     const spheres = this.players.filter((p) => p.alive).map(hitSphere);
+    // The mods up at this step's clock: orbiter wells pull on every shell but
+    // their owner's, and a shell that touches a mod goes off on it.
+    const up = anyUp(this.players);
+    const wells = up ? modWells(this.players, this.clock) : [];
+    const targets = up ? modTargets(this.players, this.clock) : [];
+    const extraFor = new Map();
+    const extra = (owner) => {
+      if (!extraFor.has(owner)) {
+        const w = wells.filter((x) => x.owner !== owner);
+        extraFor.set(owner, w.length ? w : null);
+      }
+      return extraFor.get(owner);
+    };
     for (const pr of this.projectiles) {
       if (pr.dead) continue;
       if (pr.roller) { this.stepRolling(pr, spheres, dt); continue; }
+      pr.extra = wells.length ? extra(pr.owner) : null;
       const vyBefore = pr.vel[1];
       if (pr.steer && pr.steer.input && pr.steer.fuel > 0) {
         // Swing the horizontal velocity; speed and climb are untouched.
@@ -1014,7 +1190,8 @@ export class Game {
       if (burst) {
         const [bx, , bz] = pr.pos;
         const ground = t.inBounds(bx, bz) && t.solidAt(bx, bz) ? t.heightAt(bx, bz) : null;
-        if (airburstNow(pr, burst, spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id })), ground)) {
+        const nearMod = targets.length ? airburstNearMod(pr, burst, targets) : null;
+        if (nearMod || airburstNow(pr, burst, spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id })), ground)) {
           pr.dead = true;
           pr.splitDone = true;
           for (const v of airburstVelocities(pr.vel, burst)) {
@@ -1022,10 +1199,22 @@ export class Game {
             child.splitDone = true;
           }
           this.emit({ type: 'split', id: pr.id, pos: [...pr.pos], airburst: true });
+          // The burst itself shreds any enemy mod in reach (anti-air).
+          if (burst.air) this.blastMods(pr.pos, burst.air / 1.25, burst.airDamage, pr.owner);
           continue;
         }
       }
       const [x, y, z] = pr.pos;
+      // Into a mod: it goes off there, in the air.
+      let struck = null;
+      for (const m of targets) {
+        if (m.owner === pr.owner) continue;
+        if ((x - m.x) ** 2 + (y - m.y) ** 2 + (z - m.z) ** 2 <= m.r * m.r) { struck = m; break; }
+      }
+      if (struck) {
+        this.detonate(pr, [x, y, z], null, false, { owner: struck.owner, mod: struck.mod });
+        continue;
+      }
       // Direct hit on a tank (the shooter is immune for the first half second).
       let hitTank = null;
       for (const s of spheres) {
@@ -1045,6 +1234,7 @@ export class Game {
     }
     this.projectiles = this.projectiles.filter((p) => !p.dead);
     this.updateFalling(dt);
+    if (flying) this.clock += dt;
   }
 
   lose(pr) {
@@ -1052,10 +1242,11 @@ export class Game {
     this.emit({ type: 'lost', id: pr.id, pos: [...pr.pos] });
   }
 
-  detonate(pr, point, directHit, moon = false) {
+  // `moon`: it struck a moon. `struck`: it struck a mod ({ owner, mod }), in the air.
+  detonate(pr, point, directHit, moon = false, struck = null) {
     const w = WEAPON_BY_ID[pr.weapon];
     // A rolling weapon that lands on open ground starts its run instead.
-    if (rollPart(w) && !directHit && !pr.roller && !moon) {
+    if (rollPart(w) && !directHit && !pr.roller && !moon && !struck) {
       pr.roller = makeRoller(point, pr.vel, this.terrain);
       pr.pos = pr.roller.pos;
       this.emit({ type: 'rollStart', id: pr.id, pos: point });
@@ -1063,8 +1254,8 @@ export class Game {
     }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
-    for (const fx of impactEffects(w, point)) this.applyEffect(fx, pr.owner, directHit, pr.shot);
-    if (pr.weapon === 'shell' && !directHit && !moon) this.throwShrapnel(pr, point);
+    for (const fx of impactEffects(w, point)) this.applyEffect(struck ? { ...fx, struck } : fx, pr.owner, directHit, pr.shot);
+    if (pr.weapon === 'shell' && !directHit && !moon && !struck) this.throwShrapnel(pr, point);
   }
 
   // Shrapnel perk: a plain Shell that hits the ground lobs bomblets onward.
@@ -1139,7 +1330,10 @@ export class Game {
       const radius = fx.radius * (1 + (o ? perkSum(o, 'blastRadius') : 0));
       const damage = fx.damage * (1 + (o ? perkSum(o, 'blastDamage') : 0));
       this.emit({ type: 'explosion', pos: fx.point, radius });
-      this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
+      // A blast high in the air (on a mod) leaves the ground alone.
+      const g = this.groundAt(bx, bz);
+      if (!(by - (g ?? -Infinity) > radius)) this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
+      this.blastMods(fx.point, radius, damage, owner, fx.struck);
       for (const p of this.players) {
         if (!p.alive) continue;
         // Whoever blows the ground out from under a tank on the isles gets the credit for its fall.
@@ -1180,6 +1374,7 @@ export class Game {
       p.alive = false;
       if (attacker && attacker !== p) { attacker.money += PAY.kill * payK; attacker.stats.kills++; }
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
+      this.dropMods(p);
       // The wreck cooks off: a small crater of its own.
       this.carve(p.x, p.y, p.z, 7, 0.4);
     }
@@ -1230,7 +1425,7 @@ export class Game {
     return {
       round: this.round, turnsThisRound: this.turnsThisRound, firstShooter: this.firstShooter,
       wind: [...this.wind], gravity: this.gravity, maxWind: this.maxWind, modifier: this.modifier.id,
-      rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0,
+      rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0, clock: this.clock,
       lastRoundResult: this.lastRoundResult,
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
       reveals: copy(this.reveals), intel: copy(this.intel),
@@ -1249,7 +1444,7 @@ export class Game {
     this.ground = JSON.parse(JSON.stringify(s.ground));
     Object.assign(this, {
       round: s.round, turnsThisRound: s.turnsThisRound, firstShooter: s.firstShooter, gravity: s.gravity,
-      maxWind: s.maxWind, lastRoundResult: s.lastRoundResult, nextProjectileId: s.nextProjectileId,
+      maxWind: s.maxWind, lastRoundResult: s.lastRoundResult, nextProjectileId: s.nextProjectileId, clock: s.clock || 0,
     });
     this.wind = [...s.wind];
     this.reveals = JSON.parse(JSON.stringify(s.reveals || []));

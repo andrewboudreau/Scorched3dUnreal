@@ -26,29 +26,36 @@ export function launchVelocity(yawDeg, elevDeg, power) {
 // projectile may carry its own gravity `g` and wind share `windK` (round
 // modifiers and perks); without them it flies under the defaults. On the
 // floating isles it also carries the moons' `wells`, each pulling it toward
-// its centre with mu / d^2 (no stronger than at the moon's surface).
+// its centre with mu / d^2 (no stronger than at the moon's surface). `extra`
+// is a second list of wells that move (an enemy's Gravity Orbiter, core/mods.js),
+// set afresh each step for the game clock; a well's `soft` (else `r`) is the
+// distance inside which its pull stops growing.
 export function stepProjectile(p, wind, dt = SIM_DT) {
   const k = p.windK ?? 1;
   p.vel[0] += wind[0] * k * dt;
   p.vel[1] -= (p.g ?? GRAVITY) * dt;
   p.vel[2] += wind[1] * k * dt;
-  if (p.wells) {
-    for (const w of p.wells) {
-      const dx = w.x - p.pos[0];
-      const dy = w.y - p.pos[1];
-      const dz = w.z - p.pos[2];
-      const d2 = Math.max(dx * dx + dy * dy + dz * dz, w.r * w.r);
-      const a = (w.mu / (d2 * Math.sqrt(d2))) * dt;
-      p.vel[0] += dx * a;
-      p.vel[1] += dy * a;
-      p.vel[2] += dz * a;
-    }
-  }
+  if (p.wells) pull(p, p.wells, dt);
+  if (p.extra) pull(p, p.extra, dt);
   p.prev[0] = p.pos[0]; p.prev[1] = p.pos[1]; p.prev[2] = p.pos[2];
   p.pos[0] += p.vel[0] * dt;
   p.pos[1] += p.vel[1] * dt;
   p.pos[2] += p.vel[2] * dt;
   p.time += dt;
+}
+
+function pull(p, wells, dt) {
+  for (const w of wells) {
+    const dx = w.x - p.pos[0];
+    const dy = w.y - p.pos[1];
+    const dz = w.z - p.pos[2];
+    const s = w.soft ?? w.r;
+    const d2 = Math.max(dx * dx + dy * dy + dz * dz, s * s);
+    const a = (w.mu / (d2 * Math.sqrt(d2))) * dt;
+    p.vel[0] += dx * a;
+    p.vel[1] += dy * a;
+    p.vel[2] += dz * a;
+  }
 }
 
 export function makeProjectile(pos, vel) {
@@ -85,9 +92,9 @@ export function groundContact(p, terrain) {
   return [b[0], terrain.heightAt(b[0], b[2]), b[2]];
 }
 
-// Did this step hit one of the moons? Returns the point on its surface or null.
-export function wellContact(p) {
-  for (const w of p.wells) {
+// Did this step hit one of the moons (or of `wells`)? Returns the point on its surface or null.
+export function wellContact(p, wells = p.wells) {
+  for (const w of wells) {
     const dx = p.pos[0] - w.x;
     const dy = p.pos[1] - w.y;
     const dz = p.pos[2] - w.z;
@@ -104,7 +111,9 @@ export function wellContact(p) {
 // spheres (tanks); hitting one ends the flight there.
 // With `level`, a lost shot also reports `cross`: where it first came down
 // through that height (the AI's measure of a shot that fell past an isle).
-export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, level = null }) {
+// `field(t)` gives the moving wells (enemy orbiters, core/mods.js modWells) at
+// game clock `t`; the shot leaves at clock `t0`. Touching one ends it ('orbiter').
+export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, level = null, field = null, t0 = 0 }) {
   const p = makeProjectile(pos, vel);
   p.g = gravity;
   p.windK = windK;
@@ -113,12 +122,15 @@ export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], r
   let cross = null;
   const lost = () => ({ kind: 'lost', point: [...p.pos], time: p.time, path, cross });
   while (p.time < maxTime) {
+    if (field) p.extra = field(t0 + p.time);
     stepProjectile(p, wind);
     if (level != null && !cross && p.pos[1] < level && p.prev[1] >= level) cross = [...p.pos];
     if (path && Math.round(p.time / SIM_DT) % 6 === 0) path.push([...p.pos]);
     const [x, y, z] = p.pos;
     const moon = p.wells && wellContact(p);
     if (moon) return { kind: 'moon', point: moon, time: p.time, path };
+    const orb = p.extra?.length && wellContact(p, p.extra);
+    if (orb) return { kind: 'orbiter', point: orb, time: p.time, path };
     if (!terrain.inBounds(x, z)) {
       if (y < terrain.bedrock) return lost();
       continue; // still flying outside the arena; may blow back in
