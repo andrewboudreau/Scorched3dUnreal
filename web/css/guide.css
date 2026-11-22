@@ -1,0 +1,63 @@
+/* The in-game guide (src/guide.js), loaded with it the first time it opens.
+   A centred panel on a desktop; the whole screen on a phone (body.touch, or a
+   short or narrow window), with the safe-area insets cleared, thumb-sized
+   tabs, and a body that scrolls by itself. */
+#guide { z-index: 40; }
+.g-card { display: flex; flex-direction: column; width: min(720px, 94vw); height: min(680px, 90vh); outline: none;
+  background: rgba(18, 23, 30, .97); border: 1px solid var(--edge); border-radius: var(--r-lg); box-shadow: 0 20px 60px rgba(0,0,0,.5); overflow: hidden; }
+.g-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 4px 20px; flex: none; }
+.g-head h2 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+.g-x { min-height: 44px; min-width: 44px; padding: 0; font-size: 18px; line-height: 1; }
+.g-tabs { display: flex; gap: 6px; padding: 4px 14px 8px; overflow-x: auto; flex: none; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.g-tabs::-webkit-scrollbar { display: none; }
+.g-tab { flex: none; min-height: 44px; padding: 0 16px; white-space: nowrap; font-weight: 600; }
+.g-tab.on { border-color: var(--accent); color: var(--accent); background: rgba(255, 181, 71, .12); }
+.g-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 6px 20px 28px; line-height: 1.5; }
+.g-body > * { max-width: 640px; margin-left: auto; margin-right: auto; }
+.g-body h3 { margin: 22px auto 6px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+.g-body h3:first-child { margin-top: 12px; }
+.g-body p { margin: 6px auto; }
+.g-body b { color: #fff; }
+.g-rows { list-style: none; padding: 0; margin: 6px auto; }
+.g-rows li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.g-rows li:last-child { border-bottom: 0; }
+.g-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.g-meta { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+.g-tag { font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 1px 5px; border: 1px solid var(--edge); border-radius: var(--r); color: var(--muted); }
+.g-text { color: #cdd5dc; font-size: 13px; }
+.g-levels { color: var(--muted); font-size: 12px; margin-top: 2px; }
+kbd { display: inline-block; min-width: 20px; padding: 0 5px; text-align: center; font: 600 12px/1.6 ui-monospace, Consolas, monospace;
+  background: rgba(255, 255, 255, .08); border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: var(--r); }
+.g-keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; margin: 6px auto; }
+.g-keys dt { white-space: nowrap; }
+.g-keys dd { margin: 0; color: #cdd5dc; font-size: 13px; }
+.g-rps { display: flex; align-items: stretch; gap: 4px; margin: 8px auto; }
+.g-fam { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: rgba(255, 255, 255, .04); border: 1px solid var(--edge); border-radius: var(--r-lg); }
+.g-fam span { color: var(--accent); font-size: 12px; }
+.g-fam small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.g-fam em { font-style: normal; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.g-fam.coming { border-style: dashed; opacity: .7; }
+.g-arrow { align-self: center; color: var(--muted); font-size: 18px; }
+
+/* A phone: the whole screen. */
+body.touch #guide.screen { place-items: stretch; background: #0e1218; backdrop-filter: none; }
+body.touch .g-card { width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+@media (max-height: 520px), (max-width: 600px) {
+  #guide.screen { place-items: stretch; background: #0e1218; backdrop-filter: none; }
+  .g-card { width: 100%; height: 100%; border: 0; border-radius: 0; box-shadow: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+}
+/* Landscape phones are short: the title, tabs and close share one row. */
+@media (max-height: 520px) {
+  .g-card { display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto minmax(0, 1fr); }
+  .g-head { display: contents; }
+  .g-head h2 { grid-column: 1; grid-row: 1; padding: 0 6px 0 16px; font-size: 16px; align-self: center; }
+  .g-x { grid-column: 3; grid-row: 1; }
+  .g-tabs { grid-column: 2; grid-row: 1; min-width: 0; padding: 2px 8px; border-bottom: 0; align-items: center; }
+  .g-body { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid var(--line); padding: 4px 16px 24px; }
+}
+@media (max-width: 600px) {
+  .g-rps { flex-direction: column; }
+  .g-arrow { transform: rotate(90deg); }
+}
