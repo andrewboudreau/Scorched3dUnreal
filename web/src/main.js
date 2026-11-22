@@ -17,6 +17,7 @@ import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Moons } from './render/moons.js';
+import { GravityLines } from './render/gravityLines.js';
 import { AimArc, Gunner } from './gunner.js';
 import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
@@ -47,6 +48,7 @@ $('app').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const sky = new Sky(scene);   // sun, sky light, fog, clouds
 const moons = new Moons(scene);   // the floating isles' moons
+const gravityLines = new GravityLines(scene);   // flux lines while a well pulls a shell
 if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 6000);
@@ -228,6 +230,7 @@ function disposeMatch() {
   heroId = null;
   $('labels').innerHTML = '';
   moons.set([]);
+  gravityLines.set([]);
   sky.setSpace(false);
   lastLand.clear();
   aimArc.hide();
@@ -349,6 +352,7 @@ function handleEvents() {
           birds.bodies.visible = birds.wings.visible = !game.terrain.under;
           craft.set(!!game.terrain.under, game.terrain.half);
           moons.set(game.terrain.wells);
+          gravityLines.set(game.terrain.wells);
         }
         else addDirty(e.region);
         break;
@@ -2509,6 +2513,7 @@ function tick(dt, draw = true) {
   sky.setDay(day);
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   moons.update(performance.now() / 1000);
+  gravityLines.update(dt * timeScale, game ? game.projectiles : [], [], (pr) => (shellHidden(pr) ? null : shellPos(pr)));
   birds.update(dt);
   craft.update(dt);
   soundScape(dt);
