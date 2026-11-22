@@ -4,8 +4,8 @@
 //   node tools/devserver.mjs [port]      then open http://localhost:8080/
 // Port 0 picks a free one; the first line printed says which.
 //
-// It also mounts the resource-pack library (CRATERFALL_PACKS, default the NAS
-// library) at /packs/, lists it at /api/packs and saves review picks from the
+// It also mounts the resource-pack library (CRATERFALL_PACKS, else "packs" in the
+// gitignored tools/local.json; none set, no packs) at /packs/, lists it at /api/packs and saves review picks from the
 // in-game pack review (src/review.js) to docs/pack-picks.json. The live server
 // has none of this, so the review panel only ever appears locally.
 import http from 'node:http';
@@ -25,7 +25,9 @@ let allBytes = 0;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
   '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.glb': 'model/gltf-binary', '.hdr': 'application/octet-stream', '.md': 'text/markdown; charset=utf-8', '.webp': 'image/webp' };
-const PACKS = path.resolve(process.env.CRATERFALL_PACKS || String.raw`<pack library>`);
+// Where this machine keeps things the repo shouldn't name: tools/local.json (gitignored).
+const local = await readFile(path.join(root, 'tools', 'local.json'), 'utf8').then(JSON.parse).catch(() => ({}));
+const PACKS = path.resolve(process.env.CRATERFALL_PACKS || local.packs || path.join(root, 'no-pack-library'));
 const PICKS = path.join(root, 'docs', 'pack-picks.json');
 
 // Every pack folder with a pack.json, newest spec fields as they are.

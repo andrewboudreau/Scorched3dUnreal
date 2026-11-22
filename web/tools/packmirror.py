@@ -10,7 +10,7 @@ of at most 50 MB, so:
 packmirror/index.json is the same shape as the dev server's /api/packs.
 The mirror is its own module drop (packsmodule/), so game deploys stay small:
 
-    python tools/packmirror.py [library]      (default: the NAS library)
+    python tools/packmirror.py [library]      (default: CRATERFALL_PACKS, else "packs" in tools/local.json)
     cd module && ./deploy.ps1 -Id craterfall-packs -Project ../packsmodule
 """
 import json
@@ -20,7 +20,18 @@ import sys
 
 from PIL import Image
 
-LIB = sys.argv[1] if len(sys.argv) > 1 else r"<pack library>"
+def local_packs():
+    """The library named in the gitignored tools/local.json, if any."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "local.json"), encoding="utf-8") as f:
+            return json.load(f).get("packs")
+    except (OSError, ValueError):
+        return None
+
+
+LIB = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CRATERFALL_PACKS") or local_packs()
+if not LIB:
+    sys.exit('No pack library: pass a folder, set CRATERFALL_PACKS, or put {"packs": "..."} in tools/local.json.')
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packmirror")
 MAT_PX = 512
 

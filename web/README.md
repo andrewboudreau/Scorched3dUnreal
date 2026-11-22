@@ -23,8 +23,9 @@ each other.
 
 ### Reviewing resource packs
 
-The dev server also mounts the asset library's resource packs (the NAS library
-by default; set `CRATERFALL_PACKS` to another folder). **Settings > Resource
+The dev server also mounts the asset library's resource packs, from
+`CRATERFALL_PACKS` or else `{"packs": "<folder>"}` in `tools/local.json`
+(gitignored, so machine paths stay out of the repo). **Settings > Resource
 packs** (or P) then opens a review panel (`src/review.js`):
 
 - **Sounds**: play any of them, or put one in for a game event (cannon, small,

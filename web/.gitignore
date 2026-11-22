@@ -2,3 +2,6 @@ packmirror/
 packsmodule/bin/
 packsmodule/obj/
 packsmodule/out/
+# This machine's paths (the pack library) and the review picks, which record them.
+tools/local.json
+docs/pack-picks.json
