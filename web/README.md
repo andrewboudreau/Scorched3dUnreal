@@ -60,6 +60,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | ↑ / ↓ | drive forward / reverse along the hull (uses fuel) |
 | ← / → | turn the hull (free) |
 | J | jump jet: hop about 25 m the way the hull faces (does not use the shot or fuel) |
+| X | Double Strike (with the perk): arm a double, or drop it again |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
 | Space | fire (in a volley: lock in your shot) |
 | F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
@@ -305,7 +306,19 @@ second column beside the first. On a phone the players box sits top right.
   | Heavy Rounds | wind pushes your shots 35% less |
   | Shrapnel | plain Shells throw two bomblets onward from where they land |
   | Tracer Rounds | see the first 45 m of your shot while you aim |
+| Double Strike | from round 3's draft on: queue two shots in one turn (see below) |
 
+- **Double Strike** (a perk, drafted from the round 3 pick on). On a turn, or
+  a go at planning a volley, press ×2 (X; on a phone the ×2 button just above
+  Fire) to arm it. Fire then queues your aim as shot 1 ("Shot 1 of 2 queued"),
+  you aim shot 2, and Fire again sends both (in a volley, locks both in): the
+  second leaves 0.45 s of flight after the first. Each shot has its own aim and
+  weapon and spends its own ammo. The price: your next turn (or volley) is move
+  only. You can drive, turn and jump, but Fire passes ("Reloading: move only,
+  fire passes"). Arming is optional, and ×2 again drops a queued shot 1. Online,
+  both shots travel in the one plan and a reload goes as an empty plan. CPU tanks
+  that hold it double when they have the range on a target or can finish it, and
+  sit out the reload. A reload does not carry into the next round.
 - **Round modifiers.** With Twists on, each round rolls one and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (much stronger wind), Dead calm, Low gravity,

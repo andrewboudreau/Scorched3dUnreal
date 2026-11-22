@@ -184,11 +184,32 @@ export function planJump({ me, terrain, difficulty = 'normal', tryHop }) {
   return best;
 }
 
+// Double Strike: should a CPU that holds it fire two shots this turn (and so
+// only move on its next)? When it has the range on its target (a few shots at
+// it already, so the second is not wasted), or when two hits would finish the
+// target off. Easy uses it now and then, at random. Called after the first
+// shot is planned, so `memory[target.id].shots` already counts that one.
+export function wantsDouble({ target, memory, difficulty = 'normal', rng }) {
+  if (difficulty === 'easy') return rng.next() < 0.2;
+  const seen = memory[target.id]?.shots || 0;
+  const dialled = seen >= (difficulty === 'hard' ? 2 : 3);
+  const finish = (target.hp || 0) + (target.armor || 0) <= 70;
+  return (dialled || finish) && rng.next() < (difficulty === 'hard' ? 0.8 : 0.55);
+}
+
 export function chooseWeapon(me, target, rng) {
   const has = (id) => me.inventory[id] > 0;
   if (has('roller') && target.y < me.y - 8 && rng.next() < 0.6) return 'roller';
   if (has('breacher') && rng.next() < 0.5) return 'breacher';
   if (has('scatter') && rng.next() < 0.4) return 'scatter';
   if (has('flak') && rng.next() < 0.4) return 'flak';
+  return 'shell';
+}
+
+// A weapon for the second of a CPU's two shots: the first one's ammo is spent
+// already, so it only picks a heavy round it still has one of, else a Shell.
+export function chooseSecondWeapon(me, first, rng) {
+  const left = (id) => (me.inventory[id] || 0) - (id === first ? 1 : 0);
+  if (left('breacher') > 0 && rng.next() < 0.5) return 'breacher';
   return 'shell';
 }

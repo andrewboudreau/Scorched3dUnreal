@@ -23,6 +23,7 @@ import { AlienCraft } from './render/craft.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
+import { StrikeUI } from './strike.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
@@ -310,6 +311,7 @@ function addShake(pos, power) {
 function handleEvents() {
   recentBlasts.length = 0;
   for (const e of game.drainEvents()) {
+    strikeUi.event(e);
     switch (e.type) {
       case 'roundStart':
         wrecks.forEach(dropWreck);
@@ -363,7 +365,7 @@ function handleEvents() {
       }
       case 'locked':
         sound.click();
-        banner('Locked in', '', 700);
+        banner(e.pass ? 'Passed' : 'Locked in', e.pass ? 'Reloading after a Double Strike' : '', e.pass ? 1000 : 700);
         break;
       case 'volley': {
         closeHandoff();
@@ -1421,6 +1423,8 @@ if (touch) {
   $('steer-hint').querySelector('.sh-tip').textContent = 'hold left or right to steer';
   $('chat-input').placeholder = 'Say something';
 }
+// Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
+const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 
 function toggleMute() {
   sound.ensure();
@@ -1444,7 +1448,7 @@ settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', op
 settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 
-const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
+const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
 
 function selectWeaponSlot(i) {
@@ -1458,12 +1462,12 @@ function selectWeaponSlot(i) {
 let weaponBarKey = '';
 function updateWeaponBar(p) {
   const list = ownedWeapons(p);
-  const key = `${p.id}|${p.weapon}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${p.inventory[w.id]}`).join(',')}`;
+  const key = `${p.id}|${p.weapon}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${game.ammoLeft(p, w.id)}`).join(',')}`;
   if (key === weaponBarKey) return;
   weaponBarKey = key;
   $('weapon-bar').innerHTML = list.map((w, i) => `
     <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(w.desc)}" ${p.ai ? 'disabled' : ''}>
-      <span class="wb-key">${i + 1}</span>${w.name}<span class="wb-n">${ammoText(p.inventory[w.id])}</span>
+      <span class="wb-key">${i + 1}</span>${w.name}<span class="wb-n">${ammoText(game.ammoLeft(p, w.id))}</span>
     </button>`).join('');
 }
 $('weapon-bar').addEventListener('click', (e) => {
@@ -2168,7 +2172,7 @@ function updateNetClock() {
   }
   if (!(left <= 0)) return;
   clockKey = `${key} out`;          // once
-  if (key.startsWith('aim')) { game.fire(); return; }
+  if (key.startsWith('aim')) { game.fire(true); return; }
   if (!$('draft').classList.contains('hidden')) $('draft-items').querySelector('button')?.click();
   if (!$('shop').classList.contains('hidden')) $('shop-done').click();
 }
@@ -2442,6 +2446,7 @@ function tick(dt, draw = true) {
     updateTracer();
     sceneryMesh.sync(elapsed);
     updateHud();
+    strikeUi.update();
     updateLabels();
     updatePips();
     updateLocators();

@@ -478,3 +478,21 @@ body.touch #gunner .gn-zoom button { width: 44px; height: 38px; }
 #gunner-btn.on { border-color: var(--accent); color: var(--accent); }
 body.touch #gunner-btn { display: none; }
 .t-sight { width: 84px; }
+
+/* Double Strike (src/strike.js): the ×2 toggle, the status pill, and Fire as a pass while reloading. */
+.strike-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 10px; border-radius: var(--r);
+  border: 1px solid var(--edge); background: rgba(14, 18, 24, .5); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer;
+  pointer-events: auto; user-select: none; }
+.strike-btn b { font-size: 10px; color: var(--muted); }
+.strike-btn.on { border-color: var(--accent); background: rgba(255, 181, 71, .25); color: #ffd79a; }
+.strike-chip { margin-top: 6px; padding: 3px 8px; border-radius: var(--r); font-size: 12px; font-weight: 600; width: fit-content;
+  background: rgba(255, 181, 71, .16); border: 1px solid rgba(255, 181, 71, .55); color: #ffd79a; }
+.strike-chip.queued { background: rgba(76, 199, 122, .18); border-color: rgba(76, 199, 122, .7); color: #b9f0cc; }
+.strike-chip.reload { background: rgba(140, 150, 165, .2); border-color: rgba(190, 200, 215, .5); color: #dfe6ee; }
+/* On a phone: ×2 sits just above FIRE; the pill floats over the right-hand cluster. */
+#touch .strike-btn { margin: 0; width: 84px; height: 34px; padding: 0; justify-content: center; font-size: 17px; border-radius: var(--r-lg); }
+#touch .strike-btn.on { background: rgba(255, 181, 71, .4); border-color: var(--accent); color: #fff; }
+#touch .strike-btn.queued::after { content: '1/2'; margin-left: 6px; font-size: 11px; color: #b9f0cc; }
+#touch .strike-chip { position: absolute; right: 0; bottom: calc(100% + 8px); margin: 0; padding: 5px 10px; font-size: 13px; white-space: nowrap;
+  text-shadow: 0 1px 2px #000; backdrop-filter: blur(2px); }
+#touch .t-fire.pass { background: linear-gradient(135deg, #8a96a6, #5d6878); }

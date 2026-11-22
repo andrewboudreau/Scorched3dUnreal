@@ -3,7 +3,7 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
 
@@ -37,6 +37,16 @@ export const VOLLEY = { beat: 0.9, beatMax: 2.6, stagger: 0.09 };
 // scout burst), so every copy of an online game holds the same; the CPUs aim
 // from it.
 export const FOG = { sight: 110, rough: 60, flash: 35 };
+
+// Double Strike (the perk with `doubleStrike`). On its turn (or its go at
+// planning a volley) a tank that holds it may arm a double: Fire then queues
+// the aim as shot 1 and the next Fire sends both, the second `gap` seconds of
+// flight after the first. Each shot has its own aim and weapon and spends its
+// own ammo. The tank is then reloading: on its next turn (or volley) it can
+// drive, turn and jump, but Fire only passes. Arming is a choice, never forced.
+// The second shot is timed in fixed simulation steps, so every copy of an
+// online game fires it on the same step.
+export const STRIKE = { gap: 0.45 };
 
 export class Game {
   constructor({
@@ -84,6 +94,7 @@ export class Game {
       hull: 0, fuel: 0, fuelMax: 0, hitsHere: 0,
       hp: TANK.maxHp, maxHp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
+      reloading: false,   // fired a Double Strike: its next turn is move only (see STRIKE)
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
       shots: [], shotCount: 0,   // aim history, see AIM_HISTORY
       // Whole-match tallies for the results screen. `hits` counts shots (not
@@ -103,6 +114,9 @@ export class Game {
     this.turnsThisRound = 0;
     this.lastRoundResult = null;
     this.acc = 0;
+    this.strike = null;     // Double Strike being planned now: { player, first: shot 1 or null }
+    this.followUps = [];    // second shots waiting to go: { owner, plan, at (sim step), delay }
+    this.simStep = 0;       // fixed simulation steps run so far (times the second shots)
   }
 
   emit(e) { this.events.push(e); }
@@ -161,7 +175,10 @@ export class Game {
       p.power = 60;
       p.elev = 45;
       p.roundDamage = 0;
+      p.reloading = false;
     }
+    this.strike = null;
+    this.followUps = [];
     // Everyone starts aiming at the arena centre.
     for (const p of this.players) p.hull = p.yaw = ((Math.atan2(-p.z, -p.x) * 180) / Math.PI + 360) % 360;
     this.wind = this.randomWind();
@@ -245,6 +262,7 @@ export class Game {
     this.aiPlan = null;
     this.aiDrive = null;
     this.driveNote = null;
+    this.strike = null;
     this.checkAimHistory(p);
     this.refreshIntel();
     if (this.volleyMode) {
@@ -319,10 +337,15 @@ export class Game {
   }
 
   // The current human is happy with the aim: keep it secret until the volley.
+  // With a Double Strike queued, the plan carries the second shot as `second`.
   lockPlan() {
     const p = this.current;
     if (this.phase !== 'aim' || !p || !p.alive || p.ai) return false;
-    this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    if (p.reloading) return this.passTurn(p);
+    const shot = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    const first = this.strike?.player === p.id ? this.strike.first : null;
+    this.volley.plans[p.id] = first ? { ...first, second: shot } : shot;
+    this.strike = null;
     this.volley.done.push(p.id);
     Object.assign(p, this.volley.shown);
     this.emit({ type: 'locked', player: p.id });
@@ -341,8 +364,13 @@ export class Game {
     for (const p of this.players) {
       if (!p.alive) { delete v.plans[p.id]; continue; }
       if (!p.ai) continue;
+      if (p.reloading) {   // a Double Strike last volley: this one it sits out
+        delete v.plans[p.id];
+        this.emit({ type: 'pass', player: p.id });
+        continue;
+      }
       const plan = this.planAiShot(p);
-      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon };
+      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.second ? { second: plan.second } : {}) };
     }
     this.aiPlan = null;
     this.emit({ type: 'volley', players: Object.keys(v.plans).map(Number) });
@@ -359,14 +387,14 @@ export class Game {
   launchVolley() {
     let k = 0;
     for (const p of this.players) {
+      const reloaded = p.reloading;
+      p.reloading = false;   // this volley was its reload, if it had one
       const plan = this.volley.plans[p.id];
-      if (!plan || !p.alive) continue;
-      p.yaw = ((plan.yaw % 360) + 360) % 360;
-      p.elev = plan.elev;
-      p.power = plan.power;
-      clampAim(p);
-      p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
-      this.launch(p, k++ * VOLLEY.stagger);
+      if (!plan || !p.alive || reloaded) continue;
+      this.aimAt(p, plan);
+      const delay = k++ * VOLLEY.stagger;
+      if (plan.second && hasPerk(p, 'doubleStrike')) this.launchDouble(p, plan.second, delay);
+      else this.launch(p, delay);
     }
     this.volley.plans = {};
     this.phase = 'flight';
@@ -411,6 +439,8 @@ export class Game {
   }
 
   planAiShot(p) {
+    // Reloading after a Double Strike: nothing to aim, Fire only passes.
+    if (p.reloading) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, pass: true, think: 0.6 });
     const target = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
     if (!target) return null;
     // In the fog, a CPU that only has a rough fix sends a scout there first, now and then.
@@ -426,7 +456,13 @@ export class Game {
       gravity: this.gravity,
       windK: this.windShare(p),
     });
-    return (this.aiPlan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 });
+    const plan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
+    if (!scout && hasPerk(p, 'doubleStrike') && wantsDouble({ target, memory: p.aim, difficulty: p.ai, rng: this.rng })) {
+      const again = planShot({ shooter: p, target, wind: this.wind, terrain: this.terrain, rng: this.rng, difficulty: p.ai,
+        memory: p.aim, gravity: this.gravity, windK: this.windShare(p) });
+      plan.second = { yaw: again.yaw, elev: again.elev, power: again.power, weapon: chooseSecondWeapon(p, plan.weapon, this.rng) };
+    }
+    return (this.aiPlan = plan);
   }
 
   // ---------- fog of war ----------
@@ -629,7 +665,7 @@ export class Game {
     this.shopped = [];                          // online: humans whose shopping is in
     for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
-      const offer = this.cfg.twists ? draftOffer(p, this.rogue) : [];
+      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1) : [];
       if (!offer.length) continue;
       if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
       else this.draft[p.id] = offer;
@@ -695,19 +731,134 @@ export class Game {
   cycleWeapon(dir = 1) {
     const p = this.current;
     if (this.phase !== 'aim' || !p || p.ai) return;
-    const list = WEAPONS.filter((w) => !w.hidden && p.inventory[w.id] > 0);
+    const list = WEAPONS.filter((w) => !w.hidden && this.ammoLeft(p, w.id) > 0);
     const i = list.findIndex((w) => w.id === p.weapon);
     p.weapon = list[(i + dir + list.length) % list.length].id;
   }
 
   // Fire the current tank's shot. In volley mode this locks the plan in instead.
-  fire() {
+  // With a Double Strike armed the first press queues shot 1 and the second
+  // sends (or locks) both; while reloading it passes. `now` (the online clock
+  // ran out) never stops at queueing: an armed double with nothing queued goes
+  // as a single shot.
+  fire(now = false) {
     const p = this.current;
     if (this.phase !== 'aim' || !p || !p.alive) return false;
+    const step = this.strikeStep(p);
+    if (step === 'pass') return this.passTurn(p);
+    if (step === 'first') {
+      if (!now) return this.queueFirst(p);
+      this.strike = null;
+    }
     if (this.volleyMode) return this.lockPlan();
-    if (!this.launch(p)) return false;
+    if (!(step === 'second' ? this.fireBoth(p) : this.launch(p))) return false;
+    this.strike = null;
     this.phase = 'flight';
     this.phaseTime = 0;
+    return true;
+  }
+
+  // ---------- Double Strike (see STRIKE) ----------
+
+  // Could the current human arm a double right now?
+  canDouble(p = this.current) {
+    return this.phase === 'aim' && !!p && p.alive && !p.ai && hasPerk(p, 'doubleStrike') && !p.reloading;
+  }
+
+  // What Fire does for this planner now: 'pass' (reloading), 'first' (armed,
+  // queues shot 1), 'second' (sends both, or locks both in a volley) or 'single'.
+  strikeStep(p = this.current) {
+    if (!p) return 'single';
+    if (p.reloading) return 'pass';
+    if (this.strike && this.strike.player === p.id) return this.strike.first ? 'second' : 'first';
+    return 'single';
+  }
+
+  // Arm or disarm a double for the current human. Disarming once shot 1 is
+  // queued drops it; the turret stays as it is. Returns whether it is armed now.
+  toggleDouble() {
+    const p = this.current;
+    if (this.strike) {
+      this.strike = null;
+      this.emit({ type: 'strike', player: p ? p.id : null, armed: false });
+      return false;
+    }
+    if (!this.canDouble(p)) return false;
+    this.strike = { player: p.id, first: null };
+    this.emit({ type: 'strike', player: p.id, armed: true });
+    return true;
+  }
+
+  // Rounds of `id` this tank can still put in a shot: a queued shot 1 has a claim on one.
+  ammoLeft(p, id) {
+    const n = p.inventory[id] || 0;
+    const q = this.strike && this.strike.player === p.id ? this.strike.first : null;
+    return q && q.weapon === id && !WEAPON_BY_ID[id]?.infinite ? n - 1 : n;
+  }
+
+  // The current aim becomes shot 1 of 2; the tank goes on aiming shot 2.
+  queueFirst(p) {
+    if (!(p.inventory[p.weapon] > 0)) return false;
+    this.strike.first = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    if (!(this.ammoLeft(p, p.weapon) > 0)) p.weapon = 'shell';
+    this.emit({ type: 'queued', player: p.id, n: 1 });
+    return true;
+  }
+
+  // Turns: shot 1 as queued, shot 2 as aimed now.
+  fireBoth(p) {
+    const second = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon };
+    this.aimAt(p, this.strike.first);
+    return this.launchDouble(p, second);
+  }
+
+  // Shot 1 leaves now as the tank is aimed; `second` follows STRIKE.gap later.
+  launchDouble(p, second, delay = 0) {
+    if (!this.launch(p, delay)) return false;
+    this.followUps.push({ owner: p.id, plan: second, at: this.simStep + Math.round(STRIKE.gap / SIM_DT), delay });
+    p.reloading = true;
+    this.emit({ type: 'double', player: p.id });
+    return true;
+  }
+
+  // Second shots that are due go off. Runs on the fixed step.
+  fireFollowUps() {
+    if (!this.followUps.some((f) => f.at <= this.simStep)) return;
+    const due = this.followUps.filter((f) => f.at <= this.simStep);
+    this.followUps = this.followUps.filter((f) => f.at > this.simStep);
+    for (const f of due) {
+      const p = this.players[f.owner];
+      if (!p.alive) continue;   // knocked out between the two
+      this.aimAt(p, f.plan);
+      this.launch(p, f.delay);
+    }
+  }
+
+  // Set a tank's turret, barrel, charge and weapon to a planned shot (a Shell if that ammo is gone).
+  aimAt(p, plan) {
+    p.yaw = ((plan.yaw % 360) + 360) % 360;
+    p.elev = plan.elev;
+    p.power = plan.power;
+    clampAim(p);
+    p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
+  }
+
+  // A reloading tank's Fire: no shot. Its turn ends (in a volley, it is done
+  // planning and sits this one out; launchVolley ends the reload).
+  passTurn(p) {
+    this.strike = null;
+    this.emit({ type: 'pass', player: p.id });
+    if (this.volleyMode) {
+      delete this.volley.plans[p.id];
+      this.volley.done.push(p.id);
+      Object.assign(p, this.volley.shown);
+      this.emit({ type: 'locked', player: p.id, pass: true });
+      this.nextPlanner();
+      return true;
+    }
+    p.reloading = false;
+    this.phase = 'settle';
+    this.phaseTime = 0.3;
     return true;
   }
 
@@ -781,7 +932,7 @@ export class Game {
         steps++;
         this.stepWorld(SIM_DT);
       }
-      if (this.phase === 'flight' && this.projectiles.length === 0) {
+      if (this.phase === 'flight' && this.projectiles.length === 0 && !this.followUps.length) {
         this.phase = 'settle';
         this.phaseTime = 0;
       }
@@ -806,12 +957,19 @@ export class Game {
       p.yaw = ((plan.yaw % 360) + 360) % 360;
       p.elev = plan.elev;
       p.power = plan.power;
+      if (plan.second && !p.reloading) {
+        // Double Strike: this aim is shot 1, queued; the second goes as planned.
+        this.strike = { player: p.id, first: { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon } };
+        this.aimAt(p, plan.second);
+      }
       this.fire();
     }
   }
 
   stepWorld(dt) {
     const t = this.terrain;
+    this.simStep++;
+    if (this.followUps.length) this.fireFollowUps();
     const spheres = this.players.filter((p) => p.alive).map(hitSphere);
     for (const pr of this.projectiles) {
       if (pr.dead) continue;
@@ -1098,6 +1256,8 @@ export class Game {
     });
     if (s.volley) this.volley = { queue: [], plans: s.volley.plans, done: s.volley.done, shown: null };
     this.projectiles = [];
+    this.followUps = [];
+    this.strike = null;
   }
 
   // Remake this round's ground from its seed, the tank pads and every crater
