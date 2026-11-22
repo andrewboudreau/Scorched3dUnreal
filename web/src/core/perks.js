@@ -18,6 +18,8 @@
 //   windScale     change to how hard the wind pushes the owner's shots
 //   shrapnel      bomblets a plain Shell throws onward from where it lands
 //   tracer        metres of predicted flight drawn while aiming
+//   doubleStrike  the owner may queue two shots in one turn (see game.js STRIKE)
+//   fromRound     only offered in the draft before this round or a later one
 
 export const PERKS = [
   { id: 'wideblast', tag: 'WB', name: 'Wide Blast', desc: 'Your blasts reach 15% further.', blastRadius: 0.15 },
@@ -33,6 +35,8 @@ export const PERKS = [
   { id: 'heavyrounds', tag: 'HR', name: 'Heavy Rounds', desc: 'Wind pushes your shots 35% less.', windScale: -0.35 },
   { id: 'shrapnel', tag: 'SH', name: 'Shrapnel', desc: 'Your plain Shells throw two bomblets onward from where they land.', shrapnel: 2 },
   { id: 'tracer', tag: 'TR', name: 'Tracer Rounds', desc: 'See the first 45 m of your shot while you aim.', tracer: 45 },
+  { id: 'double', tag: 'DS', name: 'Double Strike', fromRound: 3, doubleStrike: true,
+    desc: 'When you choose, queue two shots in one turn: they fire back to back. Your next turn is move only.' },
 ];
 
 export const PERK_BY_ID = Object.fromEntries(PERKS.map((p) => [p.id, p]));
@@ -49,8 +53,9 @@ export function hasPerk(player, key) {
 }
 
 // Three perks the tank does not hold yet (fewer once it owns nearly all).
-export function draftOffer(player, rng, count = 3) {
-  const pool = PERKS.filter((p) => !(player.perks || []).includes(p.id));
+// `round` is the round the pick is for: perks with a later `fromRound` sit out.
+export function draftOffer(player, rng, count = 3, round = Infinity) {
+  const pool = PERKS.filter((p) => !(player.perks || []).includes(p.id) && (p.fromRound || 0) <= round);
   const out = [];
   while (out.length < count && pool.length) out.push(pool.splice(rng.int(0, pool.length - 1), 1)[0].id);
   return out;
