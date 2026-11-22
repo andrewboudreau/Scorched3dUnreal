@@ -86,10 +86,23 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   tall, so it clears the drive cross on a 375 px phone) and perks hide; the keyboard
   help line goes; the weapon bar is the weapon button's pop-up; the chat log
   moves up.
-- The setup, draft, shop and results cards already fit (`max-height: 92vh` and
+- The draft, shop and results cards already fit (`max-height: 92vh` and
   scroll). Buttons get a 40 px minimum height. The shop grid is 3 columns in
-  landscape and fine. The setup card is long; in landscape it scrolls. A later pass
-  could fold the options into a "More options" section.
+  landscape and fine.
+- **The launch screen is not a card on a phone.** With `body.touch`, or a landscape
+  window under 500 px tall, `#setup` fills the screen edge to edge and scrolls
+  by itself. Padding uses the safe-area insets so nothing hides under the notch or
+  the home bar, with room left at the end for the gear. Inputs, selects and
+  buttons are at least 44 to 48 px tall, and text inputs are 16 px so iOS does
+  not zoom. In landscape it is two columns: title, **Your name** and **Play** stay
+  put on the left, and Play online and the collapsed **Custom match** scroll on the
+  right. In portrait it is one column. Most people only need Play; the
+  options live under Custom match (open or shut, remembered).
+- **Play and Start go full screen.** On a phone, tapping Play or Start also calls
+  `toggleFullscreen()` when `canFullscreen()` and not already full screen. That
+  has to run inside the tap (full screen needs a user gesture), so it is in
+  the click handlers (`phoneFullscreen` in `src/launch.js`). iPhone Safari has
+  no element full screen; Add to Home Screen covers it.
 - Labels, pips and edge arrows work as they are. Edge arrows are tappable.
 
 ## Performance on mobile GPUs
