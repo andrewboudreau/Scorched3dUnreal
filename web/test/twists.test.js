@@ -35,7 +35,7 @@ const plain = (players = two, extra = {}) => {
 // ---- perks ----
 
 test('perk data is well formed and a draft offers three the tank does not hold', () => {
-  assert.ok(PERKS.length >= 10 && PERKS.length <= 14);
+  assert.ok(PERKS.length >= 10 && PERKS.length <= 18);
   assert.equal(new Set(PERKS.map((p) => p.id)).size, PERKS.length);
   assert.equal(new Set(PERKS.map((p) => p.tag)).size, PERKS.length);
   const rng = makeRng(4);

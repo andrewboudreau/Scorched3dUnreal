@@ -13,7 +13,8 @@ export const FADE_OUT = 0.8;          // ...and out
 // Acceleration (m/s^2) the well puts on something at (x, y, z).
 export function wellAccel(w, x, y, z) {
   const dx = w.x - x, dy = w.y - y, dz = w.z - z;
-  return w.mu / Math.max(dx * dx + dy * dy + dz * dz, w.r * w.r);
+  const s = w.soft ?? w.r;   // as stepProjectile: an orbiter well softens over `soft`
+  return w.mu / Math.max(dx * dx + dy * dy + dz * dz, s * s);
 }
 
 // 0 below the threshold; from just above it, a visible 0.35 rising to 1.

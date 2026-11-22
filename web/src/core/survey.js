@@ -43,19 +43,23 @@ export function normalizeLab(lab) {
   return { satellite, level, labels };
 }
 
-// The level of satellite `p` has in orbit (0: none).
+// Armory levels bought: the satellite is a mod now (core/mods.js, `p.mods.satellite`).
+const bought = (p) => p?.mods?.satellite?.bought ?? p?.satellite ?? 0;
+
+// The level of satellite `p` owns (0: none), before perks; the game adds
+// those (mods.js modLevel) and deploys it (game.surveyLevel).
 export function satelliteLevel(lab, p) {
   const l = normalizeLab(lab);
   if (l.satellite === 'off') return 0;
   if (l.satellite === 'all') return l.level;
-  return Math.min(SURVEY.maxLevel, p?.satellite || 0);
+  return Math.min(SURVEY.maxLevel, bought(p));
 }
 
 // What the next level costs `p` before any discount, or Infinity when it is
 // not for sale (not in the armory, or already at the top level).
 export function satellitePrice(lab, p) {
   if (normalizeLab(lab).satellite !== 'shop') return Infinity;
-  const have = p?.satellite || 0;
+  const have = bought(p);
   return have >= SURVEY.maxLevel ? Infinity : SURVEY.prices[have];
 }
 
@@ -66,9 +70,12 @@ export function labelShare(lab, level) {
 }
 
 // What a solution at this level takes into account.
-export function surveyConditions(level, { wind = [0, 0], windK = 1, gravity = GRAVITY, wells = [] } = {}) {
+// From level 2 that includes the enemies' Gravity Orbiters: `field(t)` and the
+// game clock `t0` (see ballistics.simulateShot). Recon beats defense: the
+// clock stands still while everyone plans, so those labels are exact.
+export function surveyConditions(level, { wind = [0, 0], windK = 1, gravity = GRAVITY, wells = [], field = null, t0 = 0 } = {}) {
   const live = level >= 2;
-  return { wind: live ? [wind[0], wind[1]] : [0, 0], windK: live ? windK : 0, gravity, wells: live ? wells : [], live };
+  return { wind: live ? [wind[0], wind[1]] : [0, 0], windK: live ? windK : 0, gravity, wells: live ? wells : [], live, field: live ? field : null, t0 };
 }
 
 // ---------- the lattice ----------
@@ -160,6 +167,7 @@ export function solveSite({ shooter, elev, target, cond, terrain, guess = null, 
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev), vel: launchVelocity(yaw, elev, power),
       wind: cond.wind, terrain: world, gravity: cond.gravity, windK: cond.windK, level: ty - 1,
+      field: cond.field || null, t0: cond.t0 || 0,
     });
     const [ix, , iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
     const miss = Math.hypot(ix - tx, iz - tz);

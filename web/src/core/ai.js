@@ -21,7 +21,7 @@ export const DIFFICULTY = {
 const RAD = 180 / Math.PI;
 const wrap180 = (a) => ((a + 540) % 360) - 180;
 
-export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1 }) {
+export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, field = null, t0 = 0 }) {
   const sx = shooter.x;
   const sz = shooter.z;
   const tx = target[0];
@@ -43,7 +43,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev),
       vel: launchVelocity(yaw, elev, power),
-      wind, terrain, gravity, windK, level: target[1] - 1,
+      wind, terrain, gravity, windK, level: target[1] - 1, field, t0,
     });
     // A shell that fell past an isle is judged by where it came down through the target's height.
     const [ix, , iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
@@ -77,13 +77,15 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
   };
 }
 
-// A CPU's shot at `target` (a player). `memory` belongs to the shooter and maps
+// A CPU's shot at `target` (a player). `field` / `t0` are the enemy orbiters'
+// wells as a function of the game clock and the clock at launch (see
+// simulateShot): the solver flies its trial shots through them. `memory` belongs to the shooter and maps
 // target id -> the aiming error it still carries against that target. The
 // first shot gets a full-sized error; every later shot keeps only part of it.
 // A target or shooter that has moved, or a change in the wind, puts some back.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1 }) {
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, field = null, t0 = 0 }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK });
+  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, field, t0 });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
   let m = memory[target.id];
   if (!m) {
@@ -197,8 +199,11 @@ export function wantsDouble({ target, memory, difficulty = 'normal', rng }) {
   return (dialled || finish) && rng.next() < (difficulty === 'hard' ? 0.8 : 0.55);
 }
 
+// A target behind a Gravity Orbiter (`shielded`) draws Flak first: its burst
+// over the tank hurts the orbiter too, and fragments care less about a bent path.
 export function chooseWeapon(me, target, rng) {
   const has = (id) => me.inventory[id] > 0;
+  if (target.shielded && has('flak') && rng.next() < 0.6) return 'flak';
   if (has('roller') && target.y < me.y - 8 && rng.next() < 0.6) return 'roller';
   if (has('breacher') && rng.next() < 0.5) return 'breacher';
   if (has('scatter') && rng.next() < 0.4) return 'scatter';

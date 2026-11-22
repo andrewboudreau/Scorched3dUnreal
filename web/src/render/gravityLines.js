@@ -257,6 +257,7 @@ export class GravityLines {
         }
       }
       for (const w of extraWells) {
+        if (w.owner != null && w.owner === pr.owner) continue;   // an orbiter spares its owner's shells
         const lvl = pullLevel(wellAccel(w, pos[0], pos[1], pos[2]) / GRAVITY);
         if (lvl <= 0) continue;
         const f = this.extraFor(w);

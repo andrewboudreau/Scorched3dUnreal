@@ -48,12 +48,15 @@ export const WEAPONS = [
   },
   {
     id: 'flak', name: 'Flak', price: 220, bundle: 2,
-    desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Passing nobody, it bursts just above the ground.',
+    desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Anti-air: it also bursts by an enemy orbiter or satellite and can bring it down. Passing nobody, it bursts just above the ground.',
     // On the way down it bursts at its nearest pass over an enemy tank (within
     // `range` across, `low`..`high` above it), or `floor` over the ground.
     // Fragments keep `carry` of the shell's sideways speed and fan out `spread`
     // m/s, so a burst 20 m up lands a pattern about 15 m across, under it.
-    flight: [{ type: 'airburst', range: 22, low: 4, high: 40, floor: 14, count: 12, spread: 7, carry: 0.35, child: 'flaklet' }],
+    // It is anti-air too: it also bursts on its nearest pass within `air` m of an
+    // enemy mod (core/mods.js), and the burst itself hurts every enemy mod in
+    // reach, up to `airDamage` right on it.
+    flight: [{ type: 'airburst', range: 22, low: 4, high: 40, floor: 14, count: 12, spread: 7, carry: 0.35, child: 'flaklet', air: 18, airDamage: 45 }],
     // Only if it strikes before it can burst (a flat shot into a hill): a small blast.
     impact: [{ type: 'blast', radius: 8, damage: 18, depth: 0.4 }],
   },
@@ -96,7 +99,6 @@ export const WEAPONS = [
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },
   { id: 'fuel', name: 'Fuel Can', price: 70, desc: '+20 m of driving for the next round.' },
-  { id: 'satellite', name: 'Survey Satellite', price: 200, levels: 3, desc: 'Puts a satellite over the enemy that projects a grid of cells on the ground; some are labelled with the turret and power that land there from where you stand. Level 1 leaves out the wind, level 2 counts it (and any moon), level 3 labels more cells.' },
   { id: 'jet', name: 'Jump Jets', price: 80, bundle: 2, desc: 'Two charges. Press J while planning to hop about 25 m the way the hull faces, over a crater rim. Costs no fuel and not your shot.' },
 ];
 
@@ -180,6 +182,20 @@ export function airburstNow(pr, burst, tanks, ground) {
     if (dx * pr.vel[0] + dz * pr.vel[2] <= 0 || dx * dx + dz * dz < 9) return true;   // past its closest, or right over it
   }
   return ground != null && y - ground < burst.floor;
+}
+
+// Flak against what hangs in the sky: the enemy mod (from mods.js modTargets)
+// this shell has just made its nearest pass by, within `burst.air` m, or null.
+export function airburstNearMod(pr, burst, mods) {
+  if (!burst.air || pr.time < 0.4) return null;
+  for (const m of mods) {
+    if (m.owner === pr.owner) continue;
+    const d = Math.hypot(pr.pos[0] - m.x, pr.pos[1] - m.y, pr.pos[2] - m.z);
+    if (d > burst.air) continue;
+    const d0 = Math.hypot(pr.prev[0] - m.x, pr.prev[1] - m.y, pr.prev[2] - m.z);
+    if (d > d0 || d < m.r + 2) return m;
+  }
+  return null;
 }
 
 // The fragments of an airburst: a downward fan under the burst point.

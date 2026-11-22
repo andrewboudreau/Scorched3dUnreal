@@ -20,6 +20,10 @@
 //   tracer        metres of predicted flight drawn while aiming
 //   doubleStrike  the owner may queue two shots in one turn (see game.js STRIKE)
 //   fromRound     only offered in the draft before this round or a later one
+//   mods          { mod id: levels } added to the owner's mods (core/mods.js)
+//   modTurns      +turns every mod lasts once deployed
+//   modHp         +share of every mod's health
+//   needsMod      only offered to a tank that owns a mod
 
 export const PERKS = [
   { id: 'wideblast', tag: 'WB', name: 'Wide Blast', desc: 'Your blasts reach 15% further.', blastRadius: 0.15 },
@@ -37,6 +41,13 @@ export const PERKS = [
   { id: 'tracer', tag: 'TR', name: 'Tracer Rounds', desc: 'See the first 45 m of your shot while you aim.', tracer: 45 },
   { id: 'double', tag: 'DS', name: 'Double Strike', fromRound: 3, doubleStrike: true,
     desc: 'When you choose, queue two shots in one turn: they fire back to back. Your next turn is move only.' },
+  // Mods (core/mods.js): a level up, or level 1 of one you do not have.
+  { id: 'orbital', tag: 'OM', name: 'Orbital Mechanic', mods: { orbiter: 1 },
+    desc: 'Your Gravity Orbiter goes up a level (you get one at level 1 if you have none). Deploying it takes your turn.' },
+  { id: 'satrecon', tag: 'SR', name: 'Sat Recon', mods: { satellite: 1 },
+    desc: 'Your Survey Satellite goes up a level (you get one at level 1 if you have none). Deploying it takes your turn.' },
+  { id: 'cells', tag: 'LC', name: 'Long-Life Cells', modTurns: 2, modHp: 0.25, needsMod: true,
+    desc: 'Your mods last 2 turns longer and take 25% more damage before they break.' },
 ];
 
 export const PERK_BY_ID = Object.fromEntries(PERKS.map((p) => [p.id, p]));
@@ -54,8 +65,10 @@ export function hasPerk(player, key) {
 
 // Three perks the tank does not hold yet (fewer once it owns nearly all).
 // `round` is the round the pick is for: perks with a later `fromRound` sit out.
-export function draftOffer(player, rng, count = 3, round = Infinity) {
-  const pool = PERKS.filter((p) => !(player.perks || []).includes(p.id) && (p.fromRound || 0) <= round);
+// `allow(perk)` can leave out more (the game drops mod perks that could do
+// nothing: a mod the host's Lab turned off, or already at its top level).
+export function draftOffer(player, rng, count = 3, round = Infinity, allow = () => true) {
+  const pool = PERKS.filter((p) => !(player.perks || []).includes(p.id) && (p.fromRound || 0) <= round && allow(p));
   const out = [];
   while (out.length < count && pool.length) out.push(pool.splice(rng.int(0, pool.length - 1), 1)[0].id);
   return out;

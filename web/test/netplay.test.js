@@ -17,9 +17,10 @@ const KIT_CYCLE = ['flak', 'teleport', 'shell', 'flak', 'ranger', 'teleport', 'b
 
 // One screen: its own frame rate, and a bot at the controls of its human.
 // `resume`: the same seat coming back after a reload, reading the log from the top.
-function makeClient(room, seat, name, { resume = false, kit = false } = {}) {
+// A bot with `mods` deploys any mod it has ready, now and then, instead of firing.
+function makeClient(room, seat, name, { resume = false, kit = false, mods = false } = {}) {
   const dice = makeRng(1000 + seat + (resume ? 50 : 0));
-  const c = { seat, name, cursor: 0, alive: true, dice, shots: 0, hops: 0, warps: 0, frags: 0 };
+  const c = { seat, name, cursor: 0, alive: true, dice, shots: 0, hops: 0, warps: 0, frags: 0, deploys: 0, modEvents: 0 };
   c.session = new Session({
     seat,
     send: (msg) => room.append(seat, msg),
@@ -40,6 +41,7 @@ function makeClient(room, seat, name, { resume = false, kit = false } = {}) {
         if (e.type === 'jump') c.hops++;
         if (e.type === 'warp') c.warps++;
         if (e.type === 'projectile' && e.weapon === 'flaklet') c.frags++;
+        if (e.type === 'mod') c.modEvents++;
       }
       // Screens other than the host drift while they wait, the way different
       // browsers' maths would: the host's snapshot has to put it all back.
@@ -57,7 +59,9 @@ function makeClient(room, seat, name, { resume = false, kit = false } = {}) {
           if (kit && me.jets > 0 && c.hopped !== g.volleyKey) { c.hopped = g.volleyKey; me.hull = (me.hull + dice.range(-60, 60) + 360) % 360; g.jump(); }
           g.drive(1, dice.next() < 0.5 ? 1 : 0, dt);
         }
-        else {
+        else if (mods && g.canDeploy(me) && dice.next() < 0.6) {
+          if (g.deploy()) c.deploys++;
+        } else {
           const foe = g.players.find((p) => p.alive && p !== me);
           me.yaw = ((Math.atan2(foe.z - me.z, foe.x - me.x) * 180) / Math.PI + 360) % 360 + dice.range(-3, 3);
           me.elev = 45;
@@ -122,6 +126,23 @@ test('netplay: three screens play a whole match and end up in the same place', (
   assert.ok(room.log.some((e) => e.msg.t === 'snap'));
   assert.ok(clients[1].drifts > 2 && clients[2].drifts > 2, 'the other screens did drift');
   assert.equal(room.log.filter((e) => e.msg.t === 'start').length, 1);
+});
+
+test('netplay: two screens with Gravity Orbiters and satellites up end the match identical', () => {
+  const room = makeRoom();
+  const clients = [makeClient(room, 0, 'Ana', { kit: true, mods: true }), makeClient(room, 1, 'Bo', { kit: true, mods: true })];
+  play(clients, 3, () => false);
+  const lab = { orbiter: 'all', orbiterLevel: 3, satellite: 'all', level: 2 };
+  clients[0].session.start({ ...CONFIG, rounds: 3, lab }, [{ name: 'Rook', ai: 'hard' }]);
+  const done = play(clients, 60000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
+  assert.ok(done > 0, 'match finished');
+  const [a, b] = clients.map((c) => c.session.game);
+  const withMods = (g) => JSON.stringify({ s: summary(g), clock: g.clock, mods: g.players.map((p) => p.mods) });
+  assert.equal(withMods(b), withMods(a));
+  // The mods really were in play: deployed by the humans and the CPU, and in the sky during shots.
+  assert.ok(clients[0].deploys + clients[1].deploys >= 2, `humans deployed ${clients[0].deploys + clients[1].deploys}`);
+  assert.ok(a.clock > 0);
+  assert.ok(clients[0].modEvents > 2, `mod events ${clients[0].modEvents}`);
 });
 
 test('netplay: a player who leaves is handed to the computer and the match goes on', () => {

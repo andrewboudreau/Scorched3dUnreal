@@ -127,13 +127,33 @@ If it beats everything, it's a perk number, not a mod.
 
 | Mod | Family | Status | Notes |
 | --- | --- | --- | --- |
-| Survey Satellite (L1–3) | Recon | Built as an armory item; becoming a deployable, destructible mod (#10) | Voronoi patch with aim labels; L2+ includes wind |
-| Gravity Orbiter (L1–3) | Defense | In progress (#10) | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them |
+| Survey Satellite (L1–3) | Recon | Built as a mod (#10): deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense) |
+| Gravity Orbiter (L1–3) | Defense | Built (#10): 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt |
 | Missile Defense | Defense | Idea | Intercepts the first enemy shell entering a radius; a few charges per round |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
 | Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |
 | Comms uplink ("satcom") | Recon (support) | Idea | Buffs your other mods (Uplinked); could share recon with an ally in team play |
 | Signal jam pulse | Jamming (ability) | Idea | A one-shot area pulse from your tank, on a cooldown |
+
+### Missile Defense: a sketch for the mods layer
+
+It fits the layer as it stands (`core/mods.js`) without new machinery:
+
+- Data: `{ id: 'defense', family: 'defense', hp, turns, charges: [1, 2, 2],
+  radius: [18, 18, 24] }`. `charges` refills when it is refitted at round start.
+- Each fixed step, `stepWorld` already walks the mods for wells and contact;
+  Missile Defense would add a check: the first enemy shell inside `radius` of
+  its owner, on the way down, is detonated in the air (as `struck`, so no
+  crater) and spends a charge. Deterministic, so netplay needs nothing new.
+- Counters: Flak bursts before it is in reach; a Double Strike's second shell
+  gets through if there is one charge; a MIRV's children overwhelm it. It
+  does not touch rollers or diggers on the ground.
+- CPU: the solver cannot plan round it, so CPUs facing it should prefer Flak
+  (anti-air) or the multi-shell weapons, as they already prefer Flak against
+  an orbiter (`knownFoes` marks `shielded`).
+- Against the orbiter: two defense mods at once would make a tank nearly
+  untouchable; the draft or the armory may need to allow only one defense mod
+  up at a time.
 
 ## Story hooks (open)
 

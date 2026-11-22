@@ -27,6 +27,8 @@ import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
+import { ModsUI, modShopCards } from './modsui.js';
+import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
 
@@ -236,6 +238,7 @@ function disposeMatch() {
   lastLand.clear();
   aimArc.hide();
   satView.reset();
+  modsUi.reset();
   floor.visible = birds.bodies.visible = birds.wings.visible = true;
   craft.set(false);
 }
@@ -321,6 +324,7 @@ function handleEvents() {
   recentBlasts.length = 0;
   for (const e of game.drainEvents()) {
     strikeUi.event(e);
+    modsUi.event(e);
     switch (e.type) {
       case 'roundStart':
         wrecks.forEach(dropWreck);
@@ -1253,7 +1257,7 @@ function updateAimAids() {
     const b = believed(q);
     if (b) enemies.push({ name: b.r > 0 ? `${q.name}?` : q.name, color: q.color, x: b.x, y: b.y, z: b.z });
   }
-  satView.update({ game, p: killCam ? null : p, level: p ? game.satelliteLevel(p) : 0, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
+  satView.update({ game, p: killCam ? null : p, level: p ? game.surveyLevel(p) : 0, at: p ? modsUi.satAt(p) : null, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
   if (!gunner.active || !p) { gunner.hide(); return; }
   gunner.hud(camera, p, enemies, lastShotText(p));
 }
@@ -1446,6 +1450,8 @@ if (touch) {
 }
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
+// Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
+const modsUi = new ModsUI({ game: () => game, scene, touch, banner, click: () => sound.click(), blocked: () => handoffOpen, seen: (p) => seen(p) });
 
 function toggleMute() {
   sound.ensure();
@@ -1894,7 +1900,9 @@ $('remove-player').onclick = () => {
 // The Lab options (host only): who has the Survey Satellite, and how many of its cells are labelled.
 function labChoice() {
   const v = $('opt-sat').value;
-  return { satellite: v.startsWith('all') ? 'all' : v, level: Number(v.slice(3)) || 1, labels: $('opt-sat-labels').value };
+  const o = $('opt-orbiter').value;
+  return { satellite: v.startsWith('all') ? 'all' : v, level: Number(v.slice(3)) || 1, labels: $('opt-sat-labels').value,
+    orbiter: o.startsWith('all') ? 'all' : o, orbiterLevel: Number(o.slice(3)) || 1 };
 }
 
 // The Terrain menu: how hilly the meadows are, or the floating isles.
@@ -2059,7 +2067,6 @@ const ITEM_INFO = {
   armor: { have: (p) => p.pendingArmor, owned: (n) => `+${n} fitted`, none: 'None fitted', gives: '+30 armor' },
   fuel: { have: (p) => p.pendingFuel, owned: (n) => `+${n} m loaded`, none: 'None loaded', gives: `+${TANK.fuelCan} m of driving` },
   jet: { have: (p) => p.jets, owned: (n) => `You have ${n}`, none: 'You have none', gives: `${ITEMS.find((i) => i.id === 'jet').bundle} charges per purchase` },
-  satellite: { have: (p) => p.satellite || 0, owned: (n) => `Level ${n}`, none: 'Not in orbit', gives: (p) => (p.satellite >= 3 ? 'Top level' : `Level ${(p.satellite || 0) + 1}: ${['no wind', 'with wind', 'more labels'][p.satellite || 0]}`) },
 };
 
 function openShopFor(pid) {
@@ -2077,7 +2084,7 @@ function openShopFor(pid) {
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog) && !(it.id === 'satellite' && game.cfg.lab.satellite !== 'shop')).map((it) => {
+    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog)).map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
       const info = ITEM_INFO[it.id];
       const have = isW ? p.inventory[it.id] || 0 : info.have(p);
@@ -2093,11 +2100,11 @@ function openShopFor(pid) {
           <button class="buy" data-id="${it.id}" aria-label="Buy ${it.name} for $${price}" ${short > 0 || !Number.isFinite(price) ? 'disabled' : ''}>${Number.isFinite(price) ? `$${price}` : 'Max'}</button>
         </div>
       </div>`;
-    }).join('');
+    }).join('') + modShopCards(game, p, justBought);
   };
   $('shop-items').onclick = (e) => {
     const b = e.target.closest('button.buy');
-    const it = SHOP_ITEMS.find((x) => x.id === b?.dataset.id);
+    const it = SHOP_ITEMS.find((x) => x.id === b?.dataset.id) || MOD_BY_ID[b?.dataset.id];
     const price = it ? game.priceOf(p, it.id) : 0;
     if (!b || b.disabled || !game.buy(pid, it.id)) return;
     sound.click();
@@ -2509,6 +2516,7 @@ function tick(dt, draw = true) {
     sceneryMesh.sync(elapsed);
     updateHud();
     strikeUi.update();
+    modsUi.update(sdt, elapsed);
     updateLabels();
     updatePips();
     updateLocators();
@@ -2528,7 +2536,8 @@ function tick(dt, draw = true) {
   sky.setDay(day);
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   moons.update(performance.now() / 1000);
-  gravityLines.update(dt * timeScale, game ? game.projectiles : [], [], (pr) => (shellHidden(pr) ? null : shellPos(pr)));
+  const orbWells = game?.projectiles.length ? game.orbiterWells().map((w, i) => ({ ...w, id: `orb${w.owner}:${i}` })) : [];
+  gravityLines.update(dt * timeScale, game ? game.projectiles : [], orbWells, (pr) => (shellHidden(pr) ? null : shellPos(pr)));
   birds.update(dt);
   craft.update(dt);
   soundScape(dt);
