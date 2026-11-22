@@ -5,6 +5,41 @@ how it plays today. Ideas live here until they're built, and then the README
 takes over. Backlog and work in progress are GitHub issues labelled
 `craterfall`.
 
+## Where it's going
+
+Today Craterfall is a **playable sandbox**: a place to try weapons, mods and
+rules quickly, with Lab options so the host can bend the rules for a test.
+
+The long-term goal is **roguelike player-versus-player battles**: short runs
+where you draft upgrades between rounds and fight other people. Two game modes:
+
+- **Turn-based:** the game as it plays today (take turns, or everyone plans and
+  fires together in volleys). Good for phones, and for thinking.
+- **Real-time** (future): everyone aims and fires on their own clock, with
+  reload timers instead of turns. The simulation must stay deterministic, so
+  real-time means a fixed tick with inputs stamped by tick, not free-running
+  frames.
+
+Build the sandbox so both modes can share the core: rules, weapons, mods and
+statuses are data plus a deterministic step, and the mode only decides when
+inputs are accepted.
+
+## Players and accounts
+
+Stages, simplest first:
+
+1. **Now: a cookie identity.** On the first visit the server issues a random
+   player id in a long-lived cookie. You pick a name once; the id and name are
+   reused for every match and room, so a player is tracked across sessions
+   (and can rejoin their seat after a reload). No password, no email.
+2. **Later: email-validated login.** Claim your id with an email address (a
+   one-time link, no password), so it follows you to another device.
+3. **Then: stored player data.** Match history, wins, unlocked cosmetics and
+   roguelike progress, kept server-side against the id.
+
+Keep personal data to the minimum: a name, and later an email used only to
+sign in.
+
 ## Pillars
 
 - **Artillery first.** Reading the arc, the wind and the ground is the game.
