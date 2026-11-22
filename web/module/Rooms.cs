@@ -13,7 +13,14 @@ namespace Craterfall;
 /// in it reads in the same order (the game logic is all in the browsers, see
 /// src/core/netplay.js). Players long-poll for new entries, which works through
 /// any proxy without WebSockets. Rooms live in memory and go when the host
-/// restarts or after a few idle hours.
+/// restarts (every deploy), when nobody has polled them for half an hour, or
+/// after a few idle hours.
+///
+/// Limits, so one room or a flood of them cannot take the host's memory: a
+/// message is at most 128 KB, a room's log at most 20000 entries and 16 MB,
+/// all rooms together at most 256 MB (a send past these gets 507), and 300
+/// rooms (when full, rooms not started whose seats all stopped polling make
+/// way; else 503). A room plays one match: a second `start` gets 409.
 ///
 ///   GET  /Craterfall/api/rooms?id=&name=                          -> { rooms: [...], menu: { count, names } }
 ///   POST /Craterfall/api/rooms                 { name, private, tab } -> { code, seat, token }
@@ -52,9 +59,13 @@ public static class Rooms
     private const int MaxSeats = 6;
     private const int MaxEntries = 20000;
     private const int MaxBody = 128 * 1024;
+    private const long MaxRoomBytes = 16L * 1024 * 1024;
+    private const long MaxAllBytes = 256L * 1024 * 1024;
+    private static long AllBytes;   // message bytes held by every room's log
     private static readonly TimeSpan Hold = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan IdleAfter = TimeSpan.FromHours(3);
+    private static readonly TimeSpan AbandonedAfter = TimeSpan.FromMinutes(30);
     private const string Letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 
     private static readonly ConcurrentDictionary<string, Room> All = new();
@@ -84,6 +95,8 @@ public static class Rooms
         public bool Private;
         public Dictionary<int, string>? MatchIds;   // seat -> player id, as the match started
         public bool Reported;
+        public bool Closed;      // removed from All; refuses sends
+        public long Bytes;       // message bytes in Log
         public readonly DateTime Created = DateTime.UtcNow;
         public DateTime Active = DateTime.UtcNow;
         public TaskCompletionSource Signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -123,6 +136,7 @@ public static class Rooms
             var body = await ReadBody(req);
             if (body is null) return Results.BadRequest();
             Cleanup();
+            if (All.Count >= MaxRooms) Cleanup(full: true);
             if (All.Count >= MaxRooms) return Results.StatusCode(503);
             var pid = Players.IdOf(req);
             if (pid is not null) Players.Seen(pid);
@@ -167,7 +181,7 @@ public static class Rooms
             var body = await ReadBody(req);
             if (body is null) return Results.BadRequest();
             if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound();
-            var token = body.Value.TryGetProperty("token", out var t) ? t.GetString() : null;
+            var token = body.Value.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             lock (room)
             {
                 var seat = room.SeatOf(token);
@@ -215,20 +229,33 @@ public static class Rooms
 
         api.MapPost("{code}/send", async (string code, HttpRequest req) =>
         {
-            var body = await ReadBody(req);
-            if (body is null || !body.Value.TryGetProperty("msg", out var msg) || msg.ValueKind != JsonValueKind.Object) return Results.BadRequest();
+            var read = await Body.ReadObject(req, MaxBody);
+            if (read is not { } got || !got.Value.TryGetProperty("msg", out var msg) || msg.ValueKind != JsonValueKind.Object) return Results.BadRequest();
+            var body = got.Value;
             if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound();
-            var token = body.Value.TryGetProperty("token", out var t) ? t.GetString() : null;
+            var token = body.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             lock (room)
             {
+                if (room.Closed) return Results.NotFound();
                 var seat = room.SeatOf(token);
                 if (seat < 0) return Results.StatusCode(403);
-                if (room.Log.Count >= MaxEntries) return Results.StatusCode(507);
-                var kind = msg.TryGetProperty("t", out var k) ? k.GetString() : null;
+                var kind = msg.TryGetProperty("t", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null;
                 if (kind is "join" or "gone") return Results.BadRequest();
+                if (kind == "start" && seat != 0) return Results.StatusCode(403);
+                if (kind == "start" && room.Started) return Results.Conflict();
+
+                // Room for it: in this room's log, then in all rooms' together.
+                var size = got.Length;
+                if (room.Log.Count >= MaxEntries || room.Bytes + size > MaxRoomBytes) return Results.StatusCode(507);
+                if (Interlocked.Add(ref AllBytes, size) > MaxAllBytes)
+                {
+                    Interlocked.Add(ref AllBytes, -size);
+                    return Results.StatusCode(507);
+                }
+                room.Bytes += size;
+
                 if (kind == "start")
                 {
-                    if (seat != 0) return Results.StatusCode(403);
                     room.Started = true;
                     room.MatchIds = room.Seats.Select((s, i) => (s, i)).Where(x => !x.s.Gone && x.s.Pid is not null).ToDictionary(x => x.i, x => x.s.Pid!);
                 }
@@ -245,7 +272,7 @@ public static class Rooms
             var body = await ReadBody(req);
             if (body is null) return Results.BadRequest();
             if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound();
-            var token = body.Value.TryGetProperty("token", out var t) ? t.GetString() : null;
+            var token = body.Value.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             int? winner = body.Value.TryGetProperty("winner", out var w) && w.ValueKind == JsonValueKind.Number && w.TryGetInt32(out var wi) ? wi : null;
             List<(string, bool)> players;
             lock (room)
@@ -326,23 +353,29 @@ public static class Rooms
 
     private static string Clip(string? name) => Players.CleanName(name);
 
-    private static async Task<JsonElement?> ReadBody(HttpRequest req)
-    {
-        if (req.ContentLength is > MaxBody) return null;
-        try
-        {
-            using var doc = await JsonDocument.ParseAsync(req.Body);
-            return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.Clone() : null;
-        }
-        catch (JsonException) { return null; }
-    }
+    private static async Task<JsonElement?> ReadBody(HttpRequest req) =>
+        await Body.ReadObject(req, MaxBody) is { } read ? read.Value : null;
 
-    private static void Cleanup()
+    // Drops rooms idle for hours or that nobody has polled for half an hour.
+    // With `full`, also rooms not started whose seats have all stopped polling,
+    // to make way for new ones.
+    private static void Cleanup(bool full = false)
     {
         var now = DateTime.UtcNow;
         foreach (var (code, room) in All)
         {
-            if (now - room.Active > IdleAfter) All.TryRemove(code, out _);
+            lock (room)
+            {
+                if (room.Closed) continue;
+                var polled = room.Seats.Count == 0 ? room.Created : room.Seats.Max(s => s.Seen);
+                var drop = now - room.Active > IdleAfter
+                    || now - polled > AbandonedAfter
+                    || (full && !room.Started && now - polled > GoneAfter);
+                if (!drop) continue;
+                room.Closed = true;
+                Interlocked.Add(ref AllBytes, -room.Bytes);
+            }
+            All.TryRemove(code, out _);
         }
     }
 }

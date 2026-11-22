@@ -26,7 +26,9 @@ namespace Craterfall;
 /// an existing id, so a player keeps their record when they move device.
 ///
 /// A record holds a name, first and last seen, and matches played and won;
-/// nothing else is stored. Records are kept as JSON in a data folder
+/// nothing else is stored. A visit alone stores nothing: a record is made only
+/// when a player sets a name or finishes an online match, so the file holds
+/// players rather than every page load. Records are kept as JSON in a data folder
 /// (CRATERFALL_DATA, or config Craterfall:DataPath, else the host's App_Data/Craterfall, else data/ next to the
 /// module) with atomic writes, or only in memory when no folder is writable.
 /// Rooms.cs reads the id to tie seats to players. Keep tools/devserver.mjs in step.
@@ -70,26 +72,20 @@ public static class Players
         app.MapGet($"{prefix}/api/me", (HttpContext http) =>
         {
             var id = Identify(http, prefix);
-            lock (Gate) return Results.Json(View(id, Touch(id)));
+            lock (Gate) return Results.Json(View(id, Known(id) ?? new Record()));
         });
 
         app.MapPost($"{prefix}/api/me", async (HttpContext http) =>
         {
-            JsonElement body;
-            try
-            {
-                if (http.Request.ContentLength is > MaxBody) return Results.BadRequest();
-                using var doc = await JsonDocument.ParseAsync(http.Request.Body);
-                if (doc.RootElement.ValueKind != JsonValueKind.Object) return Results.BadRequest();
-                body = doc.RootElement.Clone();
-            }
-            catch (JsonException) { return Results.BadRequest(); }
+            if (await Body.ReadObject(http.Request, MaxBody) is not { } read) return Results.BadRequest();
+            var body = read.Value;
             var id = Identify(http, prefix);
+            var name = body.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? CleanName(n.GetString()) : null;
             lock (Gate)
             {
-                var r = Touch(id);
-                if (body.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String) r.Name = CleanName(n.GetString());
-                Dirty = true;
+                // Setting a name is what makes a record; an empty one alone does not.
+                var r = Known(id) ?? (string.IsNullOrEmpty(name) ? new Record() : Touch(id));
+                if (name is not null && All.ContainsKey(id)) { r.Name = name; Dirty = true; }
                 return Results.Json(View(id, r));
             }
         });
@@ -152,7 +148,16 @@ public static class Players
 
     // ---- records (callers outside this file need not hold the lock)
 
-    // Caller holds Gate.
+    // The id's record, seen now, or null when it has none. Caller holds Gate.
+    private static Record? Known(string id)
+    {
+        if (!All.TryGetValue(id, out var r)) return null;
+        r.LastSeen = DateTime.UtcNow;
+        Dirty = true;
+        return r;
+    }
+
+    // The id's record, made if it has none. Caller holds Gate.
     private static Record Touch(string id)
     {
         var now = DateTime.UtcNow;
@@ -183,10 +188,10 @@ public static class Players
         static (bool, DateTime) Rank(Record r) => (r.Name.Length > 0 || r.Played > 0, r.LastSeen);
     }
 
-    /// <summary>The player was seen (created or joined a room).</summary>
+    /// <summary>The player was seen (created or joined a room); a player with no record still has none.</summary>
     public static void Seen(string id)
     {
-        lock (Gate) Touch(id);
+        lock (Gate) Known(id);
     }
 
     /// <summary>The saved name for an id, or "" if it has none.</summary>

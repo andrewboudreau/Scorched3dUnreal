@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = process.argv[2] != null && process.argv[2] !== '' ? Number(process.argv[2]) : 8080;
 const HOLD = 20000, GONE_AFTER = 45000, MAX_SEATS = 6;
+// As Rooms.cs: body, log and memory limits, and when a room is let go.
+const MAX_BODY = 128 * 1024, MAX_ENTRIES = 20000, MAX_ROOM_BYTES = 16 * 1024 * 1024, MAX_ALL_BYTES = 256 * 1024 * 1024;
+const MAX_ROOMS = 300, IDLE_AFTER = 3 * 3600e3, ABANDONED_AFTER = 30 * 60e3;
+let allBytes = 0;
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
   '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.glb': 'model/gltf-binary', '.hdr': 'application/octet-stream', '.md': 'text/markdown; charset=utf-8', '.webp': 'image/webp' };
@@ -56,7 +60,8 @@ async function packs(req, res, url) {
 }
 
 // ---- who is playing (module/Players.cs): a random id in a cookie, and a small
-// record per id. The id is an identifier, not a secret. Here the game is served
+// record per id. The id is an identifier, not a secret. A visit alone stores
+// nothing: a record is made when a player sets a name or finishes a match. Here the game is served
 // from /, so the cookie's path is / rather than /Craterfall.
 const COOKIE = 'craterfall_id';
 const MAX_PLAYERS = 20000;
@@ -99,15 +104,24 @@ function touch(id) {
   return r;
 }
 const me = (id, r) => ({ id, name: r.name, played: r.played, won: r.won });
+const blank = () => ({ name: '', played: 0, won: 0 });
+// The id's record, seen now, or null when it has none.
+function known(id) {
+  const r = players.get(id);
+  if (r) r.lastSeen = new Date().toISOString();
+  return r || null;
+}
 
 async function profileApi(req, res) {
-  if (req.method === 'GET') { const id = identify(req, res); return json(res, 200, me(id, touch(id))); }
+  if (req.method === 'GET') { const id = identify(req, res); return json(res, 200, me(id, known(id) || blank())); }
   if (req.method === 'POST') {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
     const id = identify(req, res);
-    const r = touch(id);
-    if (typeof b.name === 'string') r.name = clip(b.name);
+    const name = typeof b.name === 'string' ? clip(b.name) : null;
+    // Setting a name is what makes a record; an empty one alone does not.
+    const r = known(id) || (name ? touch(id) : blank());
+    if (name !== null && players.has(id)) r.name = name;
     return json(res, 200, me(id, r));
   }
   return json(res, 404, {});
@@ -117,16 +131,30 @@ const rooms = new Map();
 const menu = new Map();          // visitor id -> { name, seen }
 const MENU_FOR = 20000;
 
+// Drops rooms idle for hours or that nobody has polled for half an hour; with
+// `full`, also rooms not started whose seats have all stopped polling.
+function cleanup(full = false) {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    const polled = room.seats.length ? Math.max(...room.seats.map((s) => s.seen)) : room.created;
+    if (now - room.active > IDLE_AFTER || now - polled > ABANDONED_AFTER || (full && !room.started && now - polled > GONE_AFTER)) {
+      allBytes -= room.bytes;
+      rooms.delete(code);
+    }
+  }
+}
+
 function makeRoom(priv) {
   let code;
   do code = Array.from({ length: 4 }, () => LETTERS[randomInt(LETTERS.length)]).join(''); while (rooms.has(code));
-  const room = { code, seats: [], log: [], started: false, waiters: [], private: priv, created: Date.now() };
+  const room = { code, seats: [], log: [], started: false, waiters: [], private: priv, created: Date.now(), active: Date.now(), bytes: 0 };
   rooms.set(code, room);
   return room;
 }
 
 function append(room, seat, msg) {
   room.log.push({ n: room.log.length + 1, seat, msg });
+  room.active = Date.now();
   const w = room.waiters;
   room.waiters = [];
   w.forEach((f) => f());
@@ -189,22 +217,31 @@ function list(id, name) {
   return { rooms: out.slice(0, 30).map(({ created, ...r }) => r), menu: { count: others.length, names: others.filter(Boolean).slice(0, 20) } };
 }
 const json = (res, code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
-const readBody = (req) => new Promise((ok) => {
-  let s = '';
-  req.on('data', (c) => { s += c; });
-  req.on('end', () => { try { const v = JSON.parse(s); ok(v && typeof v === 'object' && !Array.isArray(v) ? v : null); } catch { ok(null); } });
+// A JSON object body and its size in bytes, or null (not an object, or past MAX_BODY).
+const readRaw = (req) => new Promise((ok) => {
+  const parts = [];
+  let size = 0;
+  req.on('data', (c) => { size += c.length; if (size <= MAX_BODY) parts.push(c); });
+  req.on('end', () => {
+    if (size > MAX_BODY) return ok(null);
+    try { const v = JSON.parse(Buffer.concat(parts).toString('utf8')); ok(v && typeof v === 'object' && !Array.isArray(v) ? { value: v, size } : null); } catch { ok(null); }
+  });
 });
+const readBody = async (req) => (await readRaw(req))?.value ?? null;
 
 async function api(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean);   // api rooms [code] [action]
   const code = parts[2]?.toUpperCase();
   const action = parts[3];
-  if (req.method === 'GET' && parts.length === 2) return json(res, 200, list(url.searchParams.get('id'), url.searchParams.get('name')));
+  if (req.method === 'GET' && parts.length === 2) { cleanup(); return json(res, 200, list(url.searchParams.get('id'), url.searchParams.get('name'))); }
   const pid = cookieId(req);
   if (req.method === 'POST' && parts.length === 2) {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
-    if (pid) touch(pid);
+    cleanup();
+    if (rooms.size >= MAX_ROOMS) cleanup(true);
+    if (rooms.size >= MAX_ROOMS) return json(res, 503, {});
+    if (pid) known(pid);
     return json(res, 200, join(makeRoom(b.private === true), nameOf(b, pid), pid, tabOf(b)));
   }
   const room = rooms.get(code);
@@ -213,7 +250,7 @@ async function api(req, res, url) {
   if (req.method === 'POST' && action === 'join') {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
-    if (pid) touch(pid);
+    if (pid) known(pid);
     // This id and tab's seat is still here: hand it back, with a fresh token.
     const tab = tabOf(b);
     const mine = pid && tab ? room.seats.findIndex((s) => s.pid === pid && s.tab === tab && !s.gone) : -1;
@@ -252,13 +289,19 @@ async function api(req, res, url) {
     return json(res, 200, {});
   }
   if (req.method === 'POST' && action === 'send') {
-    const b = await readBody(req);
-    if (!b || !b.msg || typeof b.msg !== 'object') return json(res, 400, {});
+    const raw = await readRaw(req);
+    const b = raw?.value;
+    if (!b || !b.msg || typeof b.msg !== 'object' || Array.isArray(b.msg)) return json(res, 400, {});
+    if (!rooms.has(room.code)) return json(res, 404, {});
     const seat = seatOf(b.token);
     if (seat < 0) return json(res, 403, {});
     if (b.msg.t === 'join' || b.msg.t === 'gone') return json(res, 400, {});
+    if (b.msg.t === 'start' && seat !== 0) return json(res, 403, {});
+    if (b.msg.t === 'start' && room.started) return json(res, 409, {});   // one match per room
+    if (room.log.length >= MAX_ENTRIES || room.bytes + raw.size > MAX_ROOM_BYTES || allBytes + raw.size > MAX_ALL_BYTES) return json(res, 507, {});
+    room.bytes += raw.size;
+    allBytes += raw.size;
     if (b.msg.t === 'start') {
-      if (seat !== 0) return json(res, 403, {});
       room.started = true;
       room.matchIds = room.seats.map((s, i) => [i, s]).filter(([, s]) => !s.gone && s.pid).map(([i, s]) => [i, s.pid]);
     }

@@ -494,7 +494,11 @@ and won). Records are saved as `players.json` in the folder named by
 `CRATERFALL_DATA` (env var, or config `Craterfall:DataPath`), else in the
 host's `App_Data/Craterfall` (a mounted volume that outlives drops), else in
 `data/` next to the module, which a new drop may replace; with none writable
-they stay in memory and the host logs a warning.
+they stay in memory and the host logs a warning. A visit alone stores nothing:
+a record is made when a player sets a name or finishes an online match.
+Rooms have limits so a flood cannot take the host's memory: 128 KB a message,
+16 MB and 20000 entries a room, 256 MB across all rooms, 300 rooms. A room
+plays one match, and goes after half an hour with nobody polling it.
 `tools/devserver.mjs` is a copy of the same API for local testing; keep the two in step.
 
 ```powershell

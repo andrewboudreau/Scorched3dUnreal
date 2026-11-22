@@ -40,7 +40,7 @@ public class CraterfallModule : IApplicationPartModule
 
     private IResult Serve(HttpContext http, string relative)
     {
-        var root = Path.GetFullPath(this.WebRoot());
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(this.WebRoot()));
         var full = Path.GetFullPath(Path.Combine(root, relative));
         if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal) || !File.Exists(full))
             return Results.NotFound();

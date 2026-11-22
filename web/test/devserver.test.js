@@ -176,3 +176,30 @@ test('the host reports the result: played and won are counted once per player', 
   const g = (await guest.req('/api/me')).body;
   assert.deepEqual([h.played, h.won, g.played, g.won], [1, 0, 1, 1]);
 });
+
+test('a room plays one match: only the host starts it, and only once', async () => {
+  const host = browser();
+  const made = (await host.req('/api/rooms', { name: 'Host', tab: TAB1 })).body;
+  const guest = browser();
+  const seat = (await guest.req(`/api/rooms/${made.code}/join`, { name: 'Bo', tab: TAB1 })).body;
+  assert.equal((await guest.req(`/api/rooms/${made.code}/send`, { token: seat.token, msg: { t: 'start' } })).status, 403);
+  assert.equal((await host.req(`/api/rooms/${made.code}/send`, { token: made.token, msg: { t: 'start' } })).status, 200);
+  assert.equal((await host.req(`/api/rooms/${made.code}/send`, { token: made.token, msg: { t: 'start' } })).status, 409);
+  assert.equal((await host.req(`/api/rooms/${made.code}/send`, { token: made.token, msg: { t: 'plan' } })).status, 200);
+});
+
+test('a message over 128 KB is refused; one under it goes through', async () => {
+  const host = browser();
+  const made = (await host.req('/api/rooms', { name: 'Host', tab: TAB1 })).body;
+  const send = (pad) => host.req(`/api/rooms/${made.code}/send`, { token: made.token, msg: { t: 'snap', pad } });
+  assert.equal((await send('x'.repeat(100 * 1024))).status, 200);
+  assert.equal((await send('x'.repeat(130 * 1024))).status, 400);
+});
+
+test('an empty name makes no record; a visit after a name keeps it', async () => {
+  const b = browser();
+  assert.deepEqual((await b.req('/api/me', { name: '' })).body.name, '');
+  await b.req('/api/me', { name: 'Ana' });
+  assert.equal((await b.req('/api/me')).body.name, 'Ana');
+  assert.equal((await b.req('/api/me', { name: '' })).body.name, '');   // clearing a name is allowed
+});
