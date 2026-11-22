@@ -242,6 +242,25 @@ second column beside the first. On a phone the players box sits top right.
   high across the sky, pausing to hover, where birds would be. A shell that misses everything drops away into the void. You
   cannot drive or jump off an isle's edge. There are no lakes, and the sky is
   deep space: stars all round, a nebula and a ringed planet.
+- **Survey Satellite** (armory, a level at a time: 200, then 260, then 300).
+  While you plan, a small satellite hangs high over the enemy nearest your
+  turret line (as you know it, under fog of war; with none known, over the
+  ground your aim reaches) and its projector paints a patch of Voronoi cells
+  on the ground, about 160 m across, that drifts slowly round it with a
+  radar-like sweep. The cell sites are fixed to the ground for the round, so
+  the patch slides over them. A share of them are ringed and labelled with
+  the turret and power that land there from where you stand, at your current
+  elevation (a legend by the satellite says which elevation and whether wind
+  is in). The aims are solved with the same simulator the shells fly on, and
+  solved again when you move, change elevation, the wind turns or the ground
+  is cratered (the old labels dim until then). Level 1 leaves the wind and
+  moons out, level 2 counts them, level 3 labels more cells. At most 5
+  labels on a phone and 8 on a desktop, nearest the middle, never on top of
+  each other, fading with distance. Only the planner on this screen sees it,
+  only on their own aim. The CPU does not buy it.
+- **Lab** (setup screen, host only; travels in the match config online).
+  *Satellite*: in the armory (default), everyone gets one at level 1, 2 or
+  3 (and the armory stops selling it), or off. *Sat labels*: few, some or many.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
   its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
@@ -344,13 +363,16 @@ second column beside the first. On a phone the players box sits top right.
 - `src/core/` holds the pure game logic with no DOM or three.js: the heightfield and
   crater maths, the fixed-step ballistics simulator and roller, weapons, the AI
   aim solver and aim memory, driving (`driveStep` in `tank.js`), perks and round
-  modifiers as plain data (`perks.js`), road and path routing (`paths.js`), scenery placement and its reaction to
+  modifiers as plain data (`perks.js`), road and path routing (`paths.js`), the Survey
+  Satellite's sites, solving and levels (`survey.js`), scenery placement and its reaction to
   terrain changes, and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
-  (`moons.js`), the flocks (`birds.js`) and the isles' passing craft (`craft.js`).
+  (`moons.js`), the flocks (`birds.js`), the isles' passing craft (`craft.js`)
+  and the Survey Satellite with its projected cell patch and labels
+  (`satellite.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own

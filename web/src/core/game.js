@@ -6,6 +6,7 @@ import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findS
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
+import { normalizeLab, satelliteLevel, satellitePrice } from './survey.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -65,8 +66,10 @@ export class Game {
     // Online play (core/netplay.js): the ids of the tanks played on this
     // screen. The other humans plan elsewhere; their plans arrive by message.
     local = null,
+    // The host's Lab options (core/survey.js normalizeLab): who has the Survey Satellite, and its labels.
+    lab = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog };
+    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog, lab: normalizeLab(lab) };
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
     this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
@@ -86,6 +89,7 @@ export class Game {
       wins: 0,
       inventory: { ...START_INVENTORY, ...(local ? { guided: 0 } : {}) },   // no steering online
       jets: START_JETS,
+      satellite: 0,      // Survey Satellite level bought in the armory (core/survey.js)
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
@@ -533,6 +537,9 @@ export class Game {
   // How much of the wind this tank's shots feel.
   windShare(p) { return Math.max(0, 1 + perkSum(p, 'windScale')); }
 
+  // The Survey Satellite level `p` has in orbit: bought, or the host's Lab gives everyone one.
+  satelliteLevel(p) { return satelliteLevel(this.cfg.lab, p); }
+
   // ---------- driving ----------
 
   // Things a tank cannot drive through: the other tanks and standing buildings.
@@ -695,7 +702,9 @@ export class Game {
   priceOf(p, id) {
     const it = WEAPON_BY_ID[id] || ITEMS.find((x) => x.id === id);
     if (!it || !(it.price > 0)) return Infinity;
-    return Math.round((it.price * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;
+    const base = id === 'satellite' ? satellitePrice(this.cfg.lab, p) : it.price;   // priced per level
+    if (!Number.isFinite(base)) return Infinity;
+    return Math.round((base * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;
   }
 
   buy(playerId, id) {
@@ -709,6 +718,7 @@ export class Game {
     else if (id === 'armor') p.pendingArmor += 30;
     else if (id === 'fuel') p.pendingFuel += TANK.fuelCan;
     else if (id === 'jet') p.jets += ITEMS.find((x) => x.id === 'jet').bundle;
+    else if (id === 'satellite') p.satellite = (p.satellite || 0) + 1;
     return true;
   }
 

@@ -18,6 +18,7 @@ import { Effects, ShellVisual } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Moons } from './render/moons.js';
 import { AimArc, Gunner } from './gunner.js';
+import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
 import { Sound } from './audio.js';
@@ -69,6 +70,7 @@ const craft = new AlienCraft(scene);   // over the isles, where birds would be
 const effects = new Effects(scene);
 const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
+const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
 const sound = new Sound();
 const music = new Music(sound);
@@ -228,6 +230,7 @@ function disposeMatch() {
   sky.setSpace(false);
   lastLand.clear();
   aimArc.hide();
+  satView.reset();
   floor.visible = birds.bodies.visible = birds.wings.visible = true;
   craft.set(false);
 }
@@ -1226,13 +1229,14 @@ function lastShotText(p) {
 function updateAimAids() {
   const p = planning();
   aimArc.update(game, p, camera);
-  if (!gunner.active || !p) { gunner.hide(); return; }
   const enemies = [];
-  for (const q of game.players) {
+  for (const q of p ? game.players : []) {
     if (q === p || !q.alive) continue;
     const b = believed(q);
     if (b) enemies.push({ name: b.r > 0 ? `${q.name}?` : q.name, color: q.color, x: b.x, y: b.y, z: b.z });
   }
+  satView.update({ game, p: killCam ? null : p, level: p ? game.satelliteLevel(p) : 0, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
+  if (!gunner.active || !p) { gunner.hide(); return; }
   gunner.hud(camera, p, enemies, lastShotText(p));
 }
 
@@ -1863,6 +1867,12 @@ $('remove-player').onclick = () => {
   if (setupRows.length > 2) { setupRows.pop(); renderSetup(); }
 };
 
+// The Lab options (host only): who has the Survey Satellite, and how many of its cells are labelled.
+function labChoice() {
+  const v = $('opt-sat').value;
+  return { satellite: v.startsWith('all') ? 'all' : v, level: Number(v.slice(3)) || 1, labels: $('opt-sat-labels').value };
+}
+
 // The Terrain menu: how hilly the meadows are, or the floating isles.
 function terrainChoice() {
   const v = $('opt-hills').value;
@@ -1881,6 +1891,7 @@ $('start').onclick = () => {
       ...terrainChoice(),
       twists: $('opt-twists').value === '1',
       fog: $('opt-fog').value === '1',
+      lab: labChoice(),
     }, lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
     $('start').disabled = true;
     return;
@@ -1894,6 +1905,7 @@ $('start').onclick = () => {
     twists: $('opt-twists').value === '1',
     firing: $('opt-firing').value,
     fog: $('opt-fog').value === '1',
+    lab: labChoice(),
   });
 };
 
@@ -2011,6 +2023,7 @@ const ITEM_INFO = {
   armor: { have: (p) => p.pendingArmor, owned: (n) => `+${n} fitted`, none: 'None fitted', gives: '+30 armor' },
   fuel: { have: (p) => p.pendingFuel, owned: (n) => `+${n} m loaded`, none: 'None loaded', gives: `+${TANK.fuelCan} m of driving` },
   jet: { have: (p) => p.jets, owned: (n) => `You have ${n}`, none: 'You have none', gives: `${ITEMS.find((i) => i.id === 'jet').bundle} charges per purchase` },
+  satellite: { have: (p) => p.satellite || 0, owned: (n) => `Level ${n}`, none: 'Not in orbit', gives: (p) => (p.satellite >= 3 ? 'Top level' : `Level ${(p.satellite || 0) + 1}: ${['no wind', 'with wind', 'more labels'][p.satellite || 0]}`) },
 };
 
 function openShopFor(pid) {
@@ -2028,20 +2041,20 @@ function openShopFor(pid) {
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog)).map((it) => {
+    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog) && !(it.id === 'satellite' && game.cfg.lab.satellite !== 'shop')).map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
       const info = ITEM_INFO[it.id];
       const have = isW ? p.inventory[it.id] || 0 : info.have(p);
       const owned = isW ? `You have ${have}` : have ? info.owned(have) : info.none;
-      const gives = isW ? `${it.bundle} per purchase` : info.gives;
+      const gives = isW ? `${it.bundle} per purchase` : typeof info.gives === 'function' ? info.gives(p) : info.gives;
       const price = game.priceOf(p, it.id);
-      const short = price - p.money;
+      const short = Number.isFinite(price) ? price - p.money : 0;
       return `<div class="shop-item${short > 0 ? ' cant' : ''}${it.id === justBought ? ' bought' : ''}">
         <div class="si-head"><b>${it.name}</b><span class="si-own${have ? ' has' : ''}">${owned}</span></div>
         <div class="desc">${it.desc}</div>
         <div class="si-foot">
           <span class="si-gives">${gives}${short > 0 ? `<span class="si-short">need $${short} more</span>` : ''}</span>
-          <button class="buy" data-id="${it.id}" aria-label="Buy ${it.name} for $${price}" ${short > 0 ? 'disabled' : ''}>$${price}</button>
+          <button class="buy" data-id="${it.id}" aria-label="Buy ${it.name} for $${price}" ${short > 0 || !Number.isFinite(price) ? 'disabled' : ''}>${Number.isFinite(price) ? `$${price}` : 'Max'}</button>
         </div>
       </div>`;
     }).join('');
