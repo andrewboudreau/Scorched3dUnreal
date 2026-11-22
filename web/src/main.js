@@ -307,6 +307,7 @@ function addShake(pos, power) {
   shake = Math.max(shake, power * Math.max(0, 1 - d / 900));
 }
 
+const fellInVoid = new Set();   // players whose 'void' banner is up, so their death banner stays quiet
 function handleEvents() {
   recentBlasts.length = 0;
   for (const e of game.drainEvents()) {
@@ -483,6 +484,7 @@ function handleEvents() {
       case 'void': {
         const q = game.players[e.player];
         banner(`${q.id === heroId ? 'You' : q.name} fell into the void`, '', 1800);
+        fellInVoid.add(e.player);   // its 'destroyed' follows at once and must not take the banner
         break;
       }
       case 'landed': {
@@ -506,7 +508,7 @@ function handleEvents() {
         const w = new Wreck(scene, tanks[e.player], blast, effects, (x, z) => game.terrain.heightAt(x, z));
         w.onLand = (at, heavy) => sound.thud(camDist([at.x, at.y, at.z]) * (heavy ? 1 : 1.6), 'wreck');
         wrecks.push(w);
-        banner(`${p.name} destroyed`, by && by !== p ? `by ${by.name}` : by === p ? 'self-inflicted' : '', 1800);
+        if (!fellInVoid.delete(e.player)) banner(`${p.name} destroyed`, by && by !== p ? `by ${by.name}` : by === p ? 'self-inflicted' : '', 1800);
         break;
       }
       case 'roundOver':
