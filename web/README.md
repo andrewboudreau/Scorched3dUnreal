@@ -98,7 +98,20 @@ second column beside the first. On a phone the players box sits top right.
   the camera, and the line beside it splits it for this shot: how far it
   pushes the shell right or left, and whether it carries it longer or
   shorter.
-- **Firing: together or in turns.** The setup screen has a Firing option.
+- **The launch screen** (`src/launch.js`, `#setup`). It shows the title, one
+  **Your name** field (`#net-name`; it names your tank and your online seat) and a
+  big **Play**, which starts you against two Normal CPUs with the default
+  options. Below it is **Play online** (the room list, create and join), then a
+  collapsed **Custom match** holding the tank rows (add or remove, human or
+  CPU), rounds, wind, terrain, firing, twists, fog of war and the Lab. **Start
+  match** in there starts the configured match. Whether Custom was open, the
+  options you last chose and your CPU rows are kept in localStorage
+  (`craterfall.custom`), so the next visit opens as you left it; Play ignores
+  them and always uses the defaults. In an online room the Custom section is the
+  lobby: always open, with no Play. On a phone the screen fills the screen
+  rather than floating as a card, and tapping Play or Start also goes full
+  screen where the browser allows it (not iPhone Safari).
+- **Firing: together or in turns.** Custom match has a Firing option.
   - *Together (volley)*, the default: nobody shoots alone. Each living human
     plans in turn (drive, aim, pick a weapon, Space to lock it in), then every
     tank fires at once and all the shells fly together. With more than one
@@ -173,7 +186,7 @@ second column beside the first. On a phone the players box sits top right.
   tank's hits out of shots and accuracy (rangefinder probes apart), damage
   dealt (overkill not counted), kills and longest hit, plus a few awards:
   sharpshooter (at least three shots), longest hit, most damage, most kills.
-- **Online.** Under the setup card is a live list of open rooms (and
+- **Online.** On the launch screen, under Play, is a live list of open rooms (and
   matches being played, with who is in them), plus who else is on the menu
   right now. Type a name and press *Join* on a room, or *Create a room* and
   it appears in everyone's list. Tick *Private* to keep a room off the list;
@@ -258,7 +271,7 @@ second column beside the first. On a phone the players box sits top right.
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
   only on their own aim. The CPU does not buy it.
-- **Lab** (setup screen, host only; travels in the match config online).
+- **Lab** (Custom match, host only; travels in the match config online).
   *Satellite*: in the armory (default), everyone gets one at level 1, 2 or
   3 (and the armory stops selling it), or off. *Sat labels*: few, some or many.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere

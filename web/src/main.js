@@ -26,6 +26,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
+import { defaultMatch, humanName, phoneFullscreen, wireLaunch, NAME_KEY } from './launch.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -1837,7 +1838,8 @@ function renderSetup() {
   $('setup-players').innerHTML = setupRows.map((r, i) => `
     <div class="player-row">
       <span class="swatch" style="background:${PLAYER_COLORS[i]};width:18px;height:18px"></span>
-      <input data-i="${i}" class="pname" value="${escapeHtml(r.name)}" maxlength="14" />
+      ${r.type === 'human' ? `<span class="pname-fixed">${escapeHtml(r.name)}<small>your name</small></span>`
+        : `<input data-i="${i}" class="pname" value="${escapeHtml(r.name)}" maxlength="14" />`}
       <select data-i="${i}" class="ptype">
         ${[['human', 'Human'], ['easy', 'CPU · Easy'], ['normal', 'CPU · Normal'], ['hard', 'CPU · Hard']]
           .map(([v, l]) => `<option value="${v}" ${r.type === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -1881,8 +1883,18 @@ function terrainChoice() {
   return v === 'isles' ? { hills: 45, world: 'isles' } : { hills: Number(v), world: 'meadow' };
 }
 
+$('play').onclick = () => {
+  if (session) return;
+  sound.ensure();
+  phoneFullscreen(touch);
+  localStorage.setItem(NAME_KEY, humanName());
+  $('setup').classList.add('hidden');
+  startMatch(defaultMatch(humanName()));
+};
+
 $('start').onclick = () => {
   sound.ensure();
+  phoneFullscreen(touch);
   if (session) {
     // The host starts the room's match; everyone's screen starts it when the message comes round.
     if (!session.isHost || session.game) return;
@@ -1898,6 +1910,7 @@ $('start').onclick = () => {
     $('start').disabled = true;
     return;
   }
+  localStorage.setItem(NAME_KEY, humanName());
   $('setup').classList.add('hidden');
   startMatch({
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
@@ -2395,7 +2408,7 @@ $('net-copy').onclick = async () => {
   const url = `${location.origin}${location.pathname}?room=${link.code}`;
   try { await navigator.clipboard.writeText(url); $('net-note').textContent = `Copied: ${url}`; } catch { $('net-note').textContent = url; }
 };
-$('net-name').value = localStorage.getItem('craterfall.name') || '';
+$('net-name').value = localStorage.getItem(NAME_KEY) || '';
 {
   const code = new URLSearchParams(location.search).get('room');
   const saved = JSON.parse(sessionStorage.getItem(ROOM_KEY) || 'null');
@@ -2518,6 +2531,7 @@ scene.add(menuMesh.group, menuScenery.group);
 sky.fit(menuField.terrain.half);
 birds.reset(menuField.terrain, 5);
 
+wireLaunch({ rows: setupRows, render: renderSetup });   // the Custom section and the name field (launch.js)
 renderSetup();
 $('loading').classList.add('hidden');
 frame();
