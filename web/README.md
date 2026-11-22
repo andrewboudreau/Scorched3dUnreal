@@ -134,15 +134,18 @@ second column beside the first. On a phone the players box sits top right.
   drawn as small finned missiles; Roller rounds are still balls.
 - **Guided Missile.** A shell-sized blast you can steer: while it flies,
   A / D (or ← / →) swing it left or right at 34°/s for up to three seconds
-  of steering fuel, shown in a bar above the weapons. It does not climb or
-  dive, only turns. One in the starting kit; 90 for two in the shop. On a
-  shared screen every human's missile answers the same keys.
-- **Flak.** Like Scatter, it bursts at the top of its arc, but into 14 small
-  shells spread over a disc about 50 m across instead of a line of five. Each
-  is a shallow 7 m crater worth 10 damage (Scatter's five are 28 each), so the total is the
-  same 140 and the cover is much wider: it chews up an area and wounds
-  everything in it, where Scatter punishes a direct hit. 220 for two. CPU
-  tanks use it, and shop for it.
+  of steering fuel, shown in a small Guidance gauge at the right edge (its
+  how-to line fades after a moment). On a phone, hold a finger on the left or
+  right half of the view to steer. It does not climb or dive, only turns. One
+  in the starting kit; 90 for two in the shop. On a shared screen every
+  human's missile answers the same keys.
+- **Flak.** A proximity fuse. On the way down it bursts at its nearest pass
+  over an enemy tank (within 22 m across and 4 to 40 m above it) and rains 12
+  fragments on it, each a shallow 7 m blast worth 13; passing nobody, it bursts
+  14 m over the ground. So a near miss still hurts: a pass 20 or 30 m short does
+  about 15 to 30 damage, a burst right overhead about 40. Over open space (the
+  isles) it only bursts over a tank. 220 for two. CPU tanks use it, and shop
+  for it.
 - **Teleport.** No damage. Your tank moves to where the shell lands, snapped to
   the ground and nudged clear of water, houses, tanks and the map edge. Shells
   already in the air still land where they were aimed, so you may have left
@@ -219,8 +222,13 @@ second column beside the first. On a phone the players box sits top right.
   and where your last shot came down from where you stand ("54 m short, 64 m
   right of Marlow"; cleared when you move). Drag anywhere to aim (across
   turns the turret by as much as the view moves, up and down raises the
-  barrel), and the wheel or a pinch zooms. It stays on from turn to turn and
-  hands the camera back while shells fly.
+  barrel). The − / + chip zooms in steps to 2×, 4× and 8× (the wheel or a pinch
+  zooms smoothly), looking further down the line the more it magnifies, so
+  you can study the far field; the tape goes to single degrees. It stays on
+  from turn to turn and hands the camera back while shells fly.
+- **Marks over the tanks** say only what the view needs: names alone while
+  you plan, health too in the sight, the overview (View) and a Find look,
+  faint while the camera follows a shell, and names only in the kill cam.
 - **Floating isles** (Terrain menu). Instead of one stretch of ground, a dozen
   or so isles hang in open space, each with grass on top and rock beneath. Every
   tank starts on an isle of its own. Two or three small moons hang among them and pull
@@ -229,7 +237,8 @@ second column beside the first. On a phone the players box sits top right.
   can come at an isle from below: a blast in the underside eats upward, and once
   the rock between top and underside is gone the ground is open sky. A tank
   over a hole falls, and a tank that falls into the void is lost (the kill goes
-  to whoever blew the ground out). A shell that misses everything drops away into the void. You
+  to whoever blew the ground out). Now and then a strange craft or two drifts
+  high across the sky, pausing to hover, where birds would be. A shell that misses everything drops away into the void. You
   cannot drive or jump off an isle's edge. There are no lakes, and the sky is
   deep space: stars all round, a nebula and a ringed planet.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
@@ -328,7 +337,7 @@ second column beside the first. On a phone the players box sits top right.
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
-  (`moons.js`) and the flocks (`birds.js`).
+  (`moons.js`), the flocks (`birds.js`) and the isles' passing craft (`craft.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own

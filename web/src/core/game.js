@@ -1,7 +1,7 @@
 import { makeRng } from './rng.js';
 import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes } from './weapons.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon } from './ai.js';
 import { Scenery, standing } from './scenery.js';
@@ -829,15 +829,31 @@ export class Game {
       const w = WEAPON_BY_ID[pr.weapon];
       // Apex split.
       if (!pr.splitDone && vyBefore > 0 && pr.vel[1] <= 0 && w.flight) {
-        pr.splitDone = true;
         const split = w.flight.find((f) => f.type === 'split');
         if (split) {
+          pr.splitDone = true;
           pr.dead = true;
           for (const v of splitVelocities(pr.vel, split.count, split.spread, split.shape)) {
             const child = this.spawnProjectile(pr.pos, v, split.child, pr.owner, pr.shot);
             child.splitDone = true;
           }
           this.emit({ type: 'split', id: pr.id, pos: [...pr.pos] });
+          continue;
+        }
+      }
+      // Proximity burst (Flak), on the way down.
+      const burst = !pr.splitDone && !pr.probe && w.flight && w.flight.find((f) => f.type === 'airburst');
+      if (burst) {
+        const [bx, , bz] = pr.pos;
+        const ground = t.inBounds(bx, bz) && t.solidAt(bx, bz) ? t.heightAt(bx, bz) : null;
+        if (airburstNow(pr, burst, spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id })), ground)) {
+          pr.dead = true;
+          pr.splitDone = true;
+          for (const v of airburstVelocities(pr.vel, burst)) {
+            const child = this.spawnProjectile(pr.pos, v, burst.child, pr.owner, pr.shot);
+            child.splitDone = true;
+          }
+          this.emit({ type: 'split', id: pr.id, pos: [...pr.pos], airburst: true });
           continue;
         }
       }

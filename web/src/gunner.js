@@ -37,6 +37,8 @@ function screen(camera, x, y, z) {
   return { x: (_v.x * 0.5 + 0.5) * window.innerWidth, y: (-_v.y * 0.5 + 0.5) * window.innerHeight };
 }
 
+const FOV = 50;   // the sight's widest view; zoom divides it
+
 export class AimArc {
   constructor(scene, labels) {
     this.pos = new Float32Array(MAX_PTS * 3);
@@ -144,15 +146,21 @@ export class Gunner {
   constructor(parent) {
     this.on = false;          // the player's choice; shown only while they aim
     this.active = false;      // driving the camera this frame
-    this.fov = 50;
+    this.fov = FOV;
     const el = this.el = document.createElement('div');
     el.id = 'gunner';
     el.className = 'hidden';
     el.innerHTML = `
       <div class="gn-line"></div>
       <div class="gn-tape"><div class="gn-ticks"></div><div class="gn-marks"></div><div class="gn-mid"></div></div>
-      <div class="gn-read"><div class="gn-target"></div><div class="gn-last"></div></div>`;
+      <div class="gn-read"><div class="gn-target"></div><div class="gn-last"></div></div>
+      <div class="gn-zoom"><button data-z="-1" aria-label="Zoom out">&minus;</button><span>1&times;</span><button data-z="1" aria-label="Zoom in">+</button></div>`;
     parent.appendChild(el);
+    // Zoom in steps, a thumb's reach from the aim pad: 1x, 2x, 4x, 8x.
+    this.zoomText = el.querySelector('.gn-zoom span');
+    for (const b of el.querySelectorAll('.gn-zoom button')) {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.step(+b.dataset.z); });
+    }
     this.tape = el.querySelector('.gn-tape');
     this.ticks = el.querySelector('.gn-ticks');
     this.marks = el.querySelector('.gn-marks');
@@ -163,7 +171,15 @@ export class Gunner {
   }
 
   zoom(steps) {
-    this.fov = Math.max(12, Math.min(60, this.fov * Math.exp(steps * 0.12)));
+    this.fov = Math.max(FOV / 8, Math.min(60, this.fov * Math.exp(steps * 0.12)));
+  }
+
+  // To the next whole step of magnification in or out (dir +1 in, -1 out).
+  step(dir) {
+    const mag = FOV / this.fov;
+    const now = Math.log2(mag);
+    const to = dir > 0 ? Math.floor(now + 0.01) + 1 : Math.ceil(now - 0.01) - 1;
+    this.fov = FOV / 2 ** Math.max(0, Math.min(3, to));
   }
 
   // Ride behind and above the turret, looking down its line.
@@ -172,7 +188,13 @@ export class Gunner {
     const fz = Math.sin(p.yaw * DEG);
     _goal.set(p.x - fx * 15, p.y + 8.5, p.z - fz * 15);
     if (terrain.solidAt(_goal.x, _goal.z)) _goal.y = Math.max(_goal.y, terrain.heightAt(_goal.x, _goal.z) + 2.5);
-    _look.set(p.x + fx * 160, p.y + 1, p.z + fz * 160);
+    // Zoomed in, look further out along the line, over the ground there, so
+    // the magnified view is of the far field rather than the turf ahead.
+    const far = 160 * Math.max(1, FOV / camera.fov);
+    _look.set(p.x + fx * far, p.y + 1, p.z + fz * far);
+    if (far > 200 && terrain.inBounds(_look.x, _look.z) && terrain.solidAt(_look.x, _look.z)) {
+      _look.y = Math.max(_look.y, terrain.heightAt(_look.x, _look.z) + 2);
+    }
     const k = this.active ? 1 - Math.exp(-dt * 10) : 1 - Math.exp(-dt * 4);
     camera.position.lerp(_goal, k);
     _m.lookAt(camera.position, _look, _up);
@@ -190,20 +212,25 @@ export class Gunner {
   // [{ name, color, x, y, z }]. `last` is a line about the last shot, or ''.
   hud(camera, p, enemies, last) {
     this.el.classList.remove('hidden');
+    const mag = `${Math.round((FOV / this.fov) * 10) / 10}\u00D7`;
+    if (this.zoomText.textContent !== mag) this.zoomText.textContent = mag;
     const box = this.tape.getBoundingClientRect();
     const left = box.left, right = box.right;
     const inside = (x) => x >= left && x <= right;
-    // Ticks every 5°, numbered every 15°, as far round as the tape reaches.
+    // Ticks every 5°, numbered every 15°, as far round as the tape reaches;
+    // zoomed in, every degree, numbered every 5°.
     let n = 0;
+    const fine = camera.fov < 20;
+    const every = fine ? 1 : 5, label = fine ? 5 : 15;
     const span = Math.min(80, camera.fov * camera.aspect * 0.75);
-    const start = Math.ceil((p.yaw - span) / 5) * 5;
-    for (let b = start; b <= p.yaw + span; b += 5) {
+    const start = Math.ceil((p.yaw - span) / every) * every;
+    for (let b = start; b <= p.yaw + span; b += every) {
       const s = screen(camera, p.x + Math.cos(b * DEG) * 2000, camera.position.y, p.z + Math.sin(b * DEG) * 2000);
       if (!s || !inside(s.x)) continue;
       const t = this.tickEls[n] || this.ticks.appendChild(document.createElement('i'));
       this.tickEls[n++] = t;
       const deg = ((b % 360) + 360) % 360;
-      const big = deg % 15 === 0;
+      const big = deg % label === 0;
       t.className = big ? 'big' : '';
       t.textContent = big ? String(deg) : '';
       t.style.transform = `translateX(${s.x - left}px)`;

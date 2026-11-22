@@ -356,14 +356,13 @@ test('teleport: other shells already in flight at the old spot miss', () => {
 
 // ---- Flak ----
 
-test('flak: data, price, and a split into 14 over a disc rather than a row', () => {
+test('flak: data, price, and a proximity burst into 12', () => {
   const w = WEAPON_BY_ID.flak;
-  const split = w.flight.find((f) => f.type === 'split');
+  const burst = w.flight.find((f) => f.type === 'airburst');
   assert.equal(w.price, 220);
   assert.equal(w.bundle, 2);
-  assert.equal(split.count, 14);
-  assert.equal(split.shape, 'disc');
-  assert.equal(split.child, 'flaklet');
+  assert.equal(burst.count, 12);
+  assert.equal(burst.child, 'flaklet');
   assert.ok(WEAPON_BY_ID.flaklet.hidden);
   assert.ok(WEAPONS.filter((x) => !x.hidden).some((x) => x.id === 'flak'));
 });
@@ -398,16 +397,16 @@ test('flak: the fragments cover a wide, even area around the old path', () => {
 
 test('flak: about the same damage in total as Scatter, in smaller, shallower pieces', () => {
   const blast = (id) => WEAPON_BY_ID[id].impact.find((p) => p.type === 'blast');
-  const flakTotal = 14 * blast('flaklet').damage;
+  const flakTotal = WEAPON_BY_ID.flak.flight[0].count * blast('flaklet').damage;
   const scatterTotal = 5 * blast('scatterlet').damage;
-  assert.ok(Math.abs(flakTotal - scatterTotal) / scatterTotal < 0.1, `${flakTotal} vs ${scatterTotal}`);
+  assert.ok(Math.abs(flakTotal - scatterTotal) / scatterTotal < 0.2, `${flakTotal} vs ${scatterTotal}`);
   assert.ok(blast('flaklet').damage < blast('scatterlet').damage / 2);
   assert.ok(blast('flaklet').radius < blast('scatterlet').radius);
   assert.ok(blast('flaklet').depth < blast('scatterlet').depth / 1.5);
   assert.ok(WEAPON_BY_ID.flak.price < WEAPON_BY_ID.scatter.price);
 });
 
-test('flak: a fired shell bursts into 14 fragments that land over a broad area', () => {
+test('flak: passing nobody, a fired shell bursts just over the ground into 12 fragments', () => {
   const g = arena([{ name: 'A' }, { name: 'B' }]);
   const me = g.current;
   me.inventory.flak = 2;
@@ -418,21 +417,24 @@ test('flak: a fired shell bursts into 14 fragments that land over a broad area',
   assert.ok(g.fire());
   const events = run(g, (q) => q.phase === 'aim');
   const kids = events.filter((e) => e.type === 'projectile' && e.weapon === 'flaklet');
-  assert.equal(kids.length, 14);
+  assert.equal(kids.length, 12);
   assert.equal(me.inventory.flak, 1);
+  const burst = events.find((e) => e.type === 'split');
+  const above = burst.pos[1] - 20;      // the arena is flat at 20 m (before the fragments dig it)
+  assert.ok(above > 8 && above <= 16.5, `burst ${above.toFixed(1)} m up`);
   const land = events.filter((e) => e.type === 'impact').map((e) => e.pos);
-  assert.equal(land.length, 14);
-  const cx = land.reduce((s, p) => s + p[0], 0) / 14;
-  const cz = land.reduce((s, p) => s + p[2], 0) / 14;
+  assert.equal(land.length, 12);
+  const cx = land.reduce((s, p) => s + p[0], 0) / 12;
+  const cz = land.reduce((s, p) => s + p[2], 0) / 12;
   const radius = Math.max(...land.map((p) => Math.hypot(p[0] - cx, p[2] - cz)));
-  assert.ok(radius > 20, `a broad pattern (${radius.toFixed(1)} m)`);
-  assert.equal(events.filter((e) => e.type === 'explosion').length, 14);
+  assert.ok(radius > 3 && radius < 20, `a pattern under the burst (${radius.toFixed(1)} m)`);
+  assert.equal(events.filter((e) => e.type === 'explosion').length, 12);
   // Shallow: the deepest hole is a few metres, nothing like a Breacher's.
   const deepest = 20 - Math.min(...g.terrain.heights);
-  assert.ok(deepest < 3, `deepest ${deepest.toFixed(2)} m`);
+  assert.ok(deepest < 4, `deepest ${deepest.toFixed(2)} m`);
 });
 
-test('flak: six tanks firing it in one volley stay sane (84 impacts, ground and tanks consistent)', () => {
+test('flak: six tanks firing it in one volley stay sane (72 impacts, ground and tanks consistent)', () => {
   const players = Array.from({ length: 6 }, (_, i) => ({ name: `T${i}` }));
   const g = arena(players, { firing: 'volley' });
   g.players.forEach((p, i) => {
@@ -451,10 +453,10 @@ test('flak: six tanks firing it in one volley stay sane (84 impacts, ground and 
   }
   const events = run(g, (q) => q.phase === 'aim' || q.phase === 'roundOver', 60000);
   const bursts = events.filter((e) => e.type === 'explosion').length;
-  assert.equal(bursts, 84);
+  assert.equal(bursts, 72);
   assert.ok(g.players.every((p) => p.hp >= 0 && Number.isFinite(p.hp)));
   // One 'terrain' event per carve: the renderer batches them, the core never dedupes.
-  assert.ok(events.filter((e) => e.type === 'terrain').length >= 84);
+  assert.ok(events.filter((e) => e.type === 'terrain').length >= 72);
 });
 
 test('fuel: every shot puts back a third of the round\'s fuel, never past full', () => {

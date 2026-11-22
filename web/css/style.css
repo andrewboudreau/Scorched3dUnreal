@@ -98,6 +98,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 .tank-label { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); text-align: center; font-size: 12px; font-weight: 700;
   text-shadow: 0 1px 4px #000; white-space: nowrap; }
 .tank-label .bar { width: 54px; height: 4px; margin: 3px auto 0; }
+#labels.lb-name .tank-label .bar { display: none; }
+#labels.lb-name .tank-label:not(.ghost) { opacity: .8; font-size: 11px; }
+#labels.lb-faint .tank-label { opacity: .4; }
 .dmg-pop { position: absolute; transform: translate(-50%, -50%); font-weight: 800; color: #ff6b5b; font-size: 18px;
   text-shadow: 0 2px 6px #000; animation: pop 1.3s ease-out forwards; }
 @keyframes pop { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
@@ -222,9 +225,17 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 #rc-est { font-size: 12px; font-weight: 700; color: #ffd36a; margin-top: 3px; }
 #rc-est small { display: block; font-weight: 500; color: var(--muted); font-size: 11px; }
 
-/* Guided missile: steering fuel while it flies. */
-#steer-hint { bottom: 175px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; color: #dfe6ee; }
-#steer-hint .bar { width: 90px; margin: 0; }
+/* Guided missile: a small fuel gauge at the right edge while it flies, out of
+   the way of the shot. The how-to line shows for a moment, then fades. */
+#steer-hint { position: fixed; right: calc(12px + env(safe-area-inset-right)); top: 40%; z-index: 3; display: flex; align-items: center; gap: 5px;
+  padding: 5px 7px; border-radius: 8px; background: rgba(10, 14, 20, .55); color: #dfe6ee; pointer-events: none; }
+#steer-hint .sh-body { display: flex; flex-direction: column; gap: 3px; }
+#steer-hint .sh-title { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #9fdcef; }
+#steer-hint .bar { width: 64px; height: 4px; margin: 0; }
+#steer-hint .sh-tip { font-size: 10px; color: var(--muted); max-height: 14px; overflow: hidden; transition: opacity .6s, max-height .6s; white-space: nowrap; }
+#steer-hint:not(.tip) .sh-tip { opacity: 0; max-height: 0; }
+#steer-hint .sh-l, #steer-hint .sh-r { font-size: 10px; opacity: .35; transition: opacity .1s, color .1s; }
+#steer-hint.l .sh-l, #steer-hint.r .sh-r { opacity: 1; color: #6fe3ff; }
 #steer-fuel { background: linear-gradient(90deg, #6fe3ff, #b8f3ff); transition: none; }
 #steer-hint.empty { opacity: .5; }
 
@@ -293,7 +304,6 @@ body.touch #weapon-bar { display: none; top: auto; left: auto; transform: none; 
 body.touch #weapon-bar.open { display: flex; }
 body.touch .wb-item { padding: 8px 12px; font-size: 14px; min-height: 40px; justify-content: space-between; }
 body.touch .wb-key { display: none; }
-body.touch #steer-hint { bottom: auto; top: 110px; }
 body.touch #chat-log { bottom: auto; top: 120px; }
 body.touch button { min-height: 40px; }
 @media (max-height: 520px) {
@@ -453,6 +463,12 @@ body.touch .gn-read { top: 66px; font-size: 13px; }
 body.touch .gn-line { top: 30%; bottom: 40%; }
 
 /* The aim arc's label at the top of the climb. */
+#gunner .gn-zoom { position: absolute; right: calc(14px + env(safe-area-inset-right)); top: 84px; display: flex; align-items: center; gap: 2px;
+  pointer-events: auto; background: rgba(10, 14, 20, .6); border-radius: 8px; padding: 3px; }
+#gunner .gn-zoom button { width: 34px; height: 30px; border: 0; border-radius: 6px; background: rgba(255, 255, 255, .1); color: #fff; font: 700 18px/1 inherit; cursor: pointer; }
+#gunner .gn-zoom span { min-width: 34px; text-align: center; font-size: 12px; font-weight: 700; color: #ffd36a; }
+body.touch #gunner .gn-zoom { top: auto; right: auto; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom)); }
+body.touch #gunner .gn-zoom button { width: 44px; height: 38px; }
 .arc-peak { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; font-size: 11px; font-weight: 600;
   padding: 1px 6px; border-radius: var(--r); background: rgba(10, 14, 20, .6); color: #fff; text-shadow: 0 1px 2px #000; }
 

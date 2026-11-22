@@ -19,6 +19,7 @@ import { Sky } from './render/sky.js';
 import { Moons } from './render/moons.js';
 import { AimArc, Gunner } from './gunner.js';
 import { Birds } from './render/birds.js';
+import { AlienCraft } from './render/craft.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
@@ -63,6 +64,7 @@ floor.position.y = -140;
 scene.add(floor);
 
 const birds = new Birds(scene);
+const craft = new AlienCraft(scene);   // over the isles, where birds would be
 const effects = new Effects(scene);
 const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
@@ -226,6 +228,7 @@ function disposeMatch() {
   lastLand.clear();
   aimArc.hide();
   floor.visible = birds.bodies.visible = birds.wings.visible = true;
+  craft.set(false);
 }
 
 function startMatch(config) {
@@ -337,6 +340,7 @@ function handleEvents() {
           sky.setSpace(!!game.terrain.under);
           floor.visible = !game.terrain.under;   // nothing under the isles but space
           birds.bodies.visible = birds.wings.visible = !game.terrain.under;
+          craft.set(!!game.terrain.under, game.terrain.half);
           moons.set(game.terrain.wells);
         }
         else addDirty(e.region);
@@ -936,22 +940,42 @@ function updateRangeCard() {
 
 // ---------------------------------------------------------------- steering
 
-// A / D (or the side arrows) turn every human's guided missile while it flies.
+// A / D (or the side arrows) turn every human's guided missile while it flies;
+// on a touch screen, a finger held on the left or right half of the view does.
 // On a shared screen they all answer the same keys; with one human, only yours.
+let steerFuel = -1;                 // the most guidance fuel left on a local guided missile, -1 for none
+const steerTouch = new Map();       // pointer id -> -1 | 1, fingers steering
+let steerTipUntil = 0;
 function applySteering() {
-  if (!game || game.phase !== 'flight') { $('steer-hint').classList.add('hidden'); return; }
-  const dir = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0);
+  const hint = $('steer-hint');
+  if (!game || game.phase !== 'flight') { hint.classList.add('hidden'); steerFuel = -1; steerTouch.clear(); return; }
+  let finger = 0;
+  for (const d of steerTouch.values()) finger += d;
+  const dir = Math.sign((held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0) + finger);
   let fuel = -1;
   for (const p of game.localHumans) {
     game.steer(p.id, dir);
     for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) fuel = Math.max(fuel, pr.steer.fuel);
   }
-  $('steer-hint').classList.toggle('hidden', fuel < 0);
+  if (fuel >= 0 && steerFuel < 0) steerTipUntil = performance.now() + 1800;   // a new missile: say how, briefly
+  steerFuel = fuel;
+  hint.classList.toggle('hidden', fuel < 0);
   if (fuel >= 0) {
     $('steer-fuel').style.width = `${(fuel / WEAPON_BY_ID.guided.flight[0].fuel) * 100}%`;
-    $('steer-hint').classList.toggle('empty', fuel <= 0);
+    hint.classList.toggle('empty', fuel <= 0);
+    hint.classList.toggle('tip', performance.now() < steerTipUntil);
+    hint.classList.toggle('l', fuel > 0 && dir < 0);
+    hint.classList.toggle('r', fuel > 0 && dir > 0);
   }
 }
+// Caught before the camera's own handlers, so a steering finger does not also orbit.
+window.addEventListener('pointerdown', (e) => {
+  if (!touch || steerFuel <= 0 || e.target !== renderer.domElement) return;
+  steerTouch.set(e.pointerId, e.clientX < window.innerWidth / 2 ? -1 : 1);
+  touch.buzz?.(8);
+  e.stopPropagation();
+}, { capture: true });
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => steerTouch.delete(e.pointerId), { capture: true });
 
 // ---------------------------------------------------------------- kill cam
 
@@ -991,7 +1015,7 @@ function decidingShot() {
     if (pr.dead || pr.probe || pr.roller) continue;
     const w = WEAPON_BY_ID[pr.weapon];
     const blast = w.impact?.find((i) => i.type === 'blast');
-    if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split'))) continue;
+    if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split' || f.type === 'airburst'))) continue;
     const hit = forecast(pr, KILLCAM.lead);
     if (!hit) continue;
     const o = game.players[pr.owner];
@@ -1394,7 +1418,7 @@ if (touch) {
   // The left column is full on a phone, so the players box sits top right.
   $('hud').appendChild($('scoreboard'));
   // No keyboard here: the hints say what to tap instead.
-  $('steer-hint').querySelector('b').textContent = '\u25C0 \u25B6';
+  $('steer-hint').querySelector('.sh-tip').textContent = 'hold left or right to steer';
   $('chat-input').placeholder = 'Say something';
 }
 
@@ -1660,7 +1684,20 @@ function updateHud() {
   setText(E['round-desc'], mod.id === 'clear' ? '' : mod.desc);
 }
 
+// How much the marks over the tanks say, by view, to keep the field clear:
+// health only where you are sizing the field up (the sight, the overview, a
+// Find look), faint while a shell is followed, names alone otherwise.
+function labelMode() {
+  if (killCam) return 'name';
+  if (gunner.active || overview || (peek && performance.now() < peek.until)) return 'full';
+  if (game.phase !== 'aim' && followShell) return 'faint';
+  return 'name';
+}
+
+let labelModeWas = '';
 function updateLabels() {
+  const mode = labelMode();
+  if (mode !== labelModeWas) { $('labels').className = `lb-${mode}`; labelModeWas = mode; }
   game.players.forEach((p, i) => {
     const el = labels[i];
     const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
@@ -2425,6 +2462,7 @@ function tick(dt, draw = true) {
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   moons.update(performance.now() / 1000);
   birds.update(dt);
+  craft.update(dt);
   soundScape(dt);
   music.update(dt, game ? timeScale : 1);
   effects.update(dt * timeScale);
@@ -2465,7 +2503,7 @@ $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
+window.craterfall = { craft, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
   get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },

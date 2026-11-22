@@ -48,16 +48,18 @@ export const WEAPONS = [
   },
   {
     id: 'flak', name: 'Flak', price: 220, bundle: 2,
-    desc: 'Bursts at the top of its arc into 14 small shells over a wide area. Shallow craters, light hits.',
-    // Spread 5 m/s lands a pattern about 50 m across: 8 left gaps wider than a
-    // tank between fragments, so a burst right over a target could miss it.
-    flight: [{ type: 'split', count: 14, spread: 5, shape: 'disc', child: 'flaklet' }],
-    // Only if it never reaches the top of its arc (a flat shot): a small dud of a blast.
+    desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Passing nobody, it bursts just above the ground.',
+    // On the way down it bursts at its nearest pass over an enemy tank (within
+    // `range` across, `low`..`high` above it), or `floor` over the ground.
+    // Fragments keep `carry` of the shell's sideways speed and fan out `spread`
+    // m/s, so a burst 20 m up lands a pattern about 15 m across, under it.
+    flight: [{ type: 'airburst', range: 22, low: 4, high: 40, floor: 14, count: 12, spread: 7, carry: 0.35, child: 'flaklet' }],
+    // Only if it strikes before it can burst (a flat shot into a hill): a small blast.
     impact: [{ type: 'blast', radius: 8, damage: 18, depth: 0.4 }],
   },
   {
     id: 'flaklet', name: 'Flak fragment', hidden: true,
-    impact: [{ type: 'blast', radius: 7, damage: 10, depth: 0.3 }],
+    impact: [{ type: 'blast', radius: 7, damage: 13, depth: 0.1 }],
   },
   {
     id: 'bomblet', name: 'Bomblet', hidden: true,   // thrown by the Shrapnel perk
@@ -160,6 +162,29 @@ export function splitVelocities(vel, count, spread, shape = 'line') {
     out.push([vel[0] + px * spread * s, vel[1], vel[2] + pz * spread * s]);
   }
   return out;
+}
+
+// Should a falling airburst shell (Flak) go off now? At its nearest pass over
+// an enemy tank (across distance no longer shrinking), inside the window above
+// it; or close over solid ground. `tanks` are [{ x, y, z, owner }]; `ground`
+// is the height under the shell, or null over open space.
+export function airburstNow(pr, burst, tanks, ground) {
+  const [x, y, z] = pr.pos;
+  if (pr.vel[1] >= 0) return false;
+  for (const t of tanks) {
+    if (t.owner === pr.owner) continue;
+    const dx = t.x - x, dz = t.z - z;
+    const up = y - t.y;
+    if (up < burst.low || up > burst.high || dx * dx + dz * dz > burst.range * burst.range) continue;
+    if (dx * pr.vel[0] + dz * pr.vel[2] <= 0 || dx * dx + dz * dz < 9) return true;   // past its closest, or right over it
+  }
+  return ground != null && y - ground < burst.floor;
+}
+
+// The fragments of an airburst: a downward fan under the burst point.
+export function airburstVelocities(vel, burst) {
+  const base = [vel[0] * burst.carry, Math.min(vel[1] * 0.4, 0) - 3, vel[2] * burst.carry];
+  return splitVelocities(base, burst.count, burst.spread, 'disc');
 }
 
 // A rangefinder's five probes: the shot as aimed, then the turret turned each

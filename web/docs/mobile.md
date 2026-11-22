@@ -23,11 +23,12 @@ sideways" card over the game (menus can stay portrait-friendly).
 
 | Zone | Control | Feeds |
 | --- | --- | --- |
-| Right thumb | **SIGHT**, above the weapon button: the camera looks down your turret line; then drag anywhere to aim (↔ turret, ↕ elevation, 1:1 with the view) and pinch to zoom. Round one's first plan says so. (Tap-to-aim was taken out: a stray tap swung the turret) | G; `src/gunner.js` |
+| Right thumb | **SIGHT**, above the weapon button: the camera looks down your turret line; then drag anywhere to aim (↔ turret, ↕ elevation, 1:1 with the view) and pinch, or the − / + chip above Fine / Find / View, to zoom (2×, 4×, 8×). Round one's first plan says so. (Tap-to-aim was taken out: a stray tap swung the turret) | G; `src/gunner.js` |
 | Right thumb | **Aim pad**: drag ↔ turret, ↕ elevation, like a trackpad (relative, with pointer acceleration: slow is precise, a flick turns far) | `game.adjustAim`, as held A/D/W/S do |
 | Right thumb | **Power strip** beside it: drag ↕ | `adjustAim` power, as Q/E do |
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
+| Either half of the view | In flight, a finger held on the left or right half steers a Guided Missile (the Guidance gauge at the right edge shows the fuel) | A / D |
 | Left thumb | **Jet**, and **⚙ Settings** above it (Master / Effects / Music levels and mutes, music track, full screen, resource packs) | J; M and - / = for Master |
 | Bottom middle | Small: Fine, Find, View, Chat (online only) | F, V, Enter; Fine scales the pad by 0.2 |
 
@@ -83,8 +84,8 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   rangefinder) and the players box shrink. On a phone the players box leaves the
   column for the top right, as the column has no room (scale 0.72; the card 0.55 under 520 px
   tall, so it clears the drive cross on a 375 px phone) and perks hide; the keyboard
-  help line goes; the weapon bar is the weapon button's pop-up; the Guided Missile
-  steering bar and the chat log move up.
+  help line goes; the weapon bar is the weapon button's pop-up; the chat log
+  moves up.
 - The setup, draft, shop and results cards already fit (`max-height: 92vh` and
   scroll). Buttons get a 40 px minimum height. The shop grid is 3 columns in
   landscape and fine. The setup card is long; in landscape it scrolls. A later pass

@@ -243,7 +243,7 @@ test('netplay: jump jet hops, Flak and Teleports replay the same on every screen
   assert.ok(clients.every((c) => c.hops >= 1), `hops: ${clients.map((c) => c.hops)}`);
   assert.ok(clients.reduce((n, c) => n + c.hops, 0) >= 5);
   assert.ok(clients.some((c) => c.warps >= 1), 'someone teleported');
-  assert.ok(clients.every((c) => c.frags >= 14 && c.frags % 14 === 0), `flak fragments: ${clients.map((c) => c.frags)}`);
+  assert.ok(clients.every((c) => c.frags >= 12 && c.frags % 12 === 0), `flak fragments: ${clients.map((c) => c.frags)}`);
   // Every plan that went out carried the charges left after the hop.
   const plans = room.log.filter((e) => e.msg.t === 'plan');
   assert.ok(plans.length > 0 && plans.every((e) => Number.isInteger(e.msg.tank.jets)));
