@@ -429,9 +429,10 @@ memory on the server, so a redeploy ends any match in progress.
 `Players.cs` serves `/Craterfall/api/me`: a random player id in an HttpOnly
 cookie, and a small record per id (name, first and last seen, matches played
 and won). Records are saved as `players.json` in the folder named by
-`CRATERFALL_DATA` (env var, or config `Craterfall:DataPath`), else in `data/`
-next to the module, which a new drop may replace; with neither writable they
-stay in memory and the host logs a warning.
+`CRATERFALL_DATA` (env var, or config `Craterfall:DataPath`), else in the
+host's `App_Data/Craterfall` (a mounted volume that outlives drops), else in
+`data/` next to the module, which a new drop may replace; with none writable
+they stay in memory and the host logs a warning.
 `tools/devserver.mjs` is a copy of the same API for local testing; keep the two in step.
 
 ```powershell

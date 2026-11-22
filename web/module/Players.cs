@@ -27,7 +27,7 @@ namespace Craterfall;
 ///
 /// A record holds a name, first and last seen, and matches played and won;
 /// nothing else is stored. Records are kept as JSON in a data folder
-/// (CRATERFALL_DATA, or config Craterfall:DataPath, else data/ next to the
+/// (CRATERFALL_DATA, or config Craterfall:DataPath, else the host's App_Data/Craterfall, else data/ next to the
 /// module) with atomic writes, or only in memory when no folder is writable.
 /// Rooms.cs reads the id to tie seats to players. Keep tools/devserver.mjs in step.
 /// </summary>
@@ -60,7 +60,7 @@ public static class Players
     public static void Map(WebApplication app, string prefix)
     {
         Log = app.Services.GetService(typeof(ILoggerFactory)) is ILoggerFactory f ? f.CreateLogger("Craterfall.Players") : null;
-        Open(app.Configuration);
+        Open(app.Configuration, app.Environment.ContentRootPath);
         if (File_ is not null)
         {
             Saver = new Timer(_ => Save(), null, SaveEvery, SaveEvery);
@@ -216,11 +216,14 @@ public static class Players
 
     // ---- storage
 
-    private static void Open(IConfiguration config)
+    private static void Open(IConfiguration config, string contentRoot)
     {
         var candidates = new List<string>();
         var configured = Environment.GetEnvironmentVariable("CRATERFALL_DATA") ?? config["CRATERFALL_DATA"] ?? config["Craterfall:DataPath"];
         if (!string.IsNullOrWhiteSpace(configured)) candidates.Add(configured);
+        // The host's App_Data is a mounted volume that outlives module uploads.
+        var appData = Path.Combine(contentRoot, "App_Data");
+        if (Directory.Exists(appData)) candidates.Add(Path.Combine(appData, "Craterfall"));
         var here = Path.GetDirectoryName(typeof(Players).Assembly.Location);
         if (!string.IsNullOrEmpty(here)) candidates.Add(Path.Combine(here, "data"));
 
