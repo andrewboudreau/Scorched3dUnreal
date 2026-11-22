@@ -7,7 +7,8 @@
 //     it up. Anything else (or three seconds) lets it go again.
 //   - Small chips in the player card for the planner's mods: level, health
 //     and turns left once up.
-//   - The armory's Mods section (modShopCards), apart from the weapons.
+//   - The armory's Mods section (modShopCards), apart from the weapons, when
+//     the host's Lab sells mods there (by default they come from perks).
 // It reads the game each frame and talks to it only through game.deploy.
 
 import { MODS, MOD_BY_ID, modUp } from './core/mods.js';
@@ -112,7 +113,9 @@ export class ModsUI {
       const by = g.players[e.by];
       this.banner(`${mine ? 'Your' : `${p.name}'s`} ${def.name} is down`, by ? `Shot down by ${by.name}` : '', 1500);
     } else if (e.what === 'expire' && mine) {
-      this.banner(`Your ${def.name} wore out`, '', 1200);
+      this.banner(`Your ${def.name} wore out`, 'A new one is ready on your next turn', 1200);
+    } else if (e.what === 'refit' && mine) {
+      this.banner(`New ${def.name} ready`, 'Deploying it takes this turn', 1200);
     }
   }
 
@@ -160,7 +163,9 @@ export class ModsUI {
 }
 
 // The armory's Mods section, for main.js's shop: a heading and a card per mod
-// on sale (level by level), in the same shape as the weapon cards.
+// on sale (level by level), in the same shape as the weapon cards. Only when
+// the host's Lab puts mods in the armory; by default they come from the perk
+// draft and the section is left out.
 export function modShopCards(game, p, justBought = null) {
   const cards = MODS.filter((d) => game.cfg.lab[d.id] === 'shop').map((d) => {
     const have = game.modLevel(p, d.id);

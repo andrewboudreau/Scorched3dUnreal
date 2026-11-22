@@ -22,19 +22,30 @@ export function defaultMatch(name) {
     players: [{ name: name || 'You', ai: null }, { name: 'Rook', ai: 'normal' }, { name: 'Vex', ai: 'normal' }],
     rounds: 3, maxWind: 1.5, hills: 45, world: 'meadow',
     twists: true, firing: 'volley', fog: false,
-    lab: { satellite: 'shop', level: 1, labels: 'some' },
+    lab: { satellite: 'perk', level: 1, labels: 'some', orbiter: 'perk', orbiterLevel: 1 },
   };
 }
 
+// The saved Custom state's version. Version 1 (no `v`) saved every select,
+// so its 'shop' in the mod selects was the old default ("In the armory"),
+// not a choice: it is dropped, and the new default (Perks) shows instead.
+export const CUSTOM_VERSION = 2;
+const OLD_DEFAULTS = { 'opt-sat': 'shop', 'opt-orbiter': 'shop' };
+
 // {open, opts: {selectId: value}, cpus: [{name, type}]}, whatever the last visit left, checked.
+// A saved value the select no longer offers falls back to its default in wireLaunch.
 export function loadCustom(storage) {
   let raw = null;
   try { raw = JSON.parse(storage.getItem(CUSTOM_KEY) || 'null'); } catch { /* damaged: start fresh */ }
   const out = { open: false, opts: {}, cpus: null };
   if (!raw || typeof raw !== 'object') return out;
   out.open = raw.open === true;
+  const old = raw.v !== CUSTOM_VERSION;
   if (raw.opts && typeof raw.opts === 'object') {
-    for (const [k, v] of Object.entries(raw.opts)) if (/^opt-[\w-]+$/.test(k) && typeof v === 'string') out.opts[k] = v;
+    for (const [k, v] of Object.entries(raw.opts)) {
+      if (!/^opt-[\w-]+$/.test(k) || typeof v !== 'string' || (old && OLD_DEFAULTS[k] === v)) continue;
+      out.opts[k] = v;
+    }
   }
   if (Array.isArray(raw.cpus)) {
     const cpus = raw.cpus.filter((r) => r && CPU_TYPES.includes(r.type) && typeof r.name === 'string')
@@ -45,7 +56,7 @@ export function loadCustom(storage) {
 }
 
 export function saveCustom(storage, state) {
-  try { storage.setItem(CUSTOM_KEY, JSON.stringify({ open: !!state.open, opts: state.opts, cpus: state.cpus })); } catch { /* private mode */ }
+  try { storage.setItem(CUSTOM_KEY, JSON.stringify({ v: CUSTOM_VERSION, open: !!state.open, opts: state.opts, cpus: state.cpus })); } catch { /* private mode */ }
 }
 
 // On a phone, tapping Play or Start also fills the screen where the browser

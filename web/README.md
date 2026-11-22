@@ -260,32 +260,44 @@ second column beside the first. On a phone the players box sits top right.
   cannot drive or jump off an isle's edge. There are no lakes, and the sky is
   deep space: stars all round, a nebula and a ringed planet.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
-  they have their own Mods section at the end of the armory, bought a level
-  at a time, and a perk can grant or level one. A mod you own is *ready*.
+  they come from the **perk draft** between rounds. An unlock card (Orbital
+  Mechanic, Sat Recon) gives you one at level 1; once you have it, level-up
+  cards (Tighter Orbit, Sharper Optics) raise it a level at a time to level 3.
+  A draft holds at most one mod card, more often while you own no mod, and a
+  tank takes at most four mod levels from perks in a match. The host's Lab can
+  instead sell mods in the armory (a Mods section at its end, a level at a
+  time), hand everyone one, or turn them off. A mod you own is *ready*.
   Deploying it is your whole turn: on a phone, tap its button at the top of
   the Fire column (ORB / SAT) and tap again to confirm; on a desktop press B
   twice, or use the button in the player card. In a volley, deploying is the
   action you lock in, and it goes up when the volley fires. Once up, a mod
   has hit points and a lifetime counted in your turns, and it stays up
   across rounds (it moves with you to your new spot) until it is shot down
-  or wears out. Then it is ready again next round. Small chips in the player
+  or wears out. Then a new one is ready on your next turn (or next volley):
+  putting it back up costs that turn, which is the whole price of losing one.
+  A mod lost with its tank comes back next round. Small chips in the player
   card show each mod's level, health and turns left. Shells can hit a mod
   directly, blasts hurt any mod in reach, and **Flak** is the anti-air
   answer: it also bursts by an enemy mod and its burst hurts every enemy mod
-  near it. Shooting one down pays like damage. CPU tanks (not Easy) buy an
-  orbiter when they have money to spare, and deploy when they have no good
-  shot to take yet.
-- **Gravity Orbiter** (mod; 180, then 220, then 260; lasts 6, 7 or 8 turns; 30 to 50 hp). Small
+  near it. Shooting one down pays 60. CPU tanks like the orbiter cards in the
+  draft (and buy one when the Lab puts mods in the armory). Each Normal or
+  Hard CPU has its own way of timing the deploy for the match: some put it up
+  at once, some fire a ranging shot first and deploy while their aim is still
+  off, some wait until they are hurt.
+- **Gravity Orbiter** (mod; from perks, or 180, then 220, then 260 in an armory match; lasts 6, 7 or 8 turns; 30 to 50 hp). Small
   gravity wells circle your tank about 13 m out and 9 m up, and bend every
   enemy shell that passes near (your own shells fly through them). A shell that
   hits an orb is spent there and hurts it. Level 1 is one well, level 2 a
   stronger, faster one, level 3 a binary pair that spins round itself as it
   orbits, which scrambles shots rather than blocking them. The wells' places
   are a pure function of the match clock, which only runs while shells fly,
-  so every screen and the CPU agree on them. CPU tanks other than Easy (and
-  a Survey Satellite at level 2+) count the wells in when they solve a shot;
-  Easy CPUs fire as if they were not there.
-- **Survey Satellite** (mod; 200, then 260, then 300). Deploy it and it goes
+  so every screen agrees on them. A Survey Satellite at level 2+ counts the
+  wells in exactly. CPU tanks other than Easy count them in too, but misread
+  them (where the wells will be, how hard they pull) and their shots scatter
+  more, the higher the orbiter's level: against a level 3 orbiter a Normal
+  CPU lands about half as many hits as against a bare tank, a Hard one about
+  two thirds. Easy CPUs fire as if the wells were not there.
+- **Survey Satellite** (mod; from perks, or 200, then 260, then 300 in an armory match). Deploy it and it goes
   up 70 m over your tank, where it stays (a battery of 5, 6 or 7 turns, 20 to 30 hp) until
   shot down or spent; Flak or a direct hit brings it down. While it
   is up and you plan, it shines its beam down on the enemy nearest your
@@ -302,11 +314,14 @@ second column beside the first. On a phone the players box sits top right.
   moons out, level 2 counts them and enemy orbiters, level 3 labels more cells. At most 5
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
-  only on their own aim. The CPU does not buy it.
+  only on their own aim. The CPU neither drafts nor buys it.
 - **Lab** (Custom match, host only; travels in the match config online).
-  *Satellite* and *Orbiter*: in the armory (default), everyone gets one ready
-  at level 1, 2 or 3 (and the armory stops selling it), or off. *Sat labels*:
-  few, some or many.
+  *Satellite* and *Orbiter*: **Perks** (default: won and levelled in the
+  draft), **In the armory** (sold a level at a time, and the draft still
+  offers it), **Everyone · L1/L2/L3** (everyone has one ready at that level
+  from the start; the draft can level it up), or **Off**. A match config
+  saved with the old value `shop` is an armory match. *Sat labels*: few,
+  some or many.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
   its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
@@ -371,8 +386,11 @@ second column beside the first. On a phone the players box sits top right.
   | Heavy Rounds | wind pushes your shots 35% less |
   | Shrapnel | plain Shells throw two bomblets onward from where they land |
   | Tracer Rounds | see the first 45 m of your shot while you aim |
-  | Orbital Mechanic | your Gravity Orbiter goes up a level (level 1 if you have none) |
-  | Sat Recon | your Survey Satellite goes up a level (level 1 if you have none) |
+  | Orbital Mechanic | gain a Gravity Orbiter at level 1 (only offered if you have none) |
+  | Tighter Orbit | your Gravity Orbiter goes up a level (taken up to twice) |
+  | Sat Recon | gain a Survey Satellite at level 1 (only offered if you have none) |
+  | Sharper Optics | your Survey Satellite goes up a level (taken up to twice) |
+  | Long-Life Cells | your mods last 2 turns longer and take 25% more damage (only if you own one) |
 | Double Strike | from round 3's draft on: queue two shots in one turn (see below) |
 
 - **Double Strike** (a perk, drafted from the round 3 pick on). On a turn, or

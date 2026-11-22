@@ -3,11 +3,11 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField } from './ai.js';
 import { Scenery, standing } from './scenery.js';
-import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier } from './perks.js';
+import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT } from './perks.js';
 import { normalizeLab } from './survey.js';
-import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod } from './mods.js';
+import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -50,6 +50,19 @@ export const FOG = { sight: 110, rough: 60, flash: 35 };
 // online game fires it on the same step.
 export const STRIKE = { gap: 0.45 };
 
+// When a Normal or Hard CPU puts its orbiter up: each CPU has one way for the
+// whole match, drawn from the match seed and its id (game.aiDeployStyle).
+//   early     as soon as it has one ready (its first turn, and again right
+//             after losing one)
+//   ranging   fires first; deploys when it has no good shot: its aim still
+//             off by more than `yaw` degrees or `power` of the charge after
+//             ranging, only a rough fix in the fog, or nothing to shoot at;
+//             and once it has been hurt
+//   reactive  keeps firing until it has been hurt this round
+// Easy CPUs deploy now and then at random. Every style deploys with nothing to shoot at.
+export const DEPLOY_STYLES = ['early', 'ranging', 'reactive'];
+export const AI_DEPLOY = { yaw: 1.0, power: 0.02, easy: 0.35 };
+
 export class Game {
   constructor({
     players,
@@ -69,7 +82,7 @@ export class Game {
     local = null,
     // The host's Lab options (core/survey.js normalizeLab, core/mods.js
     // normalizeModLab): who has the Survey Satellite and its labels, and who has
-    // each other mod ('shop', 'all' at a level, or 'off').
+    // each other mod ('perk', the default: from the perk draft; 'shop'; 'all' at a level; or 'off').
     lab = null,
   }) {
     this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog, lab: { ...normalizeLab(lab), ...normalizeModLab(lab) } };
@@ -273,6 +286,7 @@ export class Game {
     if (!(p.inventory[p.weapon] > 0)) p.weapon = 'shell';
     const repair = perkSum(p, 'regen');
     if (repair && this.turnsThisRound > 0 && !this.volleyMode) p.hp = Math.min(p.maxHp, p.hp + repair);
+    if (!this.volleyMode) this.refit(p);   // (a volley refits everyone in beginVolley)
     this.aiPlan = null;
     this.aiDrive = null;
     this.driveNote = null;
@@ -308,6 +322,7 @@ export class Game {
         if (repair) p.hp = Math.min(p.maxHp, p.hp + repair);
       }
     }
+    for (const p of order) this.refit(p);
     this.nextPlanner();
   }
 
@@ -455,10 +470,13 @@ export class Game {
 
   // The enemy orbiters a shot by `p` would fly through, for the solvers
   // ({ field, t0 }, see ballistics.simulateShot): none when nobody has one up.
-  // `later` is how long after now the shot leaves. Easy CPUs ignore orbiters.
+  // `later` is how long after now the shot leaves. Easy CPUs ignore orbiters;
+  // the others misread them, the more the higher the level (ai.misjudgeField).
   orbitField(p, later = 0) {
-    if (p.ai === 'easy' || !this.players.some((q) => q !== p && modUp(q, 'orbiter'))) return {};   // easy CPUs fire blind
-    return { field: (t) => modWells(this.players, t, p.id), t0: this.clock + later };
+    if (p.ai === 'easy') return {};   // easy CPUs fire blind
+    const level = Math.max(0, ...this.players.filter((q) => q !== p && modUp(q, 'orbiter')).map((q) => q.mods.orbiter.level));
+    if (!level) return {};
+    return misjudgeField({ field: (t) => modWells(this.players, t, p.id), t0: this.clock + later, level, difficulty: p.ai, rng: this.rng });
   }
 
   planAiShot(p) {
@@ -625,15 +643,34 @@ export class Game {
     this.phaseTime = 0;
   }
 
+  // This CPU's way of timing its deploys for the whole match (DEPLOY_STYLES):
+  // a pure function of the match seed and its id, so it needs no state and
+  // every copy of an online game agrees.
+  aiDeployStyle(p) {
+    const r = makeRng((this.cfg.seed ^ Math.imul(p.id + 1, 0x9e3779b1)) >>> 0);
+    r.next();
+    return DEPLOY_STYLES[Math.floor(r.next() * DEPLOY_STYLES.length)];
+  }
+
   // Should a CPU spend this turn deploying its orbiter rather than firing?
-  // When it has no good shot: no target, a target it has not ranged yet (the
-  // first shot at it would be a wild guess) or only a rough fix in the fog.
-  // Easy CPUs just do it now and then. Returns the mod id or null.
+  // Always with nothing to shoot at; otherwise as its style says
+  // (DEPLOY_STYLES). Easy CPUs just do it now and then. Returns the mod id or null.
   aiWantsDeploy(p, target) {
     if (p.reloading || !readyMods(p).includes('orbiter')) return null;
     if (!target) return 'orbiter';
-    if (p.ai === 'easy') return this.rng.next() < 0.35 ? 'orbiter' : null;
-    return !p.aim[target.id] || target.rough ? 'orbiter' : null;
+    if (p.ai === 'easy') return this.rng.next() < AI_DEPLOY.easy ? 'orbiter' : null;
+    const hurt = p.hp < p.maxHp;
+    const style = this.aiDeployStyle(p);
+    if (style === 'early') return 'orbiter';
+    if (style === 'reactive') return hurt ? 'orbiter' : null;
+    const m = p.aim[target.id];
+    const unsure = target.rough || (m && m.shots > 0 && (Math.abs(m.yaw) > AI_DEPLOY.yaw || Math.abs(m.power) > AI_DEPLOY.power));
+    return hurt || unsure ? 'orbiter' : null;
+  }
+
+  // The start of `p`'s turn (or volley): a mod it lost since is ready again.
+  refit(p) {
+    for (const id of refitMods(this.cfg.lab, p)) this.emit({ type: 'mod', what: 'refit', player: p.id, mod: id });
   }
 
   // Up mods wear down by a turn; any that run out are spent.
@@ -817,7 +854,8 @@ export class Game {
     this.shopped = [];                          // online: humans whose shopping is in
     for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
-      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k)) : [];
+      const ownsMod = MODS.some((d) => this.modLevel(p, d.id) > 0);
+      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k), ownsMod ? MOD_DRAFT.then : MOD_DRAFT.first) : [];
       if (!offer.length) continue;
       if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
       else this.draft[p.id] = offer;
@@ -827,14 +865,20 @@ export class Game {
     if (!this.humans.length) this.closeShop();
   }
 
-  // Leave mod perks out of the draft when they could do nothing for `p`: a mod
-  // the host's Lab turned off or one already at its top level, or (needsMod)
-  // a tank that owns no mod at all.
+  // Leave mod perks out of the draft when they could do nothing for `p`, or
+  // are not its turn yet: a mod the host's Lab turned off or one already at
+  // its top level; an unlock for a mod it owns, a level-up for one it does
+  // not; any mod level once it has taken MOD_DRAFT.cap of them this match; or
+  // (needsMod) anything for a tank that owns no mod at all.
   perkFits(p, perk) {
     if (perk.needsMod && !MODS.some((d) => this.modLevel(p, d.id) > 0)) return false;
-    for (const id of Object.keys(perk.mods || {})) {
+    const ids = Object.keys(perk.mods || {});
+    if (ids.length && (p.perks || []).filter((k) => PERK_BY_ID[k]?.mods).length >= MOD_DRAFT.cap) return false;
+    for (const id of ids) {
       const def = MOD_BY_ID[id];
-      if (!def || modLab(this.cfg.lab, id).mode === 'off' || this.modLevel(p, id) >= def.maxLevel) return false;
+      const have = def ? this.modLevel(p, id) : 0;
+      if (!def || modLab(this.cfg.lab, id).mode === 'off' || have >= def.maxLevel) return false;
+      if ((perk.unlock && have > 0) || (perk.levelUp && have < 1)) return false;
     }
     return true;
   }
@@ -880,7 +924,8 @@ export class Game {
   }
 
   // A CPU that is not easy first saves up for a Gravity Orbiter (and its
-  // next level), keeping some money back for ammunition.
+  // next level), keeping some money back for ammunition; only when the
+  // host's Lab puts mods in the armory (by default they come from perks).
   aiShop(p) {
     if (p.ai !== 'easy' && p.money >= this.priceOf(p, 'orbiter') + 150) this.buy(p.id, 'orbiter');
     const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
