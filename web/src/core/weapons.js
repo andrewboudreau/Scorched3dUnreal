@@ -94,6 +94,7 @@ export const WEAPONS = [
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },
   { id: 'fuel', name: 'Fuel Can', price: 70, desc: '+20 m of driving for the next round.' },
+  { id: 'satellite', name: 'Survey Satellite', price: 200, levels: 3, desc: 'Puts a satellite over the enemy that projects a grid of cells on the ground; some are labelled with the turret and power that land there from where you stand. Level 1 leaves out the wind, level 2 counts it (and any moon), level 3 labels more cells.' },
   { id: 'jet', name: 'Jump Jets', price: 80, bundle: 2, desc: 'Two charges. Press J while planning to hop about 25 m the way the hull faces, over a crater rim. Costs no fuel and not your shot.' },
 ];
 
