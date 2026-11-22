@@ -19,7 +19,9 @@ public class CraterfallModule : IApplicationPartModule
 
     public void Configure(WebApplication app)
     {
-        // Online rooms (Rooms.cs). Their literal routes win over the file route below.
+        // Who is playing (Players.cs) and online rooms (Rooms.cs). Their literal
+        // routes win over the file route below.
+        Players.Map(app, $"/{Name}");
         Rooms.Map(app, $"/{Name}");
 
         // "{**path}" also matches the bare /Craterfall, which needs the trailing slash

@@ -16,11 +16,27 @@ namespace Craterfall;
 /// restarts or after a few idle hours.
 ///
 ///   GET  /Craterfall/api/rooms?id=&name=                          -> { rooms: [...], menu: { count, names } }
-///   POST /Craterfall/api/rooms                 { name, private } -> { code, seat, token }
-///   POST /Craterfall/api/rooms/{code}/join     { name }          -> { seat, token }
+///   POST /Craterfall/api/rooms                 { name, private, tab } -> { code, seat, token }
+///   POST /Craterfall/api/rooms/{code}/join     { name, tab }     -> { seat, token, rejoin? }
 ///   POST /Craterfall/api/rooms/{code}/send     { token, msg }    -> { n }
 ///   GET  /Craterfall/api/rooms/{code}/events?token=&after=N      -> { entries: [{ n, seat, msg }] }
 ///   POST /Craterfall/api/rooms/{code}/leave    { token }         -> {}
+///   POST /Craterfall/api/rooms/{code}/result   { token, winner } -> {}
+///
+/// Seats belong to a player id (the craterfall_id cookie, see Players.cs) and
+/// a tab key (`tab`, kept in the tab's sessionStorage). Joining a room where
+/// that id and tab still have a seat (one that has not gone) gives the seat
+/// back with a fresh token and `rejoin: true`, even once the match has started
+/// or the room is full, and the old token stops working: one id and tab never
+/// hold two seats. Another tab of the same browser has its own key, so two tabs
+/// can play each other as two seats; the second one's name gets a " 2" if the
+/// first already has it. A seat that has gone is let go, so joining again takes
+/// a new seat as before. Without the cookie or a tab key (old clients) every
+/// join takes a new seat, as it always did.
+///
+/// `result` is the host's report of a finished match (`winner` is a seat, or
+/// null): it counts a match played for every id seated at the start and a win
+/// for the winner's, once per room. Clients are trusted for now.
 ///
 /// The list shows every room that is not private and whose host is still
 /// there: who is in it, and whether it can still be joined. Whoever asks with
@@ -51,6 +67,8 @@ public static class Rooms
     {
         public required string Token;
         public required string Name;
+        public string? Pid;            // the player's id; null for clients without the cookie
+        public string? Tab;            // the tab's key; null for old clients
         public DateTime Seen = DateTime.UtcNow;
         public bool Gone;
     }
@@ -64,6 +82,8 @@ public static class Rooms
         public readonly List<Entry> Log = new();
         public bool Started;
         public bool Private;
+        public Dictionary<int, string>? MatchIds;   // seat -> player id, as the match started
+        public bool Reported;
         public readonly DateTime Created = DateTime.UtcNow;
         public DateTime Active = DateTime.UtcNow;
         public TaskCompletionSource Signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -104,12 +124,14 @@ public static class Rooms
             if (body is null) return Results.BadRequest();
             Cleanup();
             if (All.Count >= MaxRooms) return Results.StatusCode(503);
+            var pid = Players.IdOf(req);
+            if (pid is not null) Players.Seen(pid);
             for (var tries = 0; tries < 50; tries++)
             {
                 var code = string.Concat(Enumerable.Range(0, 4).Select(_ => Letters[RandomNumberGenerator.GetInt32(Letters.Length)]));
                 var room = new Room { Code = code, Private = body.Value.TryGetProperty("private", out var pv) && pv.ValueKind == JsonValueKind.True };
                 if (!All.TryAdd(code, room)) continue;
-                lock (room) return Results.Json(Join(room, NameOf(body.Value)));
+                lock (room) return Results.Json(Join(room, NameOf(body.Value, pid), pid, TabOf(body.Value)));
             }
             return Results.StatusCode(503);
         });
@@ -164,12 +186,31 @@ public static class Rooms
             var body = await ReadBody(req);
             if (body is null) return Results.BadRequest();
             if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound(new { error = "No room with that code." });
+            var pid = Players.IdOf(req);
+            var tab = TabOf(body.Value);
+            object result;
             lock (room)
             {
-                if (room.Started) return Results.Conflict(new { error = "That game has already started." });
-                if (room.Seats.Count(s => !s.Gone) >= MaxSeats) return Results.Conflict(new { error = "That room is full." });
-                return Results.Json(Join(room, NameOf(body.Value)));
+                // This id and tab's seat is still here: hand it back, with a fresh token.
+                var mine = pid is null || tab is null ? -1 : room.Seats.FindIndex(s => s.Pid == pid && s.Tab == tab && !s.Gone);
+                if (mine >= 0)
+                {
+                    var s = room.Seats[mine];
+                    s.Token = NewToken();
+                    s.Seen = DateTime.UtcNow;
+                    room.Active = DateTime.UtcNow;
+                    result = new { code = room.Code, seat = mine, token = s.Token, rejoin = true };
+                }
+                else
+                {
+                    if (room.Started) return Results.Conflict(new { error = "That game has already started." });
+                    if (room.Seats.Count(s => !s.Gone) >= MaxSeats) return Results.Conflict(new { error = "That room is full." });
+                    if (tab is not null) foreach (var s in room.Seats) if (s.Pid == pid && s.Tab == tab) s.Tab = null;   // a gone seat: let go
+                    result = Join(room, NameOf(body.Value, pid), pid, tab);
+                }
             }
+            if (pid is not null) Players.Seen(pid);
+            return Results.Json(result);
         });
 
         api.MapPost("{code}/send", async (string code, HttpRequest req) =>
@@ -189,11 +230,35 @@ public static class Rooms
                 {
                     if (seat != 0) return Results.StatusCode(403);
                     room.Started = true;
+                    room.MatchIds = room.Seats.Select((s, i) => (s, i)).Where(x => !x.s.Gone && x.s.Pid is not null).ToDictionary(x => x.i, x => x.s.Pid!);
                 }
                 room.Seats[seat].Seen = DateTime.UtcNow;
                 room.Append(seat, msg);
                 return Results.Json(new { n = room.Log.Count });
             }
+        });
+
+        // The host's screen reports the match's end. Trusted as it is, like every
+        // client for now: these numbers are only as honest as the host.
+        api.MapPost("{code}/result", async (string code, HttpRequest req) =>
+        {
+            var body = await ReadBody(req);
+            if (body is null) return Results.BadRequest();
+            if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound();
+            var token = body.Value.TryGetProperty("token", out var t) ? t.GetString() : null;
+            int? winner = body.Value.TryGetProperty("winner", out var w) && w.ValueKind == JsonValueKind.Number && w.TryGetInt32(out var wi) ? wi : null;
+            List<(string, bool)> players;
+            lock (room)
+            {
+                if (room.SeatOf(token) != 0) return Results.StatusCode(403);
+                if (!room.Started || room.MatchIds is null) return Results.Conflict();
+                if (room.Reported) return Results.Json(new { });
+                room.Reported = true;
+                // One match per player, even with two tabs (two seats) in it.
+                players = room.MatchIds.GroupBy(kv => kv.Value).Select(g => (g.Key, g.Any(kv => kv.Key == winner))).ToList();
+            }
+            Players.RecordMatch(players);
+            return Results.Json(new { });
         });
 
         api.MapGet("{code}/events", async (string code, string? token, int? after, HttpContext http) =>
@@ -222,26 +287,44 @@ public static class Rooms
         });
     }
 
-    private static object Join(Room room, string name)
+    private static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    private static object Join(Room room, string name, string? pid, string? tab)
     {
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-        room.Seats.Add(new Seat { Token = token, Name = name });
+        // Two tabs of one browser: tell them apart ("Ana", "Ana 2").
+        if (pid is not null)
+        {
+            var taken = room.Seats.Where(s => s.Pid == pid && !s.Gone).Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            for (var k = 2; taken.Contains(name) && k <= MaxSeats + 1; k++)
+            {
+                var tail = $" {k}";
+                var cut = Math.Min(name.Length, Players.NameMax - tail.Length);
+                if (cut < name.Length && char.IsHighSurrogate(name[cut - 1])) cut--;
+                var stem = name[..cut].TrimEnd();
+                if (!taken.Contains(stem + tail)) { name = stem + tail; break; }
+            }
+        }
+        var token = NewToken();
+        room.Seats.Add(new Seat { Token = token, Name = name, Pid = pid, Tab = tab });
         var seat = room.Seats.Count - 1;
         room.AppendServer(new { t = "join", seat, name });
         return new { code = room.Code, seat, token };
     }
 
-    private static string NameOf(JsonElement body)
+    // A tab key: short and URL-safe, else none.
+    private static string? TabOf(JsonElement body) =>
+        body.TryGetProperty("tab", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() is { Length: >= 8 and <= 40 } k
+            && k.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? k : null;
+
+    // The name sent, else the player's saved name, else "Player".
+    private static string NameOf(JsonElement body, string? pid)
     {
         var name = Clip(body.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null);
+        if (name.Length == 0) name = Players.NameOf(pid);
         return name.Length > 0 ? name : "Player";
     }
 
-    private static string Clip(string? name)
-    {
-        name = (name ?? "").Trim();
-        return name.Length > 14 ? name[..14] : name;
-    }
+    private static string Clip(string? name) => Players.CleanName(name);
 
     private static async Task<JsonElement?> ReadBody(HttpRequest req)
     {

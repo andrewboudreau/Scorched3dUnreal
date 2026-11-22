@@ -4,6 +4,7 @@ import { Game, PLAYER_COLORS, FOG } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
+import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
@@ -27,7 +28,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
-import { defaultMatch, humanName, phoneFullscreen, wireLaunch, NAME_KEY } from './launch.js';
+import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -1844,7 +1845,7 @@ function escapeHtml(s) {
 }
 
 const setupRows = [
-  { name: 'You', type: 'human' },
+  { name: profile.name || 'You', type: 'human' },
   { name: 'Rook', type: 'normal' },
 ];
 const CPU_NAMES = ['Rook', 'Vex', 'Marlow', 'Kestrel', 'Bastion', 'Ivo'];
@@ -1906,7 +1907,7 @@ $('play').onclick = () => {
   if (session) return;
   sound.ensure();
   phoneFullscreen(touch);
-  localStorage.setItem(NAME_KEY, humanName());
+  if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
   startMatch(defaultMatch(humanName()));
 };
@@ -1929,7 +1930,7 @@ $('start').onclick = () => {
     $('start').disabled = true;
     return;
   }
-  localStorage.setItem(NAME_KEY, humanName());
+  if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
   startMatch({
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
@@ -1986,6 +1987,7 @@ function showRoundResult(kind) {
     $('mo-table').innerHTML = standingsTable(sorted);
     $('mo-stats').innerHTML = statsTable(sorted);
     $('mo-awards').innerHTML = awards(game.players);
+    if (session?.isHost) link?.result(session.seatOf[sorted[0].id] ?? null);   // for the players' records
     $('matchover').classList.remove('hidden');
     return;
   }
@@ -2147,17 +2149,19 @@ async function goOnline(how) {
   const code = $('net-code').value.trim();
   if (how === 'join' && code.length !== 4) { $('net-note').textContent = 'Type the 4-letter room code first.'; return; }
   $('net-note').textContent = how === 'join' ? 'Joining…' : 'Making a room…';
-  localStorage.setItem('craterfall.name', netName());
+  if ($('net-name').value.trim()) profile.setName($('net-name').value);
   link = new RoomLink();
+  await profile.ready;   // so the request carries the player id cookie
+  let r;
   try {
-    if (how === 'create') await link.create(netName(), $('net-private').checked); else await link.join(code, netName());
+    r = how === 'create' ? await link.create(netName(), $('net-private').checked) : await link.join(code, netName());
   } catch (err) {
     link.close();
     link = null;
     $('net-note').textContent = err.message === 'Failed to fetch' ? 'Could not reach the server.' : err.message;
     return;
   }
-  enterRoom(false);
+  enterRoom(!!r.rejoin);   // this tab already had a seat there: read the room back
 }
 
 // `resume`: this tab had the seat before a reload; read the room back and carry on.
@@ -2427,7 +2431,18 @@ $('net-copy').onclick = async () => {
   const url = `${location.origin}${location.pathname}?room=${link.code}`;
   try { await navigator.clipboard.writeText(url); $('net-note').textContent = `Copied: ${url}`; } catch { $('net-note').textContent = url; }
 };
-$('net-name').value = localStorage.getItem(NAME_KEY) || '';
+// Your name is the player's (profile.js): saved here and on the server. The
+// launch screen (launch.js) copies it onto the first tank as it is typed.
+$('net-name').value = profile.name;
+$('net-name').addEventListener('change', () => { profile.setName($('net-name').value); });
+{
+  const was = profile.name;   // from localStorage; the server's may differ
+  profile.ready.then(() => {
+    if ($('net-name').value !== was || profile.name === was) return;
+    $('net-name').value = profile.name;
+    $('net-name').dispatchEvent(new Event('input'));
+  });
+}
 {
   const code = new URLSearchParams(location.search).get('room');
   const saved = JSON.parse(sessionStorage.getItem(ROOM_KEY) || 'null');
