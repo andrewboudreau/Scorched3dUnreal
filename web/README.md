@@ -63,7 +63,7 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 | X | Double Strike (with the perk): arm a double, or drop it again |
 | Tab / 1–9 | weapon (or click it in the bar at the bottom) |
 | Space | fire (in a volley: lock in your shot) |
-| F | look at the next opponent, nearest first (or click a name: an edge arrow or a scoreboard row) |
+| F | hold the camera on the next opponent, nearest first; pressed on the last one (or the only one, 1v1) it returns to your tank. Clicking a name (an edge arrow or a scoreboard row) gives a three-second look |
 | C | follow-shell camera |
 | V | overview camera |
 | M | mute everything (Master; Settings, the ⚙ button, has Effects and Music too) |

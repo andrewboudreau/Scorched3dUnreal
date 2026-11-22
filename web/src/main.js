@@ -762,24 +762,32 @@ function updateLocators() {
   });
 }
 
-// A three-second look at another tank; the camera then drifts back.
-function peekAt(p) {
+// A look at another tank: three seconds (a click on its mark), or held until
+// Find moves on or is pressed past the last enemy (hold).
+function peekAt(p, hold = false) {
   if (!game || game.phase !== 'aim' || !p.alive || p === game.current) { peek = null; return; }
-  if (!seen(p)) { const b = believed(p); if (b) peekSpot([b.x, b.y, b.z]); return; }
-  peek = { id: p.id, until: performance.now() + 3000 };
+  if (!seen(p)) { const b = believed(p); if (b) peekSpot([b.x, b.y, b.z], hold); return; }
+  peek = { id: p.id, who: game.current?.id, until: hold ? Infinity : performance.now() + 3000 };
   camGoal = null;
   overview = false;
 }
 
-// A three-second look at a spot on the ground (the rangefinder card's click).
-function peekSpot(pos) {
+// A look at a spot on the ground (the rangefinder card's click: three seconds).
+function peekSpot(pos, hold = false) {
   if (!game || game.phase !== 'aim') return;
-  peek = { id: null, x: pos[0], y: pos[1], z: pos[2], until: performance.now() + 3000 };
+  peek = { id: null, who: game.current?.id, x: pos[0], y: pos[1], z: pos[2], until: hold ? Infinity : performance.now() + 3000 };
   camGoal = null;
   overview = false;
 }
 
-// F: look at the next opponent, nearest first.
+// Whether a look is on: it ends when its time is up, the planning ends, or the turn passes.
+function peekLive() {
+  if (peek && (!game || game.phase !== 'aim' || peek.who !== game.current?.id || performance.now() >= peek.until)) peek = null;
+  return !!peek;
+}
+
+// F / Find: hold the camera on the next opponent, nearest first. Pressed on the
+// last one (or the only one, 1v1) it lets go and the camera returns to you.
 function peekNext() {
   const me = game.current;
   if (!me) return;
@@ -787,10 +795,12 @@ function peekNext() {
   const foes = game.players.filter((p) => p.alive && p !== me && believed(p))
     .sort((a, b) => Math.hypot(where(a).x - me.x, where(a).z - me.z) - Math.hypot(where(b).x - me.x, where(b).z - me.z));
   if (!foes.length) return;
-  const at = peek && performance.now() < peek.until ? foes.findIndex((p) => p.id === (peek.id ?? peek.fogId)) : -1;
-  const next = foes[(at + 1) % foes.length];
-  peekAt(next);
+  const at = peekLive() && peek.until === Infinity ? foes.findIndex((p) => p.id === (peek.id ?? peek.fogId)) : -1;
+  if (at === foes.length - 1) { peek = null; syncFind(); return; }
+  const next = foes[at + 1];
+  peekAt(next, true);
   if (peek && peek.id == null) peek.fogId = next.id;
+  syncFind();
 }
 
 // ---------------------------------------------------------------- rangefinder card
@@ -1327,8 +1337,7 @@ function updateCamera(dt) {
       }
       camTarget.copy(_shellC.divideScalar(n));
     } else if (game.phase === 'aim' && game.current) {
-      const look = peek && performance.now() < peek.until ? (peek.id != null ? game.players[peek.id] : peek) : null;
-      if (!look) peek = null;
+      const look = peekLive() ? (peek.id != null ? game.players[peek.id] : peek) : null;
       const p = look || (seen(game.current) ? game.current : fogFor?.[0] || game.current);
       camTarget.set(p.x, p.y + 4, p.z);
       // Left far out (e.g. by the volley framing) with nobody steering: come back in.
@@ -1699,15 +1708,21 @@ function updateHud() {
 // Find look), faint while a shell is followed, names alone otherwise.
 function labelMode() {
   if (killCam) return 'name';
-  if (gunner.active || overview || (peek && performance.now() < peek.until)) return 'full';
+  if (gunner.active || overview || peekLive()) return 'full';
   if (game.phase !== 'aim' && followShell) return 'faint';
   return 'name';
 }
 
 let labelModeWas = '';
+let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
+function syncFind() {
+  const finding = !!peek && peek.until === Infinity && peekLive();
+  if (finding !== findingWas) { document.querySelector('#touch [data-key="f"]')?.classList.toggle('on', finding); findingWas = finding; }
+}
 function updateLabels() {
   const mode = labelMode();
   if (mode !== labelModeWas) { $('labels').className = `lb-${mode}`; labelModeWas = mode; }
+  syncFind();
   game.players.forEach((p, i) => {
     const el = labels[i];
     const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
@@ -2528,6 +2543,7 @@ window.craterfall = { craft, get game() { return game; }, startMatch, muzzleOrig
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },
   get killCam() { return killCam; },
+  get peek() { return peek; },
   get session() { return session; },
   netClock: NET_CLOCK,
   get timeScale() { return timeScale; },

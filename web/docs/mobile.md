@@ -30,7 +30,7 @@ sideways" card over the game (menus can stay portrait-friendly).
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
 | Either half of the view | In flight, a finger held on the left or right half steers a Guided Missile (the Guidance gauge at the right edge shows the fuel) | A / D |
 | Left thumb | **Jet**, and **⚙ Settings** above it (Master / Effects / Music levels and mutes, music track, full screen, resource packs) | J; M and - / = for Master |
-| Bottom middle | Small: Fine, Find, View, Chat (online only) | F, V, Enter; Fine scales the pad by 0.2 |
+| Bottom middle | Small: Fine, Find, View, Chat (online only). Find stays lit and holds the camera on an enemy; tap again for the next, and past the last (or the only one) it lets go | F, V, Enter; Fine scales the pad by 0.2 |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so
 reaching 47.3° means nudging and waiting; a drag sets a *change*, so a 3 px move is a
