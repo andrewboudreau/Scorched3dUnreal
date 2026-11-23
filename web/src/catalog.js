@@ -17,7 +17,7 @@
 import { WEAPONS, ITEMS } from './core/weapons.js';
 import { PERKS, MODIFIERS, MOD_DRAFT, aiPickPerk } from './core/perks.js';
 import { MODS } from './core/mods.js';
-import { chooseWeapon, chooseSecondWeapon } from './core/ai.js';
+import { chooseWeapon, chooseSecondWeapon, TEMPERS, TEMPER_IDS } from './core/ai.js';
 import { makeRng } from './core/rng.js';
 import * as gameMod from './core/game.js';
 import * as aiMod from './core/ai.js';
@@ -217,39 +217,64 @@ export function sortRows(rows, key, dir = 1) {
 // cannot be imported); test/catalog.test.js checks it still matches the source.
 export const AI_BUYS = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
 
+// The situations a CPU's weapon choice is sampled in: `target` and `ctx`
+// as chooseWeapon (ai.js weaponWeights) takes them. The CPU stands at y 20.
+export const CPU_SITUATIONS = [
+  { name: 'level', target: { y: 20 }, ctx: {} },
+  { name: 'orbiter', target: { y: 20, shielded: true }, ctx: {} },
+  { name: 'target below', target: { y: 0 }, ctx: {} },
+  { name: 'far, no reading', target: { y: 20 }, ctx: { unsure: true, dist: 300 } },
+  { name: 'offline', target: { y: 20 }, ctx: { steer: true } },
+  { name: 'fog', target: { y: 20, rough: true }, ctx: { unsure: true } },
+  { name: 'in a hole', target: { y: 20 }, ctx: { sunk: 8, heap: {}, warp: {} } },
+  { name: 'under fire', target: { y: 20 }, ctx: { hits: 2, hurt: true, threat: true, heap: {}, warp: {} } },
+];
+
 // How often chooseWeapon / chooseSecondWeapon (ai.js) pick weapon `id` when a
-// CPU holds one of it, by sampling them: the best share over a few targets
-// (one behind an orbiter, one below, one level) for the first shot, and for
-// the second. Derived from the code, so it follows it.
-export function cpuWeaponUse(id, samples = 300) {
+// CPU holds one of it, by sampling them in each of CPU_SITUATIONS for every
+// temper (Normal difficulty): the best share for the first shot, the
+// situations where it comes up at all (`when`), and the share for the
+// second. Derived from the code, so it follows it.
+export function cpuWeaponUse(id, samples = 120) {
   try {
     const rng = makeRng(0xc0ffee);
     const me = { inventory: { [id]: 1 }, y: 20 };
     let first = 0;
-    for (const target of [{ shielded: true, y: 0 }, { shielded: false, y: 0 }, { shielded: false, y: 20 }]) {
-      let n = 0;
-      for (let k = 0; k < samples; k++) if (chooseWeapon(me, target, rng) === id) n++;
-      first = Math.max(first, n / samples);
+    const when = [];
+    for (const s of CPU_SITUATIONS) {
+      let best = 0;
+      for (const temper of TEMPER_IDS) {
+        let n = 0;
+        for (let k = 0; k < samples; k++) if (chooseWeapon(me, s.target, rng, { ...s.ctx, temper, difficulty: 'normal' }) === id) n++;
+        best = Math.max(best, n / samples);
+      }
+      if (best > 0) when.push(s.name);
+      first = Math.max(first, best);
     }
     let n2 = 0;
     for (let k = 0; k < samples; k++) if (chooseSecondWeapon(me, 'shell', rng) === id) n2++;
-    return { first, second: n2 / samples };
+    return { first, second: n2 / samples, when: when.length === CPU_SITUATIONS.length ? ['always'] : when };
   } catch {
-    return { first: 0, second: 0 };
+    return { first: 0, second: 0, when: [] };
   }
 }
+
+// The tempers (ai.js TEMPERS) that shop for `id` besides the common list.
+export const temperBuys = (id) => TEMPER_IDS.filter((t) => TEMPERS[t].buys?.includes(id));
 
 const pct = (x) => `${Math.round(x * 100)}%`;
 function cpuWeaponCell(w) {
   const buys = AI_BUYS.includes(w.id);
-  const { first, second } = cpuWeaponUse(w.id);
+  const tempers = temperBuys(w.id);
+  const { first, second, when } = cpuWeaponUse(w.id);
   const bits = [];
   if (w.id === 'shell') bits.push('default shot');
   else {
-    if (first > 0) bits.push(`shot 1 ≤${pct(first)}`);
+    if (first > 0) bits.push(`shot 1 ≤${pct(first)}${when.length && when[0] !== 'always' ? ` (${when.join(', ')})` : ''}`);
     if (second > 0) bits.push(`shot 2 ${pct(second)}`);
   }
   if (buys) bits.push('buys');
+  else if (tempers.length) bits.push(`buys (${tempers.join(', ')})`);
   if (!bits.length) return cell(w.hidden ? '' : 'never', 0);
   return cell(bits.join(', '), first + second + (buys ? 0.01 : 0));
 }
@@ -323,7 +348,7 @@ function itemsTable() {
     columns: ['id', 'name', 'price', 'bundle',
       { key: 'perShot', label: '$/unit', get: (w) => (Number.isFinite(w.price) && w.bundle > 0 ? Math.round((w.price / w.bundle) * 10) / 10 : '') },
       'desc',
-      { key: 'cpu', label: 'CPU', get: (w) => (AI_BUYS.includes(w.id) ? 'buys' : 'never buys') }],
+      { key: 'cpu', label: 'CPU', get: (w) => (AI_BUYS.includes(w.id) ? 'buys' : temperBuys(w.id).length ? `buys (${temperBuys(w.id).join(', ')})` : 'never buys') }],
   });
 }
 
