@@ -109,15 +109,15 @@ export function draftOffer(player, rng, count = 3, round = Infinity, allow = () 
   return out;
 }
 
-// What a CPU takes from an offer: a favourite if one is there, else any but
-// what it would never use (CPUs do not fly satellites).
+// What a CPU takes from an offer: a favourite if one is there, else any.
+// `likes` adds favourites of its own (its temper, ai.js TEMPERS): a spotter
+// goes for the Survey Satellite cards, which every CPU flies now (it puts the
+// satellite up when it has no reading on a far target, and aims better while
+// it is up: ai.js wantsSatellite, satelliteSharpen).
 const AI_FAVOURITES = ['hull', 'wideblast', 'heavycharge', 'dugin', 'repairs', 'quartermaster', 'orbital', 'orbitalup'];
-const AI_NEVER = ['satrecon', 'satrecon2'];
-export function aiPickPerk(offer, rng) {
-  const usable = offer.filter((id) => !AI_NEVER.includes(id));
-  const any = usable.length ? usable : offer;
-  const liked = any.filter((id) => AI_FAVOURITES.includes(id));
-  return rng.pick(liked.length && rng.next() < 0.7 ? liked : any);
+export function aiPickPerk(offer, rng, likes = []) {
+  const liked = offer.filter((id) => AI_FAVOURITES.includes(id) || likes.includes(id));
+  return rng.pick(liked.length && rng.next() < 0.7 ? liked : offer);
 }
 
 // Modifier fields

@@ -3,7 +3,7 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT, GALE_CAP } from './perks.js';
 import { normalizeLab } from './survey.js';
@@ -140,6 +140,8 @@ export class Game {
       hp: TANK.maxHp, maxHp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
       reloading: false,   // fired a Double Strike: its next turn is move only (see STRIKE)
+      hitBy: null,        // the last tank to hurt it this round (a CPU's threat, aiSituation)
+      steerGoal: null,    // a CPU's Guided Missile steers for this [x, z] (ai.steerGuided)
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
       shots: [], shotCount: 0,   // aim history, see AIM_HISTORY
       // Whole-match tallies for the results screen. `hits` counts shots (not
@@ -244,6 +246,7 @@ export class Game {
       p.fuel = p.fuelMax;
       p.pendingFuel = 0;
       p.hitsHere = 0;
+      p.hitBy = null;
       for (const id of p.perks) {
         for (const [w, n] of Object.entries(PERK_BY_ID[id].roundAmmo || {})) if (this.weaponOn(w)) p.inventory[w] = (p.inventory[w] || 0) + n;
       }
@@ -455,7 +458,7 @@ export class Game {
         continue;
       }
       const plan = this.planAiShot(p);
-      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.second ? { second: plan.second } : {}), ...(plan.deploy ? { deploy: plan.deploy } : {}) };
+      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.goal ? { goal: plan.goal } : {}), ...(plan.second ? { second: plan.second } : {}), ...(plan.deploy ? { deploy: plan.deploy } : {}) };
     }
     this.aiPlan = null;
     this.emit({ type: 'volley', players: Object.keys(v.plans).map(Number) });
@@ -543,28 +546,76 @@ export class Game {
     const deploy = this.aiWantsDeploy(p, target);
     if (deploy) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy, think: 0.6 });
     if (!target) return null;
-    // In the fog, a CPU that only has a rough fix sends a scout there first, now and then.
-    const scout = target.rough && p.inventory.scout > 0 && this.rng.next() < 0.45;
-    const sol = planShot({
-      shooter: p,
-      target,
-      wind: this.wind,
-      terrain: this.terrain,
-      rng: this.rng,
-      difficulty: p.ai,
-      memory: p.aim,
-      gravity: this.gravity,
-      windK: this.windShare(p),
-      drag: this.shellDrag(p),
-      ...this.orbitField(p),
-    });
-    const plan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
-    if (!scout && hasPerk(p, 'doubleStrike') && wantsDouble({ target, memory: p.aim, difficulty: p.ai, rng: this.rng })) {
-      const again = planShot({ shooter: p, target, wind: this.wind, terrain: this.terrain, rng: this.rng, difficulty: p.ai,
-        memory: p.aim, gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p), ...this.orbitField(p, STRIKE.gap) });
+    // Weigh the arsenal by the situation (ai.weaponWeights). A Mound goes at
+    // its own feet and a Teleport at a spot it picked; everything else at the target.
+    const ctx = this.aiSituation(p, target);
+    let weapon = chooseWeapon(p, target, this.rng, ctx);
+    const conds = { wind: this.wind, terrain: this.terrain, gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p) };
+    let aim = null;
+    if (weapon === 'mound') aim = ctx.heap;
+    else if (weapon === 'teleport') {
+      aim = planPlace({ shooter: p, point: ctx.warp, rng: this.rng, difficulty: p.ai, ...conds });
+      if (!aim) weapon = 'shell';
+    }
+    if (!aim) {
+      aim = planShot({
+        shooter: p,
+        target,
+        rng: this.rng,
+        difficulty: p.ai,
+        memory: p.aim,
+        ...conds,
+        ...this.orbitField(p),
+        sharpen: this.aiSharpen(p),
+      });
+      if (weapon === 'ranger') readRange(p.aim, target.id, p.ai);   // it reads the probes
+    }
+    const plan = { ...aim, weapon, target: target.id, think: 0.6 };
+    if (weapon === 'guided') plan.goal = [target.x, target.z];
+    if (!UTILITY.includes(weapon) && hasPerk(p, 'doubleStrike') && wantsDouble({ target, memory: p.aim, difficulty: p.ai, rng: this.rng })) {
+      const again = planShot({ shooter: p, target, rng: this.rng, difficulty: p.ai, memory: p.aim, ...conds,
+        ...this.orbitField(p, STRIKE.gap), sharpen: this.aiSharpen(p) });
       plan.second = { yaw: again.yaw, elev: again.elev, power: again.power, weapon: chooseSecondWeapon(p, plan.weapon, this.rng) };
     }
     return (this.aiPlan = plan);
+  }
+
+  // This CPU's temper for the match (ai.TEMPERS): a pure function of the
+  // match seed and its id, like its deploy style.
+  aiTemper(p) { return cpuTemper(this.cfg.seed, p.id); }
+
+  // How much of its aiming error a CPU carries into a shot: less while its
+  // Survey Satellite is up (ai.satelliteSharpen).
+  aiSharpen(p) {
+    const level = this.surveyLevel(p);
+    return level ? satelliteSharpen(level, { difficulty: p.ai, windy: Math.hypot(this.wind[0], this.wind[1]) / 1.5 }) : 1;
+  }
+
+  // The situation a CPU weighs its weapons by (ai.weaponWeights): its reading
+  // on the target, its hole, the hits it is taking and from whom (as far as
+  // it knows), and whether a Mound at its feet or a Teleport would work.
+  aiSituation(p, target) {
+    const A = ARSENAL;
+    const m = p.aim[target.id];
+    const foes = this.knownFoes(p);
+    const threat = p.hitBy != null ? foes.find((q) => q.id === p.hitBy) : null;
+    const sunk = holeDepth(this.terrain, p.x, p.z, p.y);
+    const hurt = p.hp < p.maxHp * A.hurt;
+    const strongest = Math.max(0, ...this.players.filter((q) => q !== p && q.alive).map((q) => q.hp + q.armor));
+    const behind = p.hp + p.armor < strongest * A.behind;
+    const ctx = {
+      difficulty: p.ai, temper: this.aiTemper(p), seen: m?.shots || 0, unsure: !!target.rough || unsureOf(m),
+      dist: Math.hypot(target.x - p.x, target.z - p.z), sunk, hits: p.hitsHere, hurt, behind, threat: !!threat,
+      steer: !this.online && p.inventory.guided > 0,
+    };
+    if (p.inventory.mound > 0 && (sunk >= A.sunk || (threat && p.hitsHere >= 1))) {
+      ctx.heap = planHeap({ me: p, toward: threat ? [threat.x, threat.z] : [0, 0], terrain: this.terrain, wind: this.wind,
+        gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p) });
+    }
+    if (p.inventory.teleport > 0 && (sunk >= A.deep || (p.hitsHere >= 2 && hurt) || behind)) {
+      ctx.warp = findWarp({ me: p, foes, terrain: this.terrain, rng: this.rng, solid: (x, z) => this.groundAt(x, z) != null });
+    }
+    return ctx;
   }
 
   // ---------- fog of war ----------
@@ -580,14 +631,14 @@ export class Game {
   // The live enemies `p` knows of, as it knows them: the real tanks without
   // fog; with it, stand-ins at its intel (`rough` when only roughly placed).
   knownFoes(p) {
-    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (modUp(q, 'orbiter') ? { ...q, shielded: true } : q));
+    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (modUp(q, 'orbiter') || modUp(q, 'satellite') ? { ...q, shielded: modUp(q, 'orbiter'), aloft: modUp(q, 'satellite') } : q));
     const out = [];
     for (const q of this.players) {
       const i = this.intel[p.id]?.[q.id];
       if (q === p || !q.alive || !i) continue;
       const t = this.terrain;
       const y = t.inBounds(i.x, i.z) ? t.heightAt(i.x, i.z) : q.y;
-      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0, shielded: i.r === 0 && modUp(q, 'orbiter') });
+      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0, shielded: i.r === 0 && modUp(q, 'orbiter'), aloft: i.r === 0 && modUp(q, 'satellite') });
     }
     return out;
   }
@@ -713,20 +764,29 @@ export class Game {
     return DEPLOY_STYLES[Math.floor(r.next() * DEPLOY_STYLES.length)];
   }
 
-  // Should a CPU spend this turn deploying its orbiter rather than firing?
-  // Always with nothing to shoot at; otherwise as its style says
-  // (DEPLOY_STYLES). Easy CPUs just do it now and then. Returns the mod id or null.
+  // Should a CPU spend this turn deploying a mod rather than firing? Its
+  // orbiter as its style says (aiWantsOrbiter), else its Survey Satellite
+  // when it has no reading on a far target (ai.wantsSatellite). Returns the mod id or null.
   aiWantsDeploy(p, target) {
-    if (p.reloading || !readyMods(p).includes('orbiter')) return null;
-    if (!target) return 'orbiter';
-    if (p.ai === 'easy') return this.rng.next() < AI_DEPLOY.easy ? 'orbiter' : null;
+    if (p.reloading) return null;
+    const ready = readyMods(p);
+    if (ready.includes('orbiter') && this.aiWantsOrbiter(p, target)) return 'orbiter';
+    if (ready.includes('satellite') && wantsSatellite({ me: p, target, memory: p.aim, difficulty: p.ai, temper: this.aiTemper(p), rng: this.rng })) return 'satellite';
+    return null;
+  }
+
+  // Its orbiter: always with nothing to shoot at; otherwise as its style says
+  // (DEPLOY_STYLES). Easy CPUs just do it now and then.
+  aiWantsOrbiter(p, target) {
+    if (!target) return true;
+    if (p.ai === 'easy') return this.rng.next() < AI_DEPLOY.easy;
     const hurt = p.hp < p.maxHp;
     const style = this.aiDeployStyle(p);
-    if (style === 'early') return 'orbiter';
-    if (style === 'reactive') return hurt ? 'orbiter' : null;
+    if (style === 'early') return true;
+    if (style === 'reactive') return hurt;
     const m = p.aim[target.id];
     const unsure = target.rough || (m && m.shots > 0 && (Math.abs(m.yaw) > AI_DEPLOY.yaw || Math.abs(m.power) > AI_DEPLOY.power));
-    return hurt || unsure ? 'orbiter' : null;
+    return !!(hurt || unsure);
   }
 
   // The start of `p`'s turn (or volley): a mod it lost since is ready again.
@@ -918,7 +978,7 @@ export class Game {
       const ownsMod = MODS.some((d) => this.modLevel(p, d.id) > 0);
       const offer = this.draftOn ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k), ownsMod ? MOD_DRAFT.then : MOD_DRAFT.first) : [];
       if (!offer.length) continue;
-      if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
+      if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue, TEMPERS[this.aiTemper(p)].likes));
       else this.draft[p.id] = offer;
     }
     for (const p of this.players) if (p.ai) this.aiShop(p);
@@ -998,7 +1058,8 @@ export class Game {
   aiShop(p) {
     if (p.ai !== 'easy' && p.money >= this.priceOf(p, 'orbiter') + 150) this.buy(p.id, 'orbiter');
     const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
-    for (const id of wishlist) this.buy(p.id, id);
+    // Its temper's own buys (ai.TEMPERS) come right after the first Breacher.
+    for (const id of [wishlist[0], ...TEMPERS[this.aiTemper(p)].buys, ...wishlist.slice(1)]) this.buy(p.id, id);
   }
 
   // ---------- input (current human player) ----------
@@ -1125,6 +1186,7 @@ export class Game {
     p.power = plan.power;
     clampAim(p);
     p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
+    p.steerGoal = plan.goal || null;
   }
 
   // A reloading tank's Fire: no shot. Its turn ends (in a volley, it is done
@@ -1164,7 +1226,11 @@ export class Game {
       for (const pb of rangeProbes(p.yaw, p.power, range, TANK.minPower, TANK.maxPower)) {
         this.spawnProjectile(pos, launchVelocity(pb.yaw, p.elev, pb.power), w.id, p.id, shot).probe = pb;
       }
-    } else this.spawnProjectile(pos, vel, w.id, p.id, shot);
+    } else {
+      const pr = this.spawnProjectile(pos, vel, w.id, p.id, shot);
+      // A CPU steers its Guided Missile for where it aimed (ai.steerGuided).
+      if (pr.steer && p.ai && p.steerGoal) { pr.steer.goal = [...p.steerGoal]; pr.steer.ai = p.ai; }
+    }
     this.heardFire(p);
     // Every shot tops the tank up by a third of its round's fuel, so a tank
     // can keep moving through a long round instead of running dry early.
@@ -1244,6 +1310,7 @@ export class Game {
       p.yaw = ((plan.yaw % 360) + 360) % 360;
       p.elev = plan.elev;
       p.power = plan.power;
+      p.steerGoal = plan.goal || null;
       if (plan.second && !p.reloading) {
         // Double Strike: this aim is shot 1, queued; the second goes as planned.
         this.strike = { player: p.id, first: { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon } };
@@ -1277,6 +1344,7 @@ export class Game {
       if (pr.roller) { this.stepRolling(pr, spheres, dt); continue; }
       pr.extra = wells.length ? extra(pr.owner) : null;
       const vyBefore = pr.vel[1];
+      if (pr.steer?.goal && pr.steer.fuel > 0) pr.steer.input = steerGuided(pr, pr.steer.goal, pr.steer.ai);
       if (pr.steer && pr.steer.input && pr.steer.fuel > 0) {
         // Swing the horizontal velocity; speed and climb are untouched.
         const a = pr.steer.rate * DEG * dt * pr.steer.input;
@@ -1478,6 +1546,7 @@ export class Game {
       attacker.money += Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK);
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
+      p.hitBy = attacker.id;
       const st = attacker.stats;
       st.damage += dealt;
       if (dealt > 0 && shot && shot !== st.lastHit) { st.hits++; st.lastHit = shot; }

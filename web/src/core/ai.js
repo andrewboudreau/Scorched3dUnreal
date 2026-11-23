@@ -1,5 +1,6 @@
-import { simulateShot, launchVelocity, GRAVITY } from './ballistics.js';
+import { simulateShot, launchVelocity, makeProjectile, stepProjectile, GRAVITY, MAX_FLIGHT } from './ballistics.js';
 import { TANK, muzzleOrigin } from './tank.js';
+import { makeRng } from './rng.js';
 
 // Iterative aim solver, after the legacy TankAIAimGuesser: fire a trial shot
 // through the real simulator, measure the miss, correct, repeat. It works the
@@ -48,6 +49,32 @@ export function misjudgeField({ field, t0 = 0, level = 0, difficulty = 'normal',
 const RAD = 180 / Math.PI;
 const wrap180 = (a) => ((a + 540) % 360) - 180;
 
+// How far a shell flies over flat ground (back down to its launch height)
+// with air drag and no wind: a coarse version of the real flight, for seeds.
+export function flatRange(power, elev, gravity, drag) {
+  const p = makeProjectile([0, 0, 0], launchVelocity(0, elev, power));
+  p.g = gravity;
+  p.windK = 0;
+  if (drag) p.drag = drag;
+  const dt = 1 / 30;
+  while (p.time < MAX_FLIGHT) {
+    stepProjectile(p, [0, 0], dt);
+    if (p.vel[1] < 0 && p.pos[1] <= 0) break;
+  }
+  return Math.max(1, p.pos[0]);
+}
+
+// The vacuum formula's power falls short in the rain (drag): scale it up
+// until the flat-ground flight with drag covers `dist`. A few steps of
+// "power by the square root of the range ratio" settle it.
+export function dragSeed(power, elev, dist, gravity, drag) {
+  for (let k = 0; k < 4; k++) {
+    const p = Math.min(TANK.maxPower, power);
+    power = p * Math.sqrt(dist / flatRange(p, elev, gravity, drag));
+  }
+  return power;
+}
+
 export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0 }) {
   const sx = shooter.x;
   const sz = shooter.z;
@@ -61,6 +88,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
   let yaw = targetBearing;
   let elev = rng.range(42, 62);
   let power = Math.sqrt((targetDist * gravity) / Math.sin((2 * elev) / RAD)) * rng.range(0.95, 1.05);
+  if (drag > 0) power = dragSeed(power, elev, targetDist, gravity, drag);
   power = Math.min(TANK.maxPower, Math.max(TANK.minPower, power));
 
   let best = { yaw, elev, power, miss: Infinity };
@@ -110,7 +138,9 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
 // target id -> the aiming error it still carries against that target. The
 // first shot gets a full-sized error; every later shot keeps only part of it.
 // A target or shooter that has moved, or a change in the wind, puts some back.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null }) {
+// `sharpen` (0..1) scales the error it carries into this shot: a Survey
+// Satellite overhead to read (satelliteSharpen); the memory itself is kept.
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null, sharpen = 1 }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
   const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, drag, field, t0 });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
@@ -132,8 +162,8 @@ export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'no
   m.shooter = [shooter.x, shooter.y, shooter.z];
   m.wind = [wind[0], wind[1]];
 
-  const yaw = sol.yaw + m.yaw + rng.gauss() * cfg.jitterYaw + (scatter?.yaw || 0);
-  const power = sol.power * (1 + m.power + rng.gauss() * cfg.jitterPower + (scatter?.power || 0));
+  const yaw = sol.yaw + m.yaw * sharpen + rng.gauss() * cfg.jitterYaw + (scatter?.yaw || 0);
+  const power = sol.power * (1 + m.power * sharpen + rng.gauss() * cfg.jitterPower + (scatter?.power || 0));
   const out = {
     yaw: ((yaw % 360) + 360) % 360,
     elev: sol.elev,
@@ -226,16 +256,231 @@ export function wantsDouble({ target, memory, difficulty = 'normal', rng }) {
   return (dialled || finish) && rng.next() < (difficulty === 'hard' ? 0.8 : 0.55);
 }
 
-// A target behind a Gravity Orbiter (`shielded`) draws Flak first: its burst
-// over the tank hurts the orbiter too, and fragments care less about a bent path.
-export function chooseWeapon(me, target, rng) {
-  const has = (id) => me.inventory[id] > 0;
-  if (target.shielded && has('flak') && rng.next() < 0.6) return 'flak';
-  if (has('roller') && target.y < me.y - 8 && rng.next() < 0.6) return 'roller';
-  if (has('breacher') && rng.next() < 0.5) return 'breacher';
-  if (has('scatter') && rng.next() < 0.4) return 'scatter';
-  if (has('flak') && rng.next() < 0.4) return 'flak';
+// ---------- the arsenal ----------
+//
+// A CPU weighs every weapon it holds by the situation (weaponWeights) and
+// draws one, the heavier the likelier, so two CPUs in the same spot do not
+// always agree. Each CPU also has a temper for the whole match (cpuTemper)
+// that leans the weights its own way. The utility rounds only come in when
+// they make sense: a Rangefinder before a long shot it has no reading for, a
+// Mound heaped at its own feet to climb out of a hole or shift off a spot it
+// keeps being hit on, a Teleport out of a deep hole or a losing fight, a
+// Guided Missile it steers in flight (offline only, steerGuided), a Scout at
+// an enemy it only roughly knows (fog). The heavy rounds keep their old
+// shares, so CPUs fire more kinds of shell, not more damage.
+
+// Tempers. Each multiplies the weights of weapons (missing: 1) and `satellite`
+// its urge to put a Survey Satellite up (wantsSatellite); `likes` are perks it
+// favours in the draft (perks.js aiPickPerk) and `buys` what it shops for
+// right after its first Breacher (game.aiShop).
+export const TEMPERS = {
+  gunner:     { breacher: 1.4, scatter: 1.3, roller: 1.2, ranger: 0.5, mound: 0.6, teleport: 0.6, satellite: 0.5, likes: [], buys: [] },
+  sapper:     { roller: 1.5, mound: 1.8, teleport: 1.4, breacher: 0.9, likes: ['dugin', 'shocks'], buys: ['mound', 'teleport'] },
+  spotter:    { ranger: 1.8, scout: 1.5, guided: 1.5, flak: 1.2, breacher: 0.9, satellite: 1.6, likes: ['satrecon', 'satrecon2'], buys: ['ranger'] },
+  skirmisher: { teleport: 2, guided: 1.3, scatter: 1.2, flak: 1.1, mound: 0.8, likes: ['longtanks'], buys: ['teleport'] },
+};
+export const TEMPER_IDS = Object.keys(TEMPERS);
+
+// A CPU's temper: a pure function of the match seed and its id, so it needs
+// no state and every copy of an online game agrees.
+export function cpuTemper(seed, id) {
+  const r = makeRng(((seed ^ 0x7e3a) ^ Math.imul(id + 1, 0x85ebca6b)) >>> 0);
+  r.next();
+  return TEMPER_IDS[Math.floor(r.next() * TEMPER_IDS.length)];
+}
+
+// Rounds that do no damage: never half of a Double Strike.
+export const UTILITY = ['ranger', 'scout', 'mound', 'teleport'];
+
+// The situations, in numbers.
+//   finish    target hp + armor a Shell can finish: no utility rounds then
+//   tough     ... that a Breacher likely finishes: the Breacher weighs more
+//   below     m the target sits below it: the Roller weighs more
+//   far       m: a shot this long it has no reading for can draw a Rangefinder
+//   sunk      m in a hole it could not drive or hop out of: Mound at its feet
+//   deep      m in a hole: Teleport out
+//   hurt      share of its hit points left under which it counts as hurt
+//   behind    its hp + armor under this share of the strongest enemy's
+//   easyDull  how keenly an Easy CPU reads the situation (1: fully)
+//   easyWild  chance an Easy CPU just grabs any weapon it could use
+export const ARSENAL = { finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, easyDull: 0.5, easyWild: 0.12 };
+
+// Does it still not have the range on a target? `m` is its aim memory for it
+// (planShot): none yet, or an error left bigger than about a degree or 2% of the charge.
+export const AIM_SURE = { yaw: 1.0, power: 0.02 };
+export const unsureOf = (m) => !m || !(m.shots > 0) || Math.abs(m.yaw) > AIM_SURE.yaw || Math.abs(m.power) > AIM_SURE.power;
+
+// What each weapon `me` holds weighs against `target` now. `ctx` is the
+// situation, all optional (game.aiSituation):
+//   difficulty, temper   its difficulty and temper id
+//   seen                 shots it has fired at this target already
+//   unsure               it has no good reading on the target (unsureOf)
+//   dist                 m to the target
+//   sunk                 m it sits below the ground around it (holeDepth)
+//   hits                 hits it has taken on this spot (p.hitsHere)
+//   hurt, behind         see ARSENAL
+//   threat               someone who has hit it is still alive
+//   heap                 a Mound fired at its feet would land there (planHeap)
+//   warp                 there is somewhere to Teleport to (findWarp)
+//   steer                it may steer a Guided Missile (offline)
+// Returns { weapon id: weight }; the Shell is always there.
+export function weaponWeights(me, target, ctx = {}) {
+  const A = ARSENAL;
+  const lean = TEMPERS[ctx.temper] || {};
+  const keen = ctx.difficulty === 'easy' ? A.easyDull : 1;
+  const sit = (x) => 1 + (x - 1) * keen;   // a situational boost, dulled for Easy
+  const inv = me.inventory || {};
+  const w = { shell: 1 };
+  const add = (id, x) => { if (inv[id] > 0 && x > 0) w[id] = x * (lean[id] ?? 1); };
+  const tough = (target.hp ?? 100) + (target.armor ?? 0);
+  const finish = tough <= A.finish;
+  const unsure = !!ctx.unsure;
+  const dy = (target.y ?? 0) - (me.y ?? 0);
+  const hits = ctx.hits || 0;
+
+  add('breacher', 0.9 * (tough <= A.tough ? sit(1.5) : 1));
+  add('scatter', 0.45 * (unsure ? sit(1.5) : 1));
+  add('flak', 0.35 * (target.shielded || target.aloft ? sit(4) : 1) * (unsure ? sit(1.3) : 1));
+  add('roller', 0.35 * (dy < -A.below ? sit(4) : dy > A.below ? 0.3 : 1));
+  if (ctx.steer) add('guided', 0.6 * (!ctx.seen ? sit(1.8) : unsure ? 1.2 : 0.4) * (target.shielded ? sit(1.5) : 1));
+  if (target.rough) add('scout', 1.6);
+  if (finish) return w;   // it can finish the target: no time for anything else
+  if (unsure && !target.rough && (ctx.dist || 0) > A.far && !(ctx.seen && keen < 1)) add('ranger', 0.7 * keen * (ctx.seen ? 0.6 : 1));
+  if (ctx.heap) {
+    const shaken = ctx.threat && (hits >= 2 || (hits >= 1 && ctx.hurt));
+    add('mound', keen * ((ctx.sunk || 0) >= A.sunk ? 3 : 0) + keen * (shaken ? 0.45 * Math.min(3, hits) * (ctx.hurt ? 1.5 : 1) : 0));
+  }
+  if (ctx.warp) {
+    add('teleport', keen * (((ctx.sunk || 0) >= A.deep ? 4 : 0) + (hits >= 2 && ctx.hurt ? 1 : 0) + (ctx.behind ? 0.7 : 0)));
+  }
+  return w;
+}
+
+// The weapon a CPU fires at `target`: drawn from weaponWeights. An Easy CPU
+// now and then grabs anything it could use.
+export function chooseWeapon(me, target, rng, ctx = {}) {
+  const w = weaponWeights(me, target, ctx);
+  const ids = Object.keys(w);
+  if (ctx.difficulty === 'easy' && rng.next() < ARSENAL.easyWild) return ids[Math.min(ids.length - 1, Math.floor(rng.next() * ids.length))];
+  let roll = rng.next() * ids.reduce((s, id) => s + w[id], 0);
+  for (const id of ids) {
+    roll -= w[id];
+    if (roll <= 0) return id;
+  }
   return 'shell';
+}
+
+// A Rangefinder shot at a target: the CPU reads where the five probes came
+// down, which is worth one more round of learning on top of the shot's own
+// (planShot already counted that). It still has to fire the real shot next turn.
+export function readRange(memory, id, difficulty = 'normal') {
+  const m = memory[id];
+  if (!m) return;
+  const learn = (DIFFICULTY[difficulty] || DIFFICULTY.normal).learn;
+  m.yaw *= learn;
+  m.power *= learn;
+}
+
+// A Mound at its own feet: lobbed nearly straight up at the least charge,
+// leaning toward `toward` ([x, z], whoever is shooting at it, else the
+// field's middle). The heap lifts the tank out of a hole, or up and off the
+// spot it keeps being hit on. Null unless the trial flight comes down within
+// `reach` m of it (wind, a ledge, the edge of an isle).
+export const HEAP = { elev: 80, reach: 9 };
+export function planHeap({ me, toward = [0, 0], terrain, wind = [0, 0], gravity = GRAVITY, windK = 1, drag = 0 }) {
+  const dx = toward[0] - me.x, dz = toward[1] - me.z;
+  const yaw = Math.hypot(dx, dz) > 1 ? ((Math.atan2(dz, dx) * RAD) + 360) % 360 : (me.yaw || 0);
+  const power = TANK.minPower;
+  const shot = simulateShot({ pos: muzzleOrigin(me, yaw, HEAP.elev), vel: launchVelocity(yaw, HEAP.elev, power), wind, terrain, gravity, windK, drag });
+  if (shot.kind !== 'ground' || Math.hypot(shot.point[0] - me.x, shot.point[2] - me.z) > HEAP.reach) return null;
+  return { yaw, elev: HEAP.elev, power };
+}
+
+// Somewhere to Teleport to: `tries` spots `min`..`max` m away, kept on
+// solid, dry, level ground inside the field, at least `clear` m from every
+// enemy and within `far` m of one (it still wants a shot). The best spot is
+// away from the enemies and out of any hole. `solid(x, z)` says whether
+// there is ground there (the isles). Returns { x, y, z } or null.
+export const WARP = { min: 90, max: 220, tries: 12, edge: 40, clear: 80, far: 380 };
+export function findWarp({ me, foes, terrain, rng, solid = () => true }) {
+  if (!foes.length) return null;
+  const half = terrain.half - WARP.edge;
+  let best = null;
+  for (let k = 0; k < WARP.tries; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    const d = rng.range(WARP.min, WARP.max);
+    const x = me.x + Math.cos(a) * d, z = me.z + Math.sin(a) * d;
+    if (Math.abs(x) > half || Math.abs(z) > half || !solid(x, z)) continue;
+    const y = terrain.heightAt(x, z);
+    if (y < terrain.waterLevel + 1) continue;
+    const hole = holeDepth(terrain, x, z, y);
+    if (hole > 2) continue;
+    const near = Math.min(...foes.map((f) => Math.hypot(f.x - x, f.z - z)));
+    if (near < WARP.clear || near > WARP.far) continue;
+    const score = Math.min(near, 250) * 0.02 - Math.max(0, hole) * 0.5 + rng.range(0, 1);
+    if (!best || score > best.score) best = { x, y, z, score };
+  }
+  return best && { x: best.x, y: best.y, z: best.z };
+}
+
+// A shot at a spot on the ground rather than at a tank (a Teleport's landing):
+// the solver's answer with half a first shot's aiming error, as nobody reads
+// a spot it has never shot at perfectly. Null if the solver cannot reach it.
+export function planPlace({ shooter, point, wind, terrain, rng, difficulty = 'normal', gravity = GRAVITY, windK = 1, drag = 0 }) {
+  const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
+  const sol = solveShot({ shooter, target: [point.x, point.y + 1, point.z], wind, terrain, rng, gravity, windK, drag });
+  if (!(sol.predictedMiss < 12)) return null;
+  const yaw = sol.yaw + rng.gauss() * cfg.yaw * 0.5;
+  const power = sol.power * (1 + rng.gauss() * cfg.power * 0.5);
+  return { yaw: ((yaw % 360) + 360) % 360, elev: sol.elev, power: Math.min(TANK.maxPower, Math.max(TANK.minPower, power)) };
+}
+
+// How a CPU steers its Guided Missile, every step: toward the spot it aimed
+// at (`goal`, [x, z]). It reacts `delay` s into the flight, holds straight
+// while the missile heads within `deadband` degrees of the goal, and lets go
+// in the last `near` m. It only fixes the bearing: steering never changes
+// the range, so a short shot stays short. Returns -1, 0 or +1 (game.steer).
+export const GUIDE = {
+  easy: { delay: 1.0, deadband: 5 },
+  normal: { delay: 0.5, deadband: 2.5 },
+  hard: { delay: 0.25, deadband: 1.2 },
+  near: 15,
+};
+export function steerGuided(pr, goal, difficulty = 'normal') {
+  const g = GUIDE[difficulty] || GUIDE.normal;
+  if (pr.time < g.delay) return 0;
+  const dx = goal[0] - pr.pos[0], dz = goal[1] - pr.pos[2];
+  if (Math.hypot(dx, dz) < GUIDE.near) return 0;
+  const off = wrap180((Math.atan2(dz, dx) - Math.atan2(pr.vel[2], pr.vel[0])) * RAD);
+  return Math.abs(off) < g.deadband ? 0 : Math.sign(off);
+}
+
+// ---------- the Survey Satellite ----------
+
+// With its satellite up, a CPU reads the labels and carries only this share
+// of its aiming error into a shot (planShot `sharpen`), by satellite level.
+// Level 1 labels leave the wind out, so they help less the windier it is;
+// an Easy CPU reads them half as well.
+export const SAT_READ = [1, 0.65, 0.5, 0.4];
+export function satelliteSharpen(level, { difficulty = 'normal', windy = 0 } = {}) {
+  if (!(level > 0)) return 1;
+  let s = SAT_READ[Math.min(SAT_READ.length - 1, level)];
+  if (level === 1) s += 0.2 * Math.min(1, Math.max(0, windy));
+  return difficulty === 'easy' ? (1 + s) / 2 : s;
+}
+
+// Should a CPU spend this turn putting its satellite up? When it has no good
+// reading on a target at least `far` m off that it cannot finish with a
+// Shell, `chance` of the time (times its temper's `satellite`). Easy CPUs
+// do it now and then at random.
+export const SAT_DEPLOY = { far: 150, chance: 0.5, easy: 0.12 };
+export function wantsSatellite({ me, target, memory, difficulty = 'normal', temper = null, rng }) {
+  if (!target) return false;
+  if (difficulty === 'easy') return rng.next() < SAT_DEPLOY.easy;
+  const tough = (target.hp ?? 100) + (target.armor ?? 0);
+  if (tough <= ARSENAL.finish || !(target.rough || unsureOf(memory[target.id]))) return false;
+  if (Math.hypot(target.x - me.x, target.z - me.z) < SAT_DEPLOY.far) return false;
+  return rng.next() < Math.min(0.9, SAT_DEPLOY.chance * (TEMPERS[temper]?.satellite ?? 1));
 }
 
 // A weapon for the second of a CPU's two shots: the first one's ammo is spent

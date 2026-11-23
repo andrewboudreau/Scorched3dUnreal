@@ -121,10 +121,14 @@ test('search and sort', () => {
 
 test('what the CPUs do is read from ai.js and perks.js, not written down twice', () => {
   assert.ok(cpuWeaponUse('breacher').first > 0.3);
-  assert.equal(cpuWeaponUse('mound').first, 0);
+  assert.equal(cpuWeaponUse('mound').first > 0, true, 'a Mound comes up, but only in a hole or under fire');
+  assert.deepEqual(cpuWeaponUse('mound').when, ['in a hole', 'under fire']);
+  assert.deepEqual(cpuWeaponUse('guided').when, ['offline']);
+  assert.deepEqual(cpuWeaponUse('breacher').when, ['always']);
   assert.equal(cpuWeaponUse('no-such-weapon').first, 0);
   const { scores, never } = cpuPerkScores();
-  assert.ok(never.has('satrecon'));
+  assert.ok(!never.has('satrecon'), 'CPUs draft the satellite now');
+  assert.equal(never.size, 0);
   assert.ok(scores.hull > scores.haggler);
   // game.js keeps the CPU shopping list in a local: the copy here must match it
   const src = readFileSync(new URL('../src/core/game.js', import.meta.url), 'utf8');

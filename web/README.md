@@ -223,8 +223,10 @@ second column beside the first. On a phone the players box sits top right.
 - **Teleport.** No damage. Your tank moves to where the shell lands, snapped to
   the ground and nudged clear of water, houses, tanks and the map edge. Shells
   already in the air still land where they were aimed, so you may have left
-  the spot. A flash marks the old and new places. 120 for two. The CPU does
-  not buy or fire it.
+  the spot. A flash marks the old and new places. 120 for two. CPU tanks
+  (sappers and skirmishers buy it) fire it to get out of a deep hole, when
+  they are being shot to pieces, or when far behind, at open, dry ground at
+  least 80 m from any enemy they know of.
 - **Fog of war** (setup option, off by default; works online too). Your tank
   sees 110 m around itself; the ground, trees, houses and water beyond are
   dimmed and enemy tanks out there are hidden. You still have intel on them, drawn as a ring in their
@@ -281,6 +283,23 @@ second column beside the first. On a phone the players box sits top right.
   first shot is a rough guess and the error shrinks with every shot at the same
   target. It grows back when the target or shooter moves or the wind swings.
   Easy stays wild, Normal usually lands on shot 2 to 4, Hard on shot 1 to 2.
+  In the rain their first guess already allows for the drag.
+- **CPU tanks use the whole arsenal** (`ai.js` `weaponWeights`). Each weighs
+  every weapon it holds by the situation: Breacher, Scatter and Roller are
+  everyday rounds (a Roller more so at a target below it, Flak against an
+  orbiter or a satellite, a Scout at a target it only has a rough fix on);
+  a Rangefinder before a long shot (over 180 m) with no reading; a Mound at
+  its own feet when it sits in a hole or keeps being hit; a Teleport out of a
+  deep hole, a losing fight or a lost position. Offline it fires Guided
+  Missiles too, mostly at targets it has no reading on, and steers them along
+  the line to the target as it flies (Hard reacts soonest and finest, Easy
+  late and coarse). With a kill on offer it never spends the turn on a
+  utility round. Each CPU also has a temper for the match, fixed by the match
+  seed: a *gunner* favours the damage rounds, a *sapper* the Roller, Mound
+  and Teleport (and buys them), a *spotter* the Rangefinder, Scout, Guided
+  Missile and Survey Satellite, a *skirmisher* the Teleport. Easy CPUs read
+  the situation less keenly and sometimes just grab anything; the
+  difficulty still sets how well they aim.
 - **Aim arc.** While you plan, a dashed line in your colour shows the shell's
   climb from the muzzle to the top of its flight, with this turn's wind and
   any moon's pull, and a ring on the ground under the top says how high and
@@ -359,7 +378,8 @@ second column beside the first. On a phone the players box sits top right.
   directly, blasts hurt any mod in reach, and **Flak** is the anti-air
   answer: it also bursts by an enemy mod and its burst hurts every enemy mod
   near it. Shooting one down pays 60. CPU tanks like the orbiter cards in the
-  draft. Each Normal or
+  draft, and draft the satellite ones as any other card (spotters favour
+  them). Each Normal or
   Hard CPU has its own way of timing the deploy for the match: some put it up
   at once, some fire a ranging shot first and deploy while their aim is still
   off, some wait until they are hurt.
@@ -393,7 +413,11 @@ second column beside the first. On a phone the players box sits top right.
   moons out, level 2 counts them and enemy orbiters, level 3 labels more cells. At most 5
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
-  only on their own aim. The CPU neither drafts nor buys it.
+  only on their own aim. CPU tanks draft it (spotters most). A CPU puts its
+  satellite up when it has no reading on a target over 150 m off (Easy only
+  now and then), and while it is up its first shots carry less of their
+  error: a third less at level 1 (less still in the wind), more at levels 2
+  and 3. Easy reads it about half as well.
 - **Mod rules in the config.** The old Lab menu is gone; the core still
   reads `lab` in the match config (`satellite` / `orbiter`: `perk`, `shop`,
   `all` or `off`, with a level, and the satellite's `labels`), so old configs
