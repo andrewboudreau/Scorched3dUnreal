@@ -96,9 +96,11 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   the home bar, with room left at the end for the gear. Inputs, selects and
   buttons are at least 44 to 48 px tall, and text inputs are 16 px so iOS does
   not zoom. In landscape it is two columns: title, **Your name** and **Play** stay
-  put on the left, and Play online and the collapsed **Custom match** scroll on the
-  right. In portrait it is one column. Most people only need Play; the
-  options live under Custom match (open or shut, remembered).
+  put on the left, and two tabs, **Custom match** and **Online** (the last one is
+  remembered), scroll on the right. In portrait it is one column. Most people only
+  need Play. In Custom match, **Start match** stays pinned at the foot of the
+  screen while you scroll the options; in a room the tabs give way to the room's
+  lobby, with its Start pinned the same way.
 - **The match builder's checkbox groups** (Weapons, Perks, Round modifiers;
   `src/builder.js`) are `<details>`, shut by default, with a 44 px summary on
   touch that says "All" or "7 of 12". Open, an All box sits over a grid of

@@ -28,31 +28,31 @@ test('Play starts you against two Normal CPUs with the default options', () => {
 });
 
 test('Custom starts shut with nothing remembered', () => {
-  assert.deepEqual(loadCustom(store()), { open: false, opts: {}, cpus: null, off: noneOff });
+  assert.deepEqual(loadCustom(store()), { tab: 'custom', opts: {}, cpus: null, off: noneOff });
 });
 
-test('Custom round-trips open, options, CPU rows and what is off', () => {
+test('Custom round-trips the tab, options, CPU rows and what is off', () => {
   const s = store();
   const off = { weapons: ['flak', 'scout'], perks: ['double'], modifiers: ['gale'] };
-  saveCustom(s, { open: true, opts: { 'opt-rounds': '5', 'opt-fog': '1', 'opt-wind': '1.5' }, cpus: [{ name: 'Vex', type: 'hard' }], off });
+  saveCustom(s, { tab: 'online', opts: { 'opt-rounds': '5', 'opt-fog': '1', 'opt-wind': '1.5' }, cpus: [{ name: 'Vex', type: 'hard' }], off });
   assert.equal(JSON.parse(s.getItem(CUSTOM_KEY)).v, CUSTOM_VERSION);
   const c = loadCustom(s);
-  assert.equal(c.open, true);
+  assert.equal(c.tab, 'online');
   assert.deepEqual(c.opts, { 'opt-rounds': '5', 'opt-fog': '1', 'opt-wind': '1.5' }, 'a chosen Gusty is kept now');
   assert.deepEqual(c.cpus, [{ name: 'Vex', type: 'hard' }]);
   assert.deepEqual(c.off, off);
 });
 
 test('damaged or hostile saved state is ignored piece by piece', () => {
-  assert.deepEqual(loadCustom(store({ [CUSTOM_KEY]: '{not json' })), { open: false, opts: {}, cpus: null, off: noneOff });
+  assert.deepEqual(loadCustom(store({ [CUSTOM_KEY]: '{not json' })), { tab: 'custom', opts: {}, cpus: null, off: noneOff });
   const c = loadCustom(saved({
     v: CUSTOM_VERSION,
-    open: 'yes',
+    tab: 'yes',
     opts: { 'opt-wind': '0', 'evil': 'x', 'opt-hills': 5 },
     cpus: [{ name: 'A', type: 'human' }, { name: 'B', type: 'easy' }, 7, { name: 9, type: 'easy' }],
     off: { weapons: ['shell', 'nuke', 'flak', 7], perks: 'all', modifiers: ['soft', 'soft'] },
   }));
-  assert.equal(c.open, false);
+  assert.equal(c.tab, 'custom');
   assert.deepEqual(c.opts, { 'opt-wind': '0' });
   assert.deepEqual(c.cpus, [{ name: 'B', type: 'easy' }]);
   assert.deepEqual(c.off, { weapons: ['flak'], perks: [], modifiers: ['soft'] }, 'unknown ids and the Shell are dropped');

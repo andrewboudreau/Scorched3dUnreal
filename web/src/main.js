@@ -32,7 +32,7 @@ import { StrikeUI } from './strike.js';
 import { ModsUI, modShopCards } from './modsui.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
-import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
+import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, conditionsLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
@@ -1499,7 +1499,7 @@ if (touch && canFullscreen()) watchPortraitExit({ isFullscreen, leave: () => {
   if (isFullscreen()) toggleFullscreen();
   banner('Left full screen', 'Settings > Full screen to go back', 2600);
 } });
-settings.add({ id: 'dials', group: 'look', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
+settings.toggle({ id: 'dials', group: 'look', label: 'Angle dials', hint: 'turret and elevation rings on your tank', get: () => dials.enabled, set: (on) => dials.setEnabled(on) });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
@@ -2415,7 +2415,7 @@ function renderRooms(data) {
   roomsSig = sig;
   const box = $('net-rooms');
   if (session || !data) box.innerHTML = '';
-  else if (!data.rooms.length) box.innerHTML = '<div class="room-empty">No open rooms right now. Create one and it shows up here for everyone.</div>';
+  else if (!data.rooms.length) box.innerHTML = '<div class="room-empty">None yet. Create one and it shows here for everyone.</div>';
   else {
     box.innerHTML = data.rooms.map((r) => `
       <div class="room-row ${r.open ? '' : 'busy'}">
@@ -2426,7 +2426,9 @@ function renderRooms(data) {
       </div>`).join('');
   }
   const m = data?.menu;
-  const others = !m || !m.count ? 'Nobody else is on the menu right now.'
+  const open = data?.rooms?.filter((r) => r.open).length || 0;
+  $('tab-online-count').textContent = open && !session ? String(open) : '';
+  const others = !m || !m.count ? ''
     : `Also on the menu: ${[...m.names, ...(m.count > m.names.length ? [`${m.count - m.names.length} more`] : [])].map(escapeHtml).join(', ')}`;
   $('net-menu').innerHTML = data ? others : '';
 }
@@ -2486,7 +2488,8 @@ $('net-name').addEventListener('change', () => { profile.setName($('net-name').v
     enterRoom(true);
   } else if (code) {
     $('net-code').value = code.toUpperCase().slice(0, 4);
-    $('net-note').textContent = 'You have an invite: type your name and press Join.';
+    showLaunchTab('online');
+    $('net-note').textContent = 'You have an invite: type your name and press Join with code.';
   }
 }
 

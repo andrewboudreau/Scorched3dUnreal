@@ -378,7 +378,9 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
 .st-head h2 { flex: 1; }
 .st-pin { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .st-pin:empty { display: none; }
-.st-pin .st-action { width: auto; margin: 0; padding: 7px 12px; min-height: 0 !important; border-color: var(--accent); color: var(--accent); }
+.st-pin .st-action, .st-pin .st-action + .st-action { width: auto; margin: 0; padding: 6px 12px; min-height: 36px !important; align-items: center;
+  font-size: 13px; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .16); color: var(--text); }
+.st-pin .st-action b { font-weight: 600; }
 .st-pin .st-action small { display: none; }
 .st-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
 .st-tab { flex: 1; min-height: 40px; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
@@ -404,6 +406,11 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
 .st-action { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 11px 14px; text-align: left; }
 .st-action + .st-action { margin-top: 8px; }
 .st-action small { color: var(--muted); font-weight: 400; font-size: 12px; }
+.st-toggle { display: grid; grid-template-columns: 1fr 56px; align-items: center; gap: 12px; padding: 6px 0; }
+.st-toggle span { display: flex; flex-direction: column; gap: 2px; }
+.st-toggle small { color: var(--muted); font-size: 12px; }
+.st-toggle .st-mute[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.st-toggle.off b { color: var(--muted); }
 /* Landscape phones: a wider, shorter card; the tab body scrolls if it must. */
 @media (max-height: 520px) {
   #settings .card { width: min(560px, 94vw); padding: 12px 20px 16px; max-height: 92vh; display: flex; flex-direction: column; }
@@ -581,23 +588,42 @@ body.killcam .survey-tag, body.killcam .survey-legend { display: none; }
 .launch-name input { font-size: 16px; padding: 10px 12px; color: var(--text); }
 #play { font-size: 22px; letter-spacing: .06em; padding: 14px 22px; min-height: 58px; margin-top: 12px; }
 .launch-hint { margin: 6px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
-#online .online-head { font-size: 16px; }
-.custom { margin-top: 16px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: rgba(255,255,255,.025); }
-.custom-head { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0;
-  padding: 12px 14px; font-weight: 700; min-height: 48px; }
-.custom-head small { flex: 1; font-weight: 400; color: #9aa6b2; font-size: 12px; }
-.custom-head .chev { width: 9px; height: 9px; border-right: 2px solid #9aa6b2; border-bottom: 2px solid #9aa6b2; transform: rotate(45deg); margin: -4px 4px 0 0; transition: transform .15s; }
-.custom.open .chev { transform: rotate(-135deg); margin-top: 4px; }
-#custom-body { padding: 0 14px 14px; }
-.custom:not(.open) #custom-body { display: none; }
-#custom-body #start { margin-top: 4px; }
+/* Custom match and Online are tabs (src/launch.js sets #setup[data-tab]). In
+   a room both show: the room bar, then its tanks and options. */
+.launch-tabs { display: flex; gap: 4px; margin: 4px 0 14px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.launch-tabs button { flex: 1; min-height: 44px; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  margin-bottom: -1px; font-weight: 700; font-size: 15px; color: var(--muted); }
+.launch-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-count:not(:empty) { display: inline-block; min-width: 18px; margin-left: 4px; padding: 1px 6px; border-radius: 9px; font-size: 12px;
+  background: var(--accent); color: #111; }
+body:not(.net-lobby) #setup[data-tab="custom"] #online, body:not(.net-lobby) #setup[data-tab="online"] #custom { display: none; }
+body.net-lobby .launch-tabs { display: none; }
+#setup #online { margin-top: 0; padding-top: 0; border-top: 0; }
+#online .online-head { font-weight: 400; font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+#net-entry { display: flex; flex-direction: column; gap: 10px; }
+#online .net-main { border-color: var(--accent); color: var(--accent); font-weight: 700; padding-inline: 18px; }
+#net-code { width: 100px; text-align: center; }
+.rooms-head { margin: 16px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+body.net-lobby .rooms-head { display: none; }
+.net-note:empty { min-height: 0; margin: 0; }
+.custom { margin-top: 0; }
+#custom-body { padding: 0; }
+#setup .options { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px 14px; }
+#setup .options select { width: 100%; min-width: 0; }
+#setup .opt-groups { grid-column: 1 / -1; }
+#setup .row-buttons { margin: 6px 0 14px; }
+#setup .row-buttons button { min-height: 40px; padding: 6px 14px; font-size: 14px; }
+/* Start stays in reach at the foot of the screen while you scroll the options.
+   On a phone the scroller keeps 96px of padding below (room for the gear), so
+   Start sticks inside it, 12px off the bottom edge, clear of the gear above. */
+#custom-body #start { position: sticky; bottom: 0; z-index: 2; margin-top: 14px; box-shadow: 0 -12px 18px rgba(8, 11, 16, .85); }
+body.touch #custom-body #start { bottom: calc(-84px - env(safe-area-inset-bottom)); }
+@media (max-height: 500px) and (orientation: landscape) { #custom-body #start { bottom: calc(-84px - env(safe-area-inset-bottom)); } }
 .pname-fixed { display: flex; flex-direction: column; padding: 4px 2px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pname-fixed small { font-weight: 400; font-size: 11px; color: #9aa6b2; }
-/* In a room the Custom section is the lobby: always open, and no Play. */
+/* In a room the Custom section is the lobby, under the room bar; no Play. */
 body.net-lobby .launch-top > :not(h1):not(.sub):not(.launch-name) { display: none; }
-body.net-lobby #custom #custom-body { display: block; padding: 0; }
-body.net-lobby #custom-toggle { display: none; }
-body.net-lobby .custom { border: 0; background: none; margin-top: 8px; }
+body.net-lobby .custom { margin-top: 8px; }
 
 /* Phones: the launch screen fills the screen edge to edge instead of floating
    as a card. That is body.touch (coarse pointer or ?mobile=1), or a short
@@ -614,14 +640,12 @@ body.touch #setup input[type=checkbox] { min-height: 0; width: 22px; height: 22p
 body.touch #setup button { min-height: 48px; }
 body.touch #setup .options { gap: 12px 16px; }
 body.touch #setup .options label { font-size: 13px; }
-body.touch #setup .options select { min-width: 120px; }
 body.touch #setup .player-row { grid-template-columns: 18px 1fr 132px; }
 body.touch #setup #net-rooms { max-height: none; }
 @media (orientation: landscape) and (min-width: 560px) {
   body.touch #setup .card.wide { display: grid; grid-template-columns: minmax(200px, 34%) 1fr; column-gap: 28px; align-content: start; }
   body.touch #setup .launch-top { grid-column: 1; grid-row: 1 / span 3; position: sticky; top: 0; align-self: start; }
-  body.touch #setup #online, body.touch #setup .custom { grid-column: 2; }
-  body.touch #setup #online { margin-top: 0; padding-top: 0; border-top: 0; }
+  body.touch #setup .launch-tabs, body.touch #setup #online, body.touch #setup .custom { grid-column: 2; }
 }
 @media (max-height: 500px) and (orientation: landscape) {
   #setup.screen { place-items: stretch; background: rgba(8, 11, 16, .86); backdrop-filter: none; }
@@ -631,8 +655,7 @@ body.touch #setup #net-rooms { max-height: none; }
     display: grid; grid-template-columns: minmax(200px, 34%) 1fr; column-gap: 28px; align-content: start; }
   #setup h1 { font-size: 34px; }
   #setup .launch-top { grid-column: 1; grid-row: 1 / span 3; position: sticky; top: 0; align-self: start; }
-  #setup #online, #setup .custom { grid-column: 2; }
-  #setup #online { margin-top: 0; padding-top: 0; border-top: 0; }
+  #setup .launch-tabs, #setup #online, #setup .custom { grid-column: 2; }
   #setup button { min-height: 44px; }
   #setup #net-rooms { max-height: none; }
 }

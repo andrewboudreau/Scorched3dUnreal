@@ -97,15 +97,22 @@
         <button id="play" class="primary" title="Start now against two Normal CPU tanks">Play</button>
         <p class="launch-hint">against two CPU tanks</p>
       </div>
+      <!-- Custom match and Online are tabs (src/launch.js remembers which); in an online room both show, as the room's lobby. -->
+      <nav class="launch-tabs" role="tablist">
+        <button id="tab-custom" role="tab" data-tab="custom">Custom match</button>
+        <button id="tab-online" role="tab" data-tab="online">Online <span id="tab-online-count" class="tab-count"></span></button>
+      </nav>
       <div id="online">
-        <div class="online-head">Play online <small>with friends on other screens: everyone plans at once, then all fire together</small></div>
-        <div id="net-rooms"></div>
-        <div id="net-entry" class="online-row">
-          <button id="net-create">Create a room</button>
-          <label class="net-private" title="Not listed: people join with the code"><input type="checkbox" id="net-private" /> Private</label>
-          <span class="or">or</span>
-          <input id="net-code" maxlength="4" placeholder="CODE" />
-          <button id="net-join">Join</button>
+        <p class="online-head">Friends on other screens: everyone aims at once, then all fire.</p>
+        <div id="net-entry">
+          <div class="online-row">
+            <button id="net-create" class="net-main">Create a room</button>
+            <label class="net-private" title="Not listed: people join with the code"><input type="checkbox" id="net-private" /> Private</label>
+          </div>
+          <div class="online-row">
+            <input id="net-code" maxlength="4" placeholder="CODE" aria-label="Room code" />
+            <button id="net-join">Join with code</button>
+          </div>
         </div>
         <div id="net-room" class="online-row hidden">
           <span>Room <b id="net-code-show"></b></span>
@@ -113,18 +120,16 @@
           <button id="net-leave">Leave</button>
         </div>
         <div id="net-note" class="net-note"></div>
+        <div class="rooms-head">Open rooms</div>
+        <div id="net-rooms"></div>
         <div id="net-menu" class="net-note"></div>
       </div>
-      <!-- Custom match: collapsed by default (the choice is remembered). In an online room it is the lobby, always open. -->
       <section id="custom" class="custom">
-        <button id="custom-toggle" class="custom-head" aria-expanded="false" aria-controls="custom-body">
-          <span>Custom match</span><small>tanks, rounds, wind, terrain, weapons, perks</small><i class="chev" aria-hidden="true"></i>
-        </button>
         <div id="custom-body">
           <div id="setup-players"></div>
           <div class="row-buttons">
             <button id="add-player">+ Add tank</button>
-            <button id="remove-player">- Remove tank</button>
+            <button id="remove-player">− Remove</button>
           </div>
       <div class="options">
         <label>Rounds <select id="opt-rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select></label>

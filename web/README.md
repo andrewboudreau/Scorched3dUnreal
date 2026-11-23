@@ -138,8 +138,9 @@ second column beside the first. On a phone the players box sits top right.
 - **The launch screen** (`src/launch.js`, `#setup`). It shows the title, one
   **Your name** field (`#net-name`; it names your tank and your online seat) and a
   big **Play**, which starts you against two Normal CPUs with the default
-  options (everything on, wind and terrain Random). Below it is **Play online**
-  (the room list, create and join), then a collapsed **Custom match**, the match
+  options (everything on, wind and terrain Random). Below it are two tabs (the
+  last one is remembered): **Online** (create a room, join with a code, the open
+  rooms; the tab shows how many are open) and **Custom match**, the match
   builder: the tank rows (add or remove, human or CPU), Rounds, Wind, Terrain,
   Firing and Fog of war, then three checkbox groups, **Weapons**, **Perks** and
   **Round modifiers** (`src/builder.js`). Each group is shut by default, its

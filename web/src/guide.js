@@ -228,7 +228,7 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
 
   const modifierList = modifierRows(modifiers);
   tabs.push({ id: 'match', title: 'Match builder', blocks: [
-    { p: '**Play** starts you against two Normal CPUs with everything on. **Custom match**, under it on the launch screen, builds your own; online the host builds it and it applies on every screen.' },
+    { p: '**Play** starts you against two Normal CPUs with everything on. **Custom match**, a tab under it on the launch screen, builds your own; online the host builds it and it applies on every screen.' },
     { rows: BUILDER_ROWS },
     { h: 'Round modifiers' },
     modifierList.length ? { rows: modifierList } : { p: 'No round modifiers in this build.' },

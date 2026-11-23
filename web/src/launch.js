@@ -1,8 +1,8 @@
-// The launch (setup) screen: your name, a big Play button, Play online, and a
-// collapsed Custom match section holding every option. This module holds what
-// is not about the match itself: the Play defaults, remembering the Custom
-// section (open or shut, last options, last tank rows) in localStorage, and
-// full screen on a phone. main.js keeps the match and the online lobby.
+// The launch (setup) screen: your name and a big Play button, then two tabs,
+// Custom match (every option) and Online (rooms). This module holds what is not
+// about the match itself: the Play defaults, remembering the Custom section
+// (which tab, last options, last tank rows) in localStorage, and full screen on
+// a phone. main.js keeps the match and the online lobby.
 //
 // The pure parts (defaults, load/save) take the storage as an argument so the
 // tests can run them without a browser.
@@ -46,15 +46,15 @@ const GONE = ['opt-twists', 'opt-sat', 'opt-orbiter', 'opt-sat-labels'];
 const emptyOff = () => Object.fromEntries(GROUPS.map((g) => [g.id, []]));
 const allIds = (id) => GROUPS.find((g) => g.id === id).items.map((it) => it.id);
 
-// {open, opts: {selectId: value}, cpus: [{name, type}], off: {group: [ids]}},
+// {tab, opts: {selectId: value}, cpus: [{name, type}], off: {group: [ids]}},
 // whatever the last visit left, checked. A saved value the select no longer
 // offers falls back to its default in wireLaunch; unknown ids are dropped.
 export function loadCustom(storage) {
   let raw = null;
   try { raw = JSON.parse(storage.getItem(CUSTOM_KEY) || 'null'); } catch { /* damaged: start fresh */ }
-  const out = { open: false, opts: {}, cpus: null, off: emptyOff() };
+  const out = { tab: 'custom', opts: {}, cpus: null, off: emptyOff() };
   if (!raw || typeof raw !== 'object') return out;
-  out.open = raw.open === true;
+  if (raw.tab === 'online') out.tab = 'online';
   const old = raw.v !== CUSTOM_VERSION;
   const was = raw.opts && typeof raw.opts === 'object' ? raw.opts : {};
   for (const [k, v] of Object.entries(was)) {
@@ -82,7 +82,7 @@ export function loadCustom(storage) {
 }
 
 export function saveCustom(storage, state) {
-  try { storage.setItem(CUSTOM_KEY, JSON.stringify({ v: CUSTOM_VERSION, open: !!state.open, opts: state.opts, cpus: state.cpus, off: state.off || emptyOff() })); } catch { /* private mode */ }
+  try { storage.setItem(CUSTOM_KEY, JSON.stringify({ v: CUSTOM_VERSION, tab: state.tab === 'online' ? 'online' : 'custom', opts: state.opts, cpus: state.cpus, off: state.off || emptyOff() })); } catch { /* private mode */ }
 }
 
 // On a phone, tapping Play or Start also fills the screen where the browser
@@ -98,6 +98,13 @@ const formOptions = () => Object.fromEntries([...document.querySelectorAll('#set
 
 export const humanName = () => $('net-name').value.trim().slice(0, 14);
 
+// Show one tab of the launch screen: 'custom' or 'online'.
+export function showLaunchTab(tab) {
+  const id = tab === 'online' ? 'online' : 'custom';
+  $('setup').dataset.tab = id;
+  for (const t of document.querySelectorAll('.launch-tabs [role=tab]')) t.setAttribute('aria-selected', String(t.dataset.tab === id));
+}
+
 // Wire the screen up: fill the Custom section from the last visit, keep the
 // name field and the first tank row as one name, and save the Custom state as
 // it changes. `rows` is main.js's setupRows (changed in place); `render` redraws
@@ -111,9 +118,7 @@ export function wireLaunch({ rows, render, builder }) {
   builder?.setOff(saved.off);
   if (saved.cpus) rows.splice(1, rows.length, ...saved.cpus);
 
-  const toggle = $('custom-toggle'), box = $('custom');
-  const setOpen = (open) => { box.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); };
-  setOpen(saved.open);
+  showLaunchTab(saved.tab);
 
   const name = () => { rows[0].name = humanName() || 'You'; };
   name();
@@ -121,9 +126,9 @@ export function wireLaunch({ rows, render, builder }) {
 
   const save = () => {
     if (document.body.classList.contains('net-lobby')) return;   // a room's tanks are not your custom match
-    saveCustom(localStorage, { open: box.classList.contains('open'), opts: formOptions(), cpus: rows.slice(1), off: builder?.getOff() });
+    saveCustom(localStorage, { tab: $('setup').dataset.tab, opts: formOptions(), cpus: rows.slice(1), off: builder?.getOff() });
   };
-  toggle.addEventListener('click', () => { setOpen(!box.classList.contains('open')); save(); });
+  for (const t of document.querySelectorAll('.launch-tabs [role=tab]')) t.addEventListener('click', () => { showLaunchTab(t.dataset.tab); save(); });
   // After the rows' own handlers (they sit lower in the tree and run first).
   $('custom-body').addEventListener('change', save);
   $('custom-body').addEventListener('input', save);

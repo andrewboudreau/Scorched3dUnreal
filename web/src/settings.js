@@ -134,6 +134,25 @@ export class Settings {
     } }, group);
   }
 
+  // On or off, with a line saying what it is. get(): on? set(on).
+  toggle({ id, label, hint = '', get, set, group }) {
+    const row = document.createElement('div');
+    row.className = 'st-toggle';
+    row.dataset.id = id;
+    row.innerHTML = `<span><b></b><small></small></span><button class="st-mute" aria-pressed="false"></button>`;
+    row.querySelector('b').textContent = label;
+    row.querySelector('small').textContent = hint;
+    const b = row.querySelector('button');
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', () => { set(!get()); this.render(); });
+    this.place({ el: row, refresh: () => {
+      const on = !!get();
+      b.textContent = on ? 'On' : 'Off';
+      b.setAttribute('aria-pressed', String(on));
+      row.classList.toggle('off', !on);
+    } }, group);
+  }
+
   // A pick from a short list.
   choice({ id, label, options, get, set, group }) {
     const row = document.createElement('div');
