@@ -1483,6 +1483,7 @@ settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 settings.add({ id: 'dials', group: 'more', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
+settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
 const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);

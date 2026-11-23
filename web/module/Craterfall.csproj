@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <Content Include="..\index.html" Link="wwwroot\index.html" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\catalog.html" Link="wwwroot\catalog.html" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\css\**" Link="wwwroot\css\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\src\**" Link="wwwroot\src\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\manifest.webmanifest" Link="wwwroot\manifest.webmanifest" CopyToPublishDirectory="PreserveNewest" />

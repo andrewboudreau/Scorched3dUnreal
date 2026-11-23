@@ -97,6 +97,8 @@ the first time it opens (styles in `css/guide.css`). Keys typed in it never reac
 the game; Esc, the ✕ or a tap outside closes it. Its content builders are tested in
 `test/guide.test.js`.
 
+**Catalog** (`catalog.html`, also Settings > Catalog) is the designer's page, not a player's: one dense, sortable, searchable table each for weapons, upgrades, perks, mods and round modifiers, plus every tuning constant (Numbers). `src/catalog.js` builds them from the core data modules (so new entries and fields appear on their own), links perks to mods and weapons, and reads what the CPUs pick from `core/ai.js`; helpers are tested in `test/catalog.test.js`.
+
 Everything sits in one column on the left: the player card (with the round and
 its modifier at its head), the players box with every tank's health, and the
 rangefinder when you have one. On a short screen the rangefinder wraps into a

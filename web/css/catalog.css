@@ -1,0 +1,39 @@
+/* The designer's catalog (catalog.html, src/catalog.js): dense dark tables, no art, no motion. */
+:root { --edge: rgba(255,255,255,.12); --line: rgba(255,255,255,.08); --r: 3px; --text: #eef1f4; --muted: #9aa6b2; --accent: #ffb547; }
+* { box-sizing: border-box; }
+html { color-scheme: dark; }
+body { margin: 0; background: #0b0e12; color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.c-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 10px 14px 4px; }
+.c-head h1 { margin: 0; font-size: 17px; }
+.c-sub { color: var(--muted); }
+.c-back { margin-left: auto; color: var(--accent); }
+.c-bar { position: sticky; top: 0; z-index: 3; background: #0b0e12; padding: 6px 14px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; }
+#cat-q { flex: 1 1 260px; max-width: 420px; min-height: 36px; padding: 0 10px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--edge); border-radius: var(--r); font: inherit; }
+.c-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.c-tab { flex: none; min-height: 36px; padding: 0 12px; color: var(--text); background: transparent; border: 1px solid var(--edge); border-radius: var(--r); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.c-tab.on { border-color: var(--accent); color: var(--accent); background: rgba(255,181,71,.12); }
+.c-n { margin-left: 6px; font-weight: 400; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.c-body { padding: 6px 14px 40px; }
+.c-note { margin: 6px 0 8px; color: var(--muted); max-width: 900px; }
+/* Scrolls both ways inside its own box, so the column heads stay put while you read down a long table. */
+.c-scroll { overflow: auto; max-height: calc(100vh - 150px);border: 1px solid var(--line); border-radius: var(--r); }
+table { border-collapse: collapse; min-width: max-content; width: 100%; }
+th, td { padding: 4px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); white-space: nowrap; }
+thead th { position: sticky; top: 0; background: #151b23; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; cursor: pointer; user-select: none; border-bottom: 1px solid var(--edge); }
+thead th.sorted { color: var(--accent); }
+th.wide, td.wide { white-space: pre-line; min-width: 240px; max-width: 420px; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.idc { font-family: ui-monospace, Consolas, monospace; color: var(--accent); }
+tbody tr:hover { background: rgba(255,255,255,.04); }
+tr.dim td { opacity: .7; }
+tr.hit td { background: rgba(255,181,71,.18); }
+a { color: #7fb8ff; }
+.c-link { text-decoration: none; border-bottom: 1px dotted #7fb8ff; }
+.c-groups .c-scroll { max-height: none; }
+.c-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.c-group h2 { margin: 0 0 4px; font-size: 13px; font-family: ui-monospace, Consolas, monospace; }
+.c-group h2 small { margin-left: 8px; color: var(--muted); font-weight: 400; }
+table.kv { min-width: 0; }
+table.kv th { color: var(--muted); font-weight: 400; font-family: ui-monospace, Consolas, monospace; font-size: 12px; width: 1%; }
+table.kv td { font-variant-numeric: tabular-nums; white-space: normal; word-break: break-word; }
+@media (max-width: 600px) { .c-body, .c-head, .c-bar { padding-left: 8px; padding-right: 8px; } .c-groups { grid-template-columns: 1fr; } }
