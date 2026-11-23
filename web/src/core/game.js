@@ -5,7 +5,7 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, spl
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField } from './ai.js';
 import { Scenery, standing } from './scenery.js';
-import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT } from './perks.js';
+import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT, GALE_CAP } from './perks.js';
 import { normalizeLab } from './survey.js';
 import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
 
@@ -224,7 +224,8 @@ export class Game {
       : pickModifier(this.rogue, this.modifier.id, (m) => this.modifierFits(m));
     this.gravity = GRAVITY * (mod.gravity || 1);
     this.drag = mod.drag || 0;
-    this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
+    const w = this.cfg.maxWind;
+    this.maxWind = mod.calm ? 0 : mod.wind ? Math.max(w, Math.min(w * mod.wind, GALE_CAP)) : w;
     const starts = this.placeTanks();
     this.makeGround(this.round, starts);
     this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });

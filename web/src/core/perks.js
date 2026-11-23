@@ -132,6 +132,10 @@ export function aiPickPerk(offer, rng) {
 // 20 degree shot at the same power loses about 10%, a 70 degree lob about 17%,
 // and a power 90 shot at 45 degrees about 30% (test/rain.test.js).
 export const RAIN_DRAG = 0.0007;
+// A Gale round multiplies the match's wind by 1.8, but never past this:
+// Gusty (1.5) goes to 2.7, and Gale wind (2.5) stops at 3.5 rather than 4.5,
+// which blew most shots off the map. A match set above it (?wind=5) keeps its own.
+export const GALE_CAP = 3.5;
 export const MODIFIERS = [
   { id: 'clear', name: 'Clear skies', desc: 'Nothing unusual this round.', weight: 2 },
   { id: 'gale', name: 'Gale', desc: 'The wind is much stronger.', wind: 1.8, weight: 1 },

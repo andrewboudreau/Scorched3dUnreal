@@ -483,7 +483,7 @@ second column beside the first. On a phone the players box sits top right.
   sit out the reload. A reload does not carry into the next round.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
-  as likely as the others), Gale (much stronger wind), Dead calm, Low gravity,
+  as likely as the others), Gale (the wind ×1.8, at most 3.5, so a Gale round on Gale wind stays playable), Dead calm, Low gravity,
   Rain (air drag on every shell: a power 60 shot at 45 degrees lands about 16%
   short, long lobs lose more and flat shots less, so add power and aim
   flatter), Soft ground (craters a third bigger), Gold rush (double pay) and
