@@ -19,10 +19,12 @@ public class CraterfallModule : IApplicationPartModule
 
     public void Configure(WebApplication app)
     {
-        // Who is playing (Players.cs) and online rooms (Rooms.cs). Their literal
+        // Who is playing (Players.cs), online rooms (Rooms.cs) and the suggestion
+        // box (Suggestions.cs). Their literal
         // routes win over the file route below.
         Players.Map(app, $"/{Name}");
         Rooms.Map(app, $"/{Name}");
+        Suggestions.Map(app, $"/{Name}");   // after Players: it uses Players.DataDir
 
         // "{**path}" also matches the bare /Craterfall, which needs the trailing slash
         // added so the page's relative script paths resolve under it.

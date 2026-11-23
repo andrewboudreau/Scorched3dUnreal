@@ -6,7 +6,8 @@ body { margin: 0; background: #0b0e12; color: var(--text); font: 13px/1.4 system
 .c-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 10px 14px 4px; }
 .c-head h1 { margin: 0; font-size: 17px; }
 .c-sub { color: var(--muted); }
-.c-back { margin-left: auto; color: var(--accent); }
+.c-suggest { margin-left: auto; padding: 4px 12px; font: inherit; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 6px; cursor: pointer; }
+.c-back { margin-left: 12px; color: var(--accent); }
 .c-bar { position: sticky; top: 0; z-index: 3; background: #0b0e12; padding: 6px 14px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; }
 #cat-q { flex: 1 1 260px; max-width: 420px; min-height: 36px; padding: 0 10px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--edge); border-radius: var(--r); font: inherit; }
 .c-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }

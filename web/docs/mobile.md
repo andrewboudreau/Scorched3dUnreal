@@ -30,7 +30,7 @@ sideways" card over the game (menus can stay portrait-friendly).
 | Right thumb | **Fire** (big, round; reads "Lock in" in a volley) and a **weapon** button above it showing the current weapon; tap it for a pop-up list of your weapons | Space; the weapon bar's own buttons |
 | Left thumb | **Drive cross**: ▲ ▼ drive, ◀ ▶ turn the hull, held. In flight ◀ ▶ also steer a Guided Missile | arrow keys |
 | Either half of the view | In flight, a finger held on the left or right half steers a Guided Missile (the Guidance gauge at the right edge shows the fuel) | A / D |
-| Left thumb | **Jet**, and **⚙ Settings** above it: tabs for Audio (Master / Effects / Music levels and mutes, music track), Graphics (fire and smoke, angle dials) and More (**Guide**, Catalog, resource packs), with **Full screen** in the header on every tab | J; M and - / = for Master |
+| Left thumb | **Jet**, and **⚙ Settings** above it: tabs for Audio (Master / Effects / Music levels and mutes, music track), Graphics (fire and smoke, angle dials) and More (**Guide**, Catalog, resource packs), with **Full screen** and **Suggest** (send the developer a note) in the header on every tab | J; M and - / = for Master |
 | Bottom middle | Small: Fine, Find, View, Chat (online only). Find stays lit and holds the camera on an enemy; tap again for the next, and past the last (or the only one) it lets go | F, V, Enter; Fine scales the pad by 0.2 |
 
 Why a relative trackpad rather than a virtual joystick: a stick sets a *rate*, so

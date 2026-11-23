@@ -58,6 +58,9 @@ public static class Players
     private static readonly object Gate = new();
     private static Dictionary<string, Record> All = new(StringComparer.Ordinal);
     private static string? File_;
+
+    /// <summary>The writable data folder players.json lives in, or null (memory only). Suggestions.cs keeps its file there too.</summary>
+    public static string? DataDir => File_ is null ? null : Path.GetDirectoryName(File_);
     private static bool Dirty;
     private static Timer? Saver;
     private static ILogger? Log;

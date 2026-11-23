@@ -118,6 +118,8 @@ the first time it opens (styles in `css/guide.css`). Keys typed in it never reac
 the game; Esc, the ✕ or a tap outside closes it. Its content builders are tested in
 `test/guide.test.js`.
 
+**Suggest** (Settings, in the header of every tab; also on the catalog page) sends the developer a note: the player picks what it is about (Game, Match builder, Settings, Guide, Catalog, Online, Other; it starts on where they were) and the page adds a little context (screen, round, phase, modifier, window size). `src/suggest.js` is the box and `module/Suggestions.cs` keeps them (`suggestions.json` beside `players.json`). The owner reads them at `suggestions.html` or with `node tools/suggestions.mjs`, both with the review key; see CLAUDE.md.
+
 **Catalog** (`catalog.html`, also Settings > Catalog) is the designer's page, not a player's: one dense, sortable, searchable table each for weapons, upgrades, perks, mods and round modifiers, plus every tuning constant (Numbers). `src/catalog.js` builds them from the core data modules (so new entries and fields appear on their own), links perks to mods and weapons, and reads what the CPUs pick from `core/ai.js`; helpers are tested in `test/catalog.test.js`.
 
 Everything sits in one column on the left: the player card (with the round and

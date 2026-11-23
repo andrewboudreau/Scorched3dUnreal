@@ -1,0 +1,29 @@
+/* The suggestion box (src/suggest.js), which loads this file itself. Self-
+   contained, so it looks the same over the game and on catalog.html; the
+   game's variables are used where they exist. */
+#suggest { position: fixed; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 8, 12, .55); backdrop-filter: blur(3px); font-family: system-ui, sans-serif; color: #e8edf2; }
+#suggest .card { min-width: 0; width: min(480px, 94vw); padding: 18px 22px 20px; max-height: 94vh; overflow-y: auto; box-sizing: border-box;
+  background: var(--panel, rgba(20, 26, 34, .96)); border: 1px solid rgba(255, 255, 255, .12); border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); }
+#suggest button { min-height: 0; cursor: pointer; font: inherit; color: inherit; background: rgba(255, 255, 255, .06);
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: var(--r, 8px); }
+.sg-head { display: flex; align-items: center; justify-content: space-between; }
+.sg-head h2 { margin: 0; font-size: 18px; }
+#suggest .sg-x { padding: 4px 10px; }
+.sg-note { margin: 6px 0 12px; font-size: 12px; color: var(--muted, #94a0ad); }
+.sg-areas { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+#suggest .sg-area { min-height: 34px; padding: 4px 12px; font-size: 13px; color: var(--muted, #94a0ad); }
+#suggest .sg-area[aria-checked="true"] { border-color: var(--accent, #ffb347); color: var(--accent, #ffb347); }
+#suggest textarea { width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical; padding: 10px; font: inherit; font-size: 16px;
+  color: inherit; background: rgba(0, 0, 0, .3); border: 1px solid rgba(255, 255, 255, .18); border-radius: var(--r, 8px); }
+.sg-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.sg-msg { flex: 1; font-size: 12px; color: var(--muted, #94a0ad); }
+#suggest .sg-send { min-width: 110px; min-height: 40px; padding: 8px 18px; border: none; font-weight: 700; color: #fff;
+  background: linear-gradient(90deg, #ff9a3c, #ff5f3c); }
+#suggest .sg-send:disabled { opacity: .5; }
+.sg-thanks { text-align: center; padding: 18px 0; }
+@media (max-height: 520px) {
+  #suggest .card { padding: 12px 18px 14px; }
+  .sg-note { display: none; }
+  #suggest textarea { min-height: 70px; }
+}

@@ -1,6 +1,9 @@
 // Local server for trying online play: serves the game from web/ and the same
 // rooms API as module/Rooms.cs (keep the two in step), under /api/rooms, and
-// the player id API as module/Players.cs, under /api/me (records in memory only).
+// the player id API as module/Players.cs, under /api/me (records in memory only),
+// and the suggestion box as module/Suggestions.cs, under /api/suggestions (in
+// memory; the review key is CRATERFALL_REVIEW_KEY, else "reviewKey" in
+// tools/local.json, else "dev").
 //   node tools/devserver.mjs [port]      then open http://localhost:8080/
 // Port 0 picks a free one; the first line printed says which.
 //
@@ -333,10 +336,70 @@ async function api(req, res, url) {
   return json(res, 404, {});
 }
 
+// ---- suggestions (module/Suggestions.cs)
+const SUGGEST = { textMin: 3, textMax: 2000, areaMax: 24, noteMax: 500, contextMax: 2048, kept: 5000, perHour: 12 };
+const REVIEW_KEY = process.env.CRATERFALL_REVIEW_KEY || local.reviewKey || 'dev';
+const suggestions = [];
+const recentSends = new Map();
+// As Suggestions.Clean: control and formatting characters out (new lines kept
+// in text), trimmed, cut to `max` without splitting a surrogate pair.
+const cleanText = (s, max, lines) => {
+  let t = [...String(s ?? '')].filter((ch) => (lines && ch === '\n') || !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(ch)).join('').trim();
+  if (t.length > max) {
+    const hi = t.charCodeAt(max - 1);
+    t = t.slice(0, hi >= 0xd800 && hi <= 0xdbff ? max - 1 : max).trimEnd();
+  }
+  return t;
+};
+async function suggestApi(req, res, url) {
+  const parts = url.pathname.split('/').filter(Boolean);   // api suggestions [id]
+  if (req.method === 'POST' && parts.length === 2) {
+    const b = await readBody(req);
+    if (!b) return json(res, 400, {});
+    const text = cleanText(b.text, SUGGEST.textMax, true);
+    if (text.length < SUGGEST.textMin) return json(res, 400, { error: 'Say a little more.' });
+    const area = cleanText(b.area, SUGGEST.areaMax, false).toLowerCase() || 'other';
+    const ctx = b.context;
+    const context = ctx && typeof ctx === 'object' && !Array.isArray(ctx) && JSON.stringify(ctx).length <= SUGGEST.contextMax ? ctx : undefined;
+    const pid = cookieId(req);
+    const who = pid || `ip:${req.socket.remoteAddress}`;
+    const now = Date.now();
+    const times = (recentSends.get(who) || []).filter((t) => now - t < 3600e3);
+    if (times.length >= SUGGEST.perHour) return json(res, 429, {});
+    recentSends.set(who, [...times, now]);
+    const s = { id: randomBytes(6).toString('base64url'), at: new Date().toISOString(), area, text, player: pid || '',
+      name: (pid && players.get(pid)?.name) || '', context, status: 'new', note: '' };
+    suggestions.push(s);
+    while (suggestions.length > SUGGEST.kept) {
+      const i = suggestions.findIndex((x) => x.status === 'done');
+      suggestions.splice(i >= 0 ? i : 0, 1);
+    }
+    return json(res, 200, { id: s.id });
+  }
+  const given = req.headers['x-review-key'] || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (given !== REVIEW_KEY) return json(res, 401, {});
+  if (req.method === 'GET' && parts.length === 2) {
+    const want = url.searchParams.get('status');
+    const st = want === 'done' || want === 'all' ? want : 'new';
+    return json(res, 200, suggestions.filter((s) => st === 'all' || s.status === st).sort((a, b) => (a.at < b.at ? 1 : -1)));
+  }
+  if (req.method === 'POST' && parts.length === 3) {
+    const s = suggestions.find((x) => x.id === parts[2]);
+    if (!s) return json(res, 404, {});
+    const b = await readBody(req);
+    if (!b) return json(res, 400, {});
+    if (b.status === 'new' || b.status === 'done') s.status = b.status;
+    if ('note' in b) s.note = cleanText(b.note, SUGGEST.noteMax, true);
+    return json(res, 200, s);
+  }
+  return json(res, 404, {});
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/rooms')) return api(req, res, url);
   if (url.pathname === '/api/me') return profileApi(req, res);
+  if (url.pathname.startsWith('/api/suggestions')) return suggestApi(req, res, url);
   if (url.pathname.startsWith('/api/packs')) return packs(req, res, url);
   const fromPacks = url.pathname.startsWith('/packs/');
   const base = fromPacks ? PACKS : root;

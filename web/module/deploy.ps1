@@ -69,6 +69,25 @@ Write-Host "Publishing $Project to $out"
 dotnet publish $Project -c Release -o $out --nologo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
+# 1b. The suggestion box's review key (Suggestions.cs): only its SHA-256 goes in
+# the drop. The key is $env:CRATERFALL_REVIEW_KEY, else "reviewKey" in the
+# gitignored ../tools/local.json. Without one, suggestions can be sent but not read.
+if ($Project -eq $PSScriptRoot) {
+    $reviewKey = $env:CRATERFALL_REVIEW_KEY
+    $local = Join-Path $PSScriptRoot "../tools/local.json"
+    if (-not $reviewKey -and (Test-Path $local)) {
+        $cfg = Get-Content $local -Raw | ConvertFrom-Json
+        if ($cfg.PSObject.Properties.Name -contains "reviewKey") { $reviewKey = $cfg.reviewKey }
+    }
+    if ($reviewKey) {
+        $sha = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($reviewKey))
+        Set-Content -Path (Join-Path $out "review-key.sha256") -Value ([Convert]::ToHexString($sha).ToLowerInvariant()) -NoNewline
+        Write-Host "Suggestion review key: on"
+    } else {
+        Write-Host "Suggestion review key: none (set reviewKey in tools/local.json to read suggestions)"
+    }
+}
+
 # 2. Zip (forward-slash entry names on every platform)
 $zip = Join-Path ([System.IO.Path]::GetTempPath()) "$Id-$([Guid]::NewGuid().ToString('N')).zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem

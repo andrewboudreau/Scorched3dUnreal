@@ -1485,6 +1485,13 @@ settings.group('look', 'Graphics', 'Light draws fewer flames, smoke puffs and sp
 settings.choice({ id: 'fxq', label: 'Fire and smoke', group: 'look', options: [{ value: 'full', text: 'Full' }, { value: 'light', text: 'Light (faster)' }],
   get: () => effects.quality, set: (v) => { effects.setQuality(v); try { localStorage.setItem(QUALITY_KEY, v); } catch { /* private mode */ } } });
 settings.group('more', 'More');
+// The suggestion box (src/suggest.js, lazy), pinned beside Full screen: the area
+// is a guess at where you were, which the box lets you change.
+settings.add({ id: 'suggest', pin: true, label: 'Suggest', run: () => import('./suggest.js').then((m) => m.openSuggest({
+  area: !$('setup').classList.contains('hidden') ? 'match builder' : game ? (game.cfg.local ? 'game' : 'online') : 'other',
+  context: m.suggestionContext({ game, screen: !$('setup').classList.contains('hidden') ? 'setup' : game ? 'match' : 'other',
+    page: location.pathname + location.search, view: { w: innerWidth, h: innerHeight }, touch: !!touch, ua: navigator.userAgent }),
+})) });
 if (canFullscreen()) settings.add({ id: 'full', pin: true, label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 // Holding the phone upright for a few seconds leaves full screen (core of it in portraitexit.js).
 if (touch && canFullscreen()) watchPortraitExit({ isFullscreen, leave: () => {

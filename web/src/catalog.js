@@ -509,6 +509,8 @@ export function mount(root, tabs = buildCatalog()) {
     h('header', { class: 'c-head' },
       h('h1', {}, 'Craterfall catalog'),
       h('span', { class: 'c-sub' }, 'everything in the game data, as it is now'),
+      h('button', { class: 'c-suggest', onclick: () => import('./suggest.js').then((m) => m.openSuggest({ area: 'catalog',
+        context: { ...m.suggestionContext({ screen: 'catalog', page: location.pathname + location.hash, view: { w: innerWidth, h: innerHeight } }), tab: state.tab } })) }, 'Suggest'),
       h('a', { class: 'c-back', href: './' }, '← back to the game')),
     h('div', { class: 'c-bar' }, search, tabBar),
     body);
