@@ -1019,7 +1019,7 @@ const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
 
 // Where a projectile comes down within `horizon` seconds if nothing changes.
 function forecast(pr, horizon) {
-  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK };
+  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag };
   const t = game.terrain;
   const step = 1 / 30;
   for (let s = step; s <= horizon; s += step) {
@@ -1556,6 +1556,7 @@ function updateTracer() {
   const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power));
   pr.g = game.gravity;
   pr.windK = game.windShare(p);
+  pr.drag = game.shellDrag(p);
   const a = tracer.geometry.attributes.position;
   let n = 0;
   let gone = 0;

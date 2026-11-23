@@ -30,8 +30,15 @@ export function launchVelocity(yawDeg, elevDeg, power) {
 // is a second list of wells that move (an enemy's Gravity Orbiter, core/mods.js),
 // set afresh each step for the game clock; a well's `soft` (else `r`) is the
 // distance inside which its pull stops growing.
+// `drag` (per metre, the Rain modifier) is quadratic air drag, |a| = drag * v^2
+// against the velocity, taken from the speed at the start of the step. With no
+// drag (0 or missing) the step is exactly the dragless one.
 export function stepProjectile(p, wind, dt = SIM_DT) {
   const k = p.windK ?? 1;
+  if (p.drag) {
+    const f = 1 - p.drag * Math.hypot(p.vel[0], p.vel[1], p.vel[2]) * dt;
+    p.vel[0] *= f; p.vel[1] *= f; p.vel[2] *= f;
+  }
   p.vel[0] += wind[0] * k * dt;
   p.vel[1] -= (p.g ?? GRAVITY) * dt;
   p.vel[2] += wind[1] * k * dt;
@@ -113,10 +120,12 @@ export function wellContact(p, wells = p.wells) {
 // through that height (the AI's measure of a shot that fell past an isle).
 // `field(t)` gives the moving wells (enemy orbiters, core/mods.js modWells) at
 // game clock `t`; the shot leaves at clock `t0`. Touching one ends it ('orbiter').
-export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, level = null, field = null, t0 = 0 }) {
+// `drag` is the shell's air drag (stepProjectile; the Rain modifier).
+export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, drag = 0, level = null, field = null, t0 = 0 }) {
   const p = makeProjectile(pos, vel);
   p.g = gravity;
   p.windK = windK;
+  if (drag) p.drag = drag;
   if (terrain.wells?.length) p.wells = terrain.wells;
   const path = recordPath ? [[...p.pos]] : null;
   let cross = null;

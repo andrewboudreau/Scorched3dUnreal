@@ -113,6 +113,7 @@ export class Game {
     this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
     this.modifier = MODIFIER_BY_ID.clear;
     this.gravity = GRAVITY;
+    this.drag = 0;                              // air drag on shells (the Rain modifier, ballistics.stepProjectile)
     this.maxWind = maxWind;
     this.draft = {};                            // human id -> perk ids on offer
     this.players = players.map((p, i) => ({
@@ -218,6 +219,7 @@ export class Game {
     const t = this.terrain;
     const mod = this.modifier = pickModifier(this.rogue, this.modifier.id, (m) => this.modifierFits(m));
     this.gravity = GRAVITY * (mod.gravity || 1);
+    this.drag = mod.drag || 0;
     this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
     const starts = this.placeTanks();
     this.makeGround(this.round, starts);
@@ -548,12 +550,13 @@ export class Game {
       memory: p.aim,
       gravity: this.gravity,
       windK: this.windShare(p),
+      drag: this.shellDrag(p),
       ...this.orbitField(p),
     });
     const plan = { ...sol, weapon: scout ? 'scout' : chooseWeapon(p, target, this.rng), target: target.id, think: 0.6 };
     if (!scout && hasPerk(p, 'doubleStrike') && wantsDouble({ target, memory: p.aim, difficulty: p.ai, rng: this.rng })) {
       const again = planShot({ shooter: p, target, wind: this.wind, terrain: this.terrain, rng: this.rng, difficulty: p.ai,
-        memory: p.aim, gravity: this.gravity, windK: this.windShare(p), ...this.orbitField(p, STRIKE.gap) });
+        memory: p.aim, gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p), ...this.orbitField(p, STRIKE.gap) });
       plan.second = { yaw: again.yaw, elev: again.elev, power: again.power, weapon: chooseSecondWeapon(p, plan.weapon, this.rng) };
     }
     return (this.aiPlan = plan);
@@ -626,6 +629,10 @@ export class Game {
 
   // How much of the wind this tank's shots feel.
   windShare(p) { return Math.max(0, 1 + perkSum(p, 'windScale')); }
+
+  // The air drag on this tank's shells: the round's (Rain), less its perks'
+  // share (dragScale). Every shell and every prediction of one reads this.
+  shellDrag(p) { return this.drag * Math.max(0, 1 + perkSum(p, 'dragScale')); }
 
   // ---------- mods (core/mods.js) ----------
 
@@ -920,9 +927,11 @@ export class Game {
   // host's Lab turned off or one already at its top level; an unlock for a mod
   // it owns, a level-up for one it does not, or a level-up whose unlock card
   // is off; any mod level once it has taken MOD_DRAFT.cap of them this match;
-  // or (needsMod) anything for a tank that owns no mod at all.
+  // or (needsMod) anything for a tank that owns no mod at all. A drag perk
+  // (dragScale) only comes up when the match can roll a Rain round.
   perkFits(p, perk) {
     if (!this.perkOn(perk.id)) return false;
+    if (perk.dragScale && !MODIFIERS.some((m) => m.drag && this.modifierFits(m))) return false;   // no rain this match
     if (perk.roundAmmo && !Object.keys(perk.roundAmmo).some((w) => this.weaponOn(w))) return false;
     if (perk.needsMod && !MODS.some((d) => this.modLevel(p, d.id) > 0)) return false;
     const ids = Object.keys(perk.mods || {});
@@ -1169,6 +1178,8 @@ export class Game {
     pr.splitDone = false;
     pr.g = this.gravity;
     pr.windK = this.windShare(this.players[owner]);
+    const drag = this.shellDrag(this.players[owner]);
+    if (drag) pr.drag = drag;   // children (split, flak, bomblets) come through here too
     if (this.terrain.wells.length) pr.wells = this.terrain.wells;
     const steer = (WEAPON_BY_ID[weaponId].flight || []).find((f) => f.type === 'steer');
     if (steer) pr.steer = { rate: steer.rate, fuel: steer.fuel, input: 0 };
@@ -1524,7 +1535,7 @@ export class Game {
     const copy = (o) => JSON.parse(JSON.stringify(o));   // Infinity becomes null; restore puts it back
     return {
       round: this.round, turnsThisRound: this.turnsThisRound, firstShooter: this.firstShooter,
-      wind: [...this.wind], gravity: this.gravity, maxWind: this.maxWind, modifier: this.modifier.id,
+      wind: [...this.wind], gravity: this.gravity, drag: this.drag, maxWind: this.maxWind, modifier: this.modifier.id,
       rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0, clock: this.clock,
       lastRoundResult: this.lastRoundResult,
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
@@ -1550,6 +1561,7 @@ export class Game {
     this.reveals = JSON.parse(JSON.stringify(s.reveals || []));
     this.intel = JSON.parse(JSON.stringify(s.intel || []));
     this.modifier = MODIFIER_BY_ID[s.modifier] || MODIFIER_BY_ID.clear;
+    this.drag = s.drag ?? (this.modifier.drag || 0);
     this.rng.setState(s.rng);
     this.rogue.setState(s.rogue);
     s.players.forEach((q, i) => {

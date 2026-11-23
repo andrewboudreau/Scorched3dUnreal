@@ -74,9 +74,10 @@ export function labelShare(lab, level) {
 // From level 2 that includes the enemies' Gravity Orbiters: `field(t)` and the
 // game clock `t0` (see ballistics.simulateShot). Recon beats defense: the
 // clock stands still while everyone plans, so those labels are exact.
-export function surveyConditions(level, { wind = [0, 0], windK = 1, gravity = GRAVITY, wells = [], field = null, t0 = 0 } = {}) {
+// Gravity and the Rain modifier's `drag` count at every level, like the ground.
+export function surveyConditions(level, { wind = [0, 0], windK = 1, gravity = GRAVITY, drag = 0, wells = [], field = null, t0 = 0 } = {}) {
   const live = level >= 2;
-  return { wind: live ? [wind[0], wind[1]] : [0, 0], windK: live ? windK : 0, gravity, wells: live ? wells : [], live, field: live ? field : null, t0 };
+  return { wind: live ? [wind[0], wind[1]] : [0, 0], windK: live ? windK : 0, gravity, drag, wells: live ? wells : [], live, field: live ? field : null, t0 };
 }
 
 // ---------- the lattice ----------
@@ -167,7 +168,7 @@ export function solveSite({ shooter, elev, target, cond, terrain, guess = null, 
   for (let it = 0; it < iterations; it++) {
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev), vel: launchVelocity(yaw, elev, power),
-      wind: cond.wind, terrain: world, gravity: cond.gravity, windK: cond.windK, level: ty - 1,
+      wind: cond.wind, terrain: world, gravity: cond.gravity, windK: cond.windK, drag: cond.drag || 0, level: ty - 1,
       field: cond.field || null, t0: cond.t0 || 0,
     });
     const [ix, , iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
