@@ -40,7 +40,7 @@ function askKey(why = '') {
   root.replaceChildren(h('div', { class: 'ib-key' },
     h('h1', {}, 'Craterfall suggestions'),
     why && h('p', { class: 'ib-err' }, why),
-    h('p', {}, 'The review key is "reviewKey" in web/tools/local.json.'),
+    h('p', {}, 'Enter the review key once; this browser keeps it.'),
     input, h('button', { onclick: go }, 'Open')));
   input.focus();
 }

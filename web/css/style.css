@@ -376,8 +376,9 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
 #settings .card { min-width: 0; width: min(420px, 92vw); padding: 20px 24px 24px; }
 .st-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .st-head h2 { flex: 1; }
+.st-pin { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .st-pin:empty { display: none; }
-.st-pin .st-action { width: auto; padding: 7px 12px; min-height: 0 !important; border-color: var(--accent); color: var(--accent); }
+.st-pin .st-action { width: auto; margin: 0; padding: 7px 12px; min-height: 0 !important; border-color: var(--accent); color: var(--accent); }
 .st-pin .st-action small { display: none; }
 .st-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
 .st-tab { flex: 1; min-height: 40px; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
