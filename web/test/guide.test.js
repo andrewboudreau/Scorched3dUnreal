@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WEAPONS, ITEMS } from '../src/core/weapons.js';
 import { MODS } from '../src/core/mods.js';
-import { PERKS } from '../src/core/perks.js';
-import { firstSentence, weaponRows, modRows, perkRows, familyRows, labRows, guideTabs, renderBlocks, rich } from '../src/guide.js';
+import { PERKS, MODIFIERS } from '../src/core/perks.js';
+import { firstSentence, weaponRows, modRows, perkRows, familyRows, modifierRows, guideTabs, renderBlocks, rich } from '../src/guide.js';
 
 test('firstSentence takes one line and trims long ones', () => {
   assert.equal(firstSentence('Heavy round. Wide crater.'), 'Heavy round.');
@@ -28,7 +28,7 @@ test('modRows and perkRows tolerate missing fields', () => {
   assert.equal(mods.length, MODS.length + 2);
   assert.match(mods.find((m) => m.name === 'Survey Satellite').meta, /recon/);
   assert.equal(mods.find((m) => m.name === 'Bare').meta, '');
-  assert.equal(mods.find((m) => m.name === 'Odd').meta, 'armory $5');
+  assert.equal(mods.find((m) => m.name === 'Odd').meta, '', 'no armory prices: mods come from perks');
   const perks = perkRows([...PERKS, { name: 'No text' }, { desc: 'No name' }, { name: 'Late', desc: 'Later.', fromRound: 3, needsMod: true }]);
   assert.equal(perks.length, perkRows(PERKS).length + 1);
   assert.equal(perks.at(-1).meta, 'from round 3 · needs a mod');
@@ -45,14 +45,15 @@ test('the rock-paper-scissors marks a family with no mod as coming', () => {
   assert.equal(familyRows([{ name: 'Jammer', family: 'jamming' }]).find((f) => f.id === 'jamming').coming, false);
 });
 
-test('labRows has a line per mod', () => {
-  const rows = labRows(MODS);
-  assert.ok(rows.length >= MODS.length);
-  assert.ok(rows.some((r) => r.name === 'Sat labels'));
+test('modifierRows has a line per round modifier', () => {
+  const rows = modifierRows(MODIFIERS);
+  assert.equal(rows.length, MODIFIERS.length);
+  assert.ok(rows.some((r) => r.name === 'Gale'));
+  assert.deepEqual(modifierRows([null, { name: 'x' }]), []);
 });
 
 test('guideTabs has the five sections, and survives empty data', () => {
-  const ids = ['basics', 'controls', 'weapons', 'mods', 'lab'];
+  const ids = ['basics', 'controls', 'weapons', 'mods', 'match'];
   for (const data of [{ weapons: WEAPONS, items: ITEMS, mods: MODS, perks: PERKS }, {}, undefined]) {
     const tabs = guideTabs(data);
     assert.deepEqual(tabs.map((t) => t.id), ids);

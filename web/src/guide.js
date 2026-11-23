@@ -1,11 +1,11 @@
 // The in-game guide: Settings > Guide. A short, scannable page in tabs (Basics,
-// Controls, Weapons, Mods and perks, Lab), full screen on a phone and a centred
+// Controls, Weapons, Mods and perks, Match builder), full screen on a phone and a centred
 // panel on a desktop. It is loaded the first time it is opened (main.js
 // registers the Settings entry and imports this file then), and its styles
 // (css/guide.css) come with it.
 //
-// The weapon, mod and perk lists are generated from core/weapons.js, mods.js
-// and perks.js, so the guide follows the data. Everything is read defensively:
+// The weapon, mod, perk and round modifier lists are generated from
+// core/weapons.js, mods.js and perks.js, so the guide follows the data. Everything is read defensively:
 // a missing field, or an entry we cannot describe, is skipped rather than
 // breaking the page. The content builders below are pure (data in, blocks
 // out; test/guide.test.js) and only `Guide` touches the DOM.
@@ -75,8 +75,6 @@ export function modRows(mods) {
     const hp = range(m.hp, 'hp'), turns = range(m.turns, 'turns');
     if (hp) bits.push(hp);
     if (turns) bits.push(turns);
-    const prices = spread(m.prices, '$');
-    if (prices) bits.push(`armory ${prices}`);   // only when the Lab sells mods; by default they come from perks
     rows.push({ name: m.name, tag: m.tag ? String(m.tag) : '', meta: bits.join(' · '), text: firstSentence(m.desc, 150), levels: isList(m.levels).filter((l) => typeof l === 'string') });
   }
   return rows;
@@ -115,22 +113,28 @@ export function familyRows(mods) {
   }));
 }
 
-// What the host's Lab does, one row per mod plus the satellite's labels.
-export function labRows(mods) {
+// Round modifiers, one line each.
+export function modifierRows(modifiers) {
   const rows = [];
-  for (const m of isList(mods)) {
-    if (!named(m)) continue;
-    const max = Number.isFinite(m.maxLevel) ? m.maxLevel : 1;
-    rows.push({
-      name: m.name,
-      text: `**Perks** (the default): won and levelled in the draft between rounds. **In the armory**: sold a level at a time (the draft still offers it). **Everyone** · ${max > 1 ? `L1 to L${max}` : 'L1'}: every tank starts with one at that level. **Off**: nobody has it.`,
-    });
-  }
-  if (isList(mods).some((m) => m && m.id === 'satellite')) {
-    rows.push({ name: 'Sat labels', text: 'How many of the Survey Satellite’s cells carry an aim label: few, some or many.' });
+  for (const m of isList(modifiers)) {
+    if (!named(m) || typeof m.desc !== 'string' || !m.desc.trim()) continue;
+    rows.push({ name: m.name, text: firstSentence(m.desc, 140) });
   }
   return rows;
 }
+
+// The Custom match options, one row each.
+export const BUILDER_ROWS = [
+  { name: 'Tanks', text: 'Two to six: you, more humans on this screen (they pass it round), or CPUs at Easy, Normal or Hard.' },
+  { name: 'Rounds', text: 'How many rounds the match lasts.' },
+  { name: 'Wind', text: '**Random** (the default) picks Calm, Breezy, Gusty or Gale when the match starts, and the round banner says which. Or choose one.' },
+  { name: 'Terrain', text: '**Random** (the default) picks Rolling, Hilly, Mountains or, less often, the Floating isles. Or choose one.' },
+  { name: 'Firing', text: 'Together (volley) or Take turns. Online is always together.' },
+  { name: 'Fog of war', text: 'You only see what is near your tank, or what a Scout Missile lights up.' },
+  { name: 'Weapons', text: 'Untick a weapon and nobody has it: not in the armory, the starting kit, a perk’s hand-out or the CPUs’ hands. The Shell is always on.' },
+  { name: 'Perks', text: 'Untick a perk and the draft never offers it. Mods come only from their cards: with **Orbital Mechanic** or **Sat Recon** off, nobody gets that mod, and its level-up cards never come up. With every perk off there is no draft.' },
+  { name: 'Round modifiers', text: 'One is rolled each round, never the same twice running. Untick the ones you do not want; with all off, every round is plain. With the wind on Calm, Gale and Dead calm sit out.' },
+];
 
 // ---------------------------------------------------------------- the content
 
@@ -172,7 +176,7 @@ const TOUCH = [
   ['The view', 'one finger orbits the camera, two pinch to zoom.'],
 ];
 
-export function guideTabs({ weapons, items, mods, perks, pay } = {}) {
+export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) {
   const P = { perDamage: 2, kill: 150, survive: 80, roundWin: 300, stipend: 150, ...(pay || {}) };
   const weaponList = weaponRows(weapons), itemList = itemRows(items);
   const modList = modRows(mods), perkList = perkRows(perks);
@@ -191,7 +195,7 @@ export function guideTabs({ weapons, items, mods, perks, pay } = {}) {
     { h: 'Damage' },
     { p: 'A blast hurts more the nearer it lands, and a direct hit most. Armor soaks damage before hit points. Blasts also dig the ground out from under tanks and buildings.' },
     { h: 'Rounds and money' },
-    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you draft a perk (with Twists on), then shop in the armory. Perks last the whole match; mods last until they are shot down.` },
+    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you draft a perk, then shop in the armory. Perks last the whole match; mods last until they are shot down.` },
   ] });
 
   tabs.push({ id: 'controls', title: 'Controls', blocks: [
@@ -210,7 +214,7 @@ export function guideTabs({ weapons, items, mods, perks, pay } = {}) {
   const fams = familyRows(mods);
   tabs.push({ id: 'mods', title: 'Mods and perks', blocks: [
     { h: 'Mods' },
-    { p: 'Equipment you put up on the field, not a weapon. By default you gain mods through the **perk draft** between rounds: an unlock card gives you one at level 1, then level-up cards raise it. The host can instead sell them in the armory, give everyone one, or turn them off in the Lab.' },
+    { p: 'Equipment you put up on the field, not a weapon. You gain mods through the **perk draft** between rounds: an unlock card gives you one at level 1, then level-up cards raise it. Untick a mod’s cards under **Custom match** > Perks and nobody has it.' },
     { p: '**Deploying a mod uses your turn** (no shot). It then stays up across rounds until it is shot down or wears out; a new one is ready on your next turn, and putting it up takes that turn. Its health and turns left show on your player card.' },
     modList.length ? { rows: modList } : { p: 'No mods in this build.' },
     { h: 'Rock, paper, scissors' },
@@ -222,11 +226,12 @@ export function guideTabs({ weapons, items, mods, perks, pay } = {}) {
     perkList.length ? { rows: perkList } : { p: 'No perks to list.' },
   ] });
 
-  const lab = labRows(mods);
-  tabs.push({ id: 'lab', title: 'Lab', blocks: [
-    { p: 'The Lab is on the launch screen under **Custom match** (the host sets it, and it travels to everyone online). It bends the house rules so you can try things.' },
-    lab.length ? { rows: lab } : { p: 'No Lab options in this build.' },
-    { p: 'Fog of war, Twists, terrain, wind and firing style are Custom match options too.' },
+  const modifierList = modifierRows(modifiers);
+  tabs.push({ id: 'match', title: 'Match builder', blocks: [
+    { p: '**Play** starts you against two Normal CPUs with everything on. **Custom match**, under it on the launch screen, builds your own; online the host builds it and it applies on every screen.' },
+    { rows: BUILDER_ROWS },
+    { h: 'Round modifiers' },
+    modifierList.length ? { rows: modifierList } : { p: 'No round modifiers in this build.' },
   ] });
 
   return tabs;
@@ -324,7 +329,7 @@ export function openGuide(tab) {
       document.head.appendChild(link);
     }
     guide = new Guide(guideTabs({
-      weapons: weaponData.WEAPONS, items: weaponData.ITEMS, mods: modData.MODS, perks: perkData.PERKS, pay: gameData.PAY,
+      weapons: weaponData.WEAPONS, items: weaponData.ITEMS, mods: modData.MODS, perks: perkData.PERKS, modifiers: perkData.MODIFIERS, pay: gameData.PAY,
     }));
   }
   guide.open(tab);

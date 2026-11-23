@@ -99,6 +99,11 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   put on the left, and Play online and the collapsed **Custom match** scroll on the
   right. In portrait it is one column. Most people only need Play; the
   options live under Custom match (open or shut, remembered).
+- **The match builder's checkbox groups** (Weapons, Perks, Round modifiers;
+  `src/builder.js`) are `<details>`, shut by default, with a 44 px summary on
+  touch that says "All" or "7 of 12". Open, an All box sits over a grid of
+  ticks, two columns on a phone in landscape (`minmax(150px, 1fr)`), each row
+  at least 36 px tall with the name and its first line, cut with an ellipsis.
 - **Play and Start go full screen.** On a phone, tapping Play or Start also calls
   `toggleFullscreen()` when `canFullscreen()` and not already full screen. That
   has to run inside the tap (full screen needs a user gesture), so it is in
@@ -109,7 +114,7 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
 ## The in-game guide
 
 Settings > Guide (`src/guide.js`, `css/guide.css`) is how a phone player learns the
-controls: tabs for Basics, Controls, Weapons, Mods and perks, and Lab. On a phone
+controls: tabs for Basics, Controls, Weapons, Mods and perks, and Match builder. On a phone
 (`body.touch`, or any window under 520 px tall or 600 px wide) it fills the screen
 edge to edge: safe-area insets cleared, 44 px tabs that scroll sideways if they do
 not fit, a body that scrolls by itself, and a 44 px ✕ top right (in landscape the

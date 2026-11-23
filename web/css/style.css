@@ -521,9 +521,31 @@ body.touch #gunner-btn { display: none; }
 .shop-section small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 2px; }
 .shop-item.mod { border-color: rgba(157, 184, 255, .45); background: rgba(90, 110, 190, .08); }
 
-/* The Lab options on the setup screen: a small group of house rules. */
-.options .lab { display: flex; gap: 16px 20px; flex-wrap: wrap; margin: 0; padding: 4px 10px 8px; border: 1px dashed rgba(114, 230, 255, .35); border-radius: var(--r); }
-.options .lab legend { padding: 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #72e6ff; }
+/* The Custom match checkbox groups (src/builder.js): Weapons, Perks, Round
+   modifiers. Each is shut by default, its summary saying "All" or "7 of 12";
+   open, an All box over a compact grid, every box a tap target of 36 px or more. */
+.opt-groups { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; }
+.pick { border: 1px solid var(--edge); border-radius: var(--r); background: rgba(255, 255, 255, .025); }
+.pick > summary { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; cursor: pointer; list-style: none; font-weight: 700; font-size: 14px; }
+.pick > summary::-webkit-details-marker { display: none; }
+.pick > summary::after { content: ''; width: 8px; height: 8px; border-right: 2px solid #9aa6b2; border-bottom: 2px solid #9aa6b2; transform: rotate(45deg); margin: -4px 2px 0 0; transition: transform .15s; }
+.pick[open] > summary::after { transform: rotate(-135deg); margin-top: 4px; }
+.pick-name { flex: 1; }
+.pick-count { font-weight: 500; font-size: 12px; color: var(--muted); }
+.pick-body { padding: 0 10px 10px; }
+.options .pick-item { flex-direction: row; align-items: center; gap: 8px; min-height: 36px; padding: 2px 6px; border-radius: 6px; color: var(--text); font-size: 13px; cursor: pointer; min-width: 0; }
+.options .pick-item:hover { background: rgba(255, 255, 255, .05); }
+.pick-item input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: #ff9a3c; }
+.pick-item span { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.pick-item b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-item small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.options .pick-item.locked { cursor: default; opacity: .75; }
+.pick-all { border-bottom: 1px solid var(--edge); border-radius: 0; margin-bottom: 4px; }
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 8px; }
+.pick-note { margin: 6px 4px 0; font-size: 11px; color: var(--muted); }
+body.touch #setup .pick > summary { min-height: 44px; font-size: 15px; }
+body.touch #setup .options .pick-item { font-size: 14px; }
+body.touch #setup .pick-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 
 /* The Survey Satellite's labels (src/render/satellite.js): turret over power, small. */
 .survey-tag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; pointer-events: none;
