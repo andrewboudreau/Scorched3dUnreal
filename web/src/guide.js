@@ -172,7 +172,7 @@ const TOUCH = [
   ['JET', 'left thumb. Hop about 25 m the way the hull faces. It costs a charge, not your shot or fuel.'],
   ['Drive arrows', '▲ ▼ drive (uses fuel), ◀ ▶ turn the hull. While a Guided Missile flies, ◀ ▶ (or a finger on the left or right half of the view) steer it.'],
   ['ORB / SAT', 'top of the Fire column once you own a mod. Tap, then tap again to deploy (it takes your turn).'],
-  ['⚙', 'Settings: sound, full screen, and this guide.'],
+  ['⚙', 'Settings: sound, full screen, and this guide. To leave full screen, hold the phone upright for 3 seconds.'],
   ['The view', 'one finger orbits the camera, two pinch to zoom.'],
 ];
 

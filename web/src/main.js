@@ -32,6 +32,7 @@ import { ModsUI, modShopCards } from './modsui.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
+import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, conditionsLabel, parseTestParams } from './builder.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1482,6 +1483,12 @@ settings.choice({ id: 'fxq', label: 'Fire and smoke', group: 'look', options: [{
   get: () => effects.quality, set: (v) => { effects.setQuality(v); try { localStorage.setItem(QUALITY_KEY, v); } catch { /* private mode */ } } });
 settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
+// Holding the phone upright for a few seconds leaves full screen (core of it in portraitexit.js).
+if (touch && canFullscreen()) watchPortraitExit({ isFullscreen, leave: () => {
+  try { screen.orientation?.unlock?.(); } catch { /* not locked */ }
+  if (isFullscreen()) toggleFullscreen();
+  banner('Left full screen', 'Settings > Full screen to go back', 2600);
+} });
 settings.add({ id: 'dials', group: 'more', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js

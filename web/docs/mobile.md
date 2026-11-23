@@ -109,6 +109,14 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   has to run inside the tap (full screen needs a user gesture), so it is in
   the click handlers (`phoneFullscreen` in `src/launch.js`). iPhone Safari has
   no element full screen; Add to Home Screen covers it.
+- **Holding the phone upright leaves full screen.** Full screen pins landscape, so
+  turning the phone doesn't rotate the page. Kept in portrait for 3 seconds, it
+  leaves full screen and unlocks the rotation, so the browser's own controls come
+  back, and a banner says how to return (Settings > Full screen). Upright is
+  read from gravity in the motion sensor, which works under the landscape lock;
+  without a sensor reading, the page's own orientation is used
+  (`src/portraitexit.js`). A glance at portrait, or the phone lying flat,
+  doesn't count.
 - Labels, pips and edge arrows work as they are. Edge arrows are tappable.
 
 ## The in-game guide
