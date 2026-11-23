@@ -96,13 +96,13 @@ There **Save picks** becomes **Copy picks**, which puts them on the clipboard.
 
 On a phone or tablet (or with `?mobile=1`) on-screen controls appear instead:
 an aim pad and power strip for the right thumb, a drive cross and jump jet for
-the left with ⚙ Settings above Jet, and Fine, Find, View and Chat (online) in
+the left, ⚙ Settings in the top right corner, and Fine, Find, View and Chat (online) in
 the middle. SIGHT (above the weapon button) looks down your turret line. The weapon
 button above Fire opens the weapons as a pop-up, and the keyboard hints are
 hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
 landscape. See `docs/mobile.md`.
 
-**Settings** (⚙, bottom right on a desktop, on every screen) holds the sound:
+**Settings** (⚙, bottom right on a desktop and top right on a phone, on every screen) holds the sound:
 Master, Effects and Music levels, each with a mute, and the music track. Master
 sits under the device's own volume (a web page cannot set that), so it starts at
 full. Also **Graphics > Fire and smoke** (Full, or Light, the default on phones: fewer
