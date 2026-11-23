@@ -289,7 +289,7 @@ second column beside the first. On a phone the players box sits top right.
   the ring; the sight never shows them. On level ground a shell comes
   down about twice as far out as its top. It stops short of the landing on
   purpose: that is still yours to judge (or the Rangefinder's).
-- **Angle dials** (Settings > Angle dials, on by default). While you aim, two
+- **Angle dials** (Settings > Graphics > Angle dials, on by default). While you aim, two
   thin gauges sit on your own tank so you can read the turret and the barrel
   on the tank itself. A ring lies on the ground round it, hugging the terrain,
   with a tick every 15°, long at 0, 90, 180 and 270 (0 is east, +x, and

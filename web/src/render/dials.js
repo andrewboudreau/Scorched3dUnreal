@@ -247,7 +247,7 @@ export class AngleDials {
     this._ground = (x, z) => this.groundY(x, z, true);
   }
 
-  // The setting (Settings > Angle dials), remembered.
+  // The setting (Settings > Graphics > Angle dials), remembered.
   setEnabled(on) {
     this.enabled = !!on;
     saveDials(this.enabled);

@@ -374,14 +374,26 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
   width: 60px; height: 40px; min-height: 0; }
 #settings { z-index: 20; }
 #settings .card { min-width: 0; width: min(420px, 92vw); padding: 20px 24px 24px; }
-.st-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.st-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.st-head h2 { flex: 1; }
+.st-pin:empty { display: none; }
+.st-pin .st-action { width: auto; padding: 7px 12px; min-height: 0 !important; border-color: var(--accent); color: var(--accent); }
+.st-pin .st-action small { display: none; }
+.st-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.st-tab { flex: 1; min-height: 40px; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+  color: var(--muted); font-weight: 700; }
+.st-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+/* Every tab sits in the same grid cell, the hidden ones invisible but still
+   taking room, so the card keeps the height of the tallest and the tabs don't
+   jump under your thumb when you switch. */
+.st-list > .st-group { grid-area: 1 / 1; }
+.st-group[hidden] { display: block; visibility: hidden; }
 .st-head h2 { margin: 0; font-size: 18px; letter-spacing: .02em; }
 .st-x { min-height: 0 !important; padding: 4px 10px; }
-.st-list { display: flex; flex-direction: column; gap: 24px; }
-.st-group h3 { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+.st-list { display: grid; }
 .st-note { margin: 0 0 10px; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .st-level, .st-choice { display: grid; grid-template-columns: 62px 1fr 40px 46px; align-items: center; gap: 12px; padding: 5px 0; }
-.st-choice { grid-template-columns: 62px 1fr; }
+.st-choice { grid-template-columns: auto 1fr; }
 .st-level label, .st-choice label { font-weight: 600; white-space: nowrap; }
 .st-level input { width: 100%; margin: 0; padding: 0; border: 0; background: none; accent-color: var(--accent); }
 .st-level output { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
@@ -391,11 +403,12 @@ body.touch #settings-btn { right: auto; left: calc(14px + env(safe-area-inset-le
 .st-action { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 11px 14px; text-align: left; }
 .st-action + .st-action { margin-top: 8px; }
 .st-action small { color: var(--muted); font-weight: 400; font-size: 12px; }
-/* Landscape phones: the groups side by side. */
+/* Landscape phones: a wider, shorter card; the tab body scrolls if it must. */
 @media (max-height: 520px) {
-  #settings .card { width: min(720px, 94vw); padding: 14px 20px 18px; }
-  #settings .st-head { margin-bottom: 10px; }
-  #settings .st-list { display: grid; grid-template-columns: 1.35fr 1fr; gap: 28px; align-items: start; }
+  #settings .card { width: min(560px, 94vw); padding: 12px 20px 16px; max-height: 92vh; display: flex; flex-direction: column; }
+  #settings .st-head { margin-bottom: 6px; }
+  #settings .st-tabs { margin-bottom: 10px; }
+  #settings .st-list { overflow-y: auto; }
 }
 
 /* Resource-pack review (src/review.js): opened from Settings. */

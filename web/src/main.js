@@ -1472,7 +1472,7 @@ function toggleMute() {
 // and the resource packs where they are served (added with the packs, below).
 const settings = new Settings({ parent: document.body });
 const keys = (s) => (touch ? '' : s);
-settings.group('sound', 'Sound', `Master sits under your device's volume, which still sets the overall level.${keys(' M mutes all, - / = set Master.')}`);
+settings.group('sound', 'Audio', `Master sits under your device's volume, which still sets the overall level.${keys(' M mutes all, - / = set Master.')}`);
 settings.level({ id: 'master', label: 'Master', group: 'sound', get: () => sound.volume, muted: () => sound.muted,
   set: (v) => { sound.ensure(); sound.setVolume(v); }, toggle: () => { sound.ensure(); sound.toggleMute(); } });
 settings.level({ id: 'fx', label: 'Effects', group: 'sound', get: () => sound.fxVolume, muted: () => sound.fxMuted,
@@ -1484,15 +1484,15 @@ settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', op
 settings.group('look', 'Graphics', 'Light draws fewer flames, smoke puffs and sparks: smoother on a phone.');
 settings.choice({ id: 'fxq', label: 'Fire and smoke', group: 'look', options: [{ value: 'full', text: 'Full' }, { value: 'light', text: 'Light (faster)' }],
   get: () => effects.quality, set: (v) => { effects.setQuality(v); try { localStorage.setItem(QUALITY_KEY, v); } catch { /* private mode */ } } });
-settings.group('more', 'Screen and tools');
-if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
+settings.group('more', 'More');
+if (canFullscreen()) settings.add({ id: 'full', pin: true, label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 // Holding the phone upright for a few seconds leaves full screen (core of it in portraitexit.js).
 if (touch && canFullscreen()) watchPortraitExit({ isFullscreen, leave: () => {
   try { screen.orientation?.unlock?.(); } catch { /* not locked */ }
   if (isFullscreen()) toggleFullscreen();
   banner('Left full screen', 'Settings > Full screen to go back', 2600);
 } });
-settings.add({ id: 'dials', group: 'more', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
+settings.add({ id: 'dials', group: 'look', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
