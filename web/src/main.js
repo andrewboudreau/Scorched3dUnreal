@@ -1488,7 +1488,7 @@ settings.group('more', 'More');
 // The suggestion box (src/suggest.js, lazy), pinned beside Full screen: the area
 // is a guess at where you were, which the box lets you change.
 settings.add({ id: 'suggest', pin: true, label: 'Suggest', run: () => import('./suggest.js').then((m) => m.openSuggest({
-  area: !$('setup').classList.contains('hidden') ? 'match builder' : game ? (game.cfg.local ? 'game' : 'online') : 'other',
+  area: !$('setup').classList.contains('hidden') ? 'match builder' : game ? (game.online ? 'online' : 'game') : 'other',
   context: m.suggestionContext({ game, screen: !$('setup').classList.contains('hidden') ? 'setup' : game ? 'match' : 'other',
     page: location.pathname + location.search, view: { w: innerWidth, h: innerHeight }, touch: !!touch, ua: navigator.userAgent }),
 })) });

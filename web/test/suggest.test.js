@@ -21,7 +21,7 @@ test('the areas include the places the request names', () => {
 });
 
 test('suggestionContext reads the match and stays small', () => {
-  const game = { round: 2, phase: 'aim', modifier: { id: 'rain' }, cfg: { rounds: 5, firing: 'turns', local: true },
+  const game = { round: 2, phase: 'aim', modifier: { id: 'rain' }, cfg: { rounds: 5, firing: 'turns' }, online: false,
     players: [{ ai: false }, { ai: true }, { ai: true }] };
   const c = suggestionContext({ game, screen: 'match', view: { w: 878.4, h: 389 }, touch: {}, ua: 'x'.repeat(500) });
   assert.deepEqual({ round: c.round, rounds: c.rounds, phase: c.phase, modifier: c.modifier, players: c.players, cpus: c.cpus, online: c.online },

@@ -43,7 +43,7 @@ export function suggestionContext({ game = null, screen = '', page = '', view = 
     c.firing = game.cfg?.firing;
     c.players = game.players?.length;
     c.cpus = game.players?.filter((p) => p.ai).length;
-    c.online = !game.cfg?.local;
+    c.online = !!game.online;
   }
   if (ua) c.ua = ua.slice(0, 200);
   for (const k of ['ua', 'page', 'players', 'cpus']) {
