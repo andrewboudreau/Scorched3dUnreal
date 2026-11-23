@@ -15,7 +15,7 @@ import { SceneryMesh } from './render/sceneryMesh.js';
 import { BUILDINGS } from './core/scenery.js';
 import { TankMesh } from './render/tankMesh.js';
 import { Wreck } from './render/wreck.js';
-import { Effects, ShellVisual } from './render/effects.js';
+import { Effects, ShellVisual, QUALITY_KEY } from './render/effects.js';
 import { Sky } from './render/sky.js';
 import { Moons } from './render/moons.js';
 import { GravityLines } from './render/gravityLines.js';
@@ -489,7 +489,7 @@ function handleEvents() {
         break;
       case 'damage': {
         if (seen(game.players[e.player])) popDamage(e.player, e.amount);
-        { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); }
+        { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); if (seen(v)) effects.ignite(`tank${e.player}`, 4 + Math.min(5, e.amount * 0.06)); }
         if (insetFor === e.player) flashInset(e.amount);
         // Name the victim on the shooter's pip.
         const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
@@ -1472,6 +1472,9 @@ settings.level({ id: 'music', label: 'Music', group: 'sound', get: () => music.v
   set: (v) => { sound.ensure(); music.setVolume(v); }, toggle: () => { sound.ensure(); music.toggleMute(); } });
 settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', options: TRACKS.map((t) => ({ value: t.id, text: t.name })),
   get: () => music.trackId, set: (id) => { sound.ensure(); music.select(id); } });
+settings.group('look', 'Graphics', 'Light draws fewer flames, smoke puffs and sparks: smoother on a phone.');
+settings.choice({ id: 'fxq', label: 'Fire and smoke', group: 'look', options: [{ value: 'full', text: 'Full' }, { value: 'light', text: 'Light (faster)' }],
+  get: () => effects.quality, set: (v) => { effects.setQuality(v); try { localStorage.setItem(QUALITY_KEY, v); } catch { /* private mode */ } } });
 settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
@@ -1564,21 +1567,20 @@ function updateTracer() {
 }
 
 // Exhaust while the engine works, a lazy puff from the tank whose turn it is,
-// dust off the tracks, and dark smoke from a tank that is nearly done for.
+// dust off the tracks, and the small fire on a tank that is hurt (see Effects.burn).
 function tankSmoke(dt) {
   const drift = [game.wind[0] * 1.5, game.wind[1] * 1.5];
   game.players.forEach((p, i) => {
     if (!p.alive || !seen(p)) return;
     const t = tanks[i];
-    if ((smoke[i] -= dt) > 0) return;
     const hurt = 1 - p.hp / p.maxHp;
+    // A badly hurt tank (or one just hit) burns and smokes until it is repaired or dies.
+    effects.burn(`tank${i}`, p.x, p.y + 2.0, p.z, { flame: hurt > 0.65 ? (hurt - 0.5) * 1.3 : 0, smoke: hurt > 0.4 ? 0.15 + hurt * 0.6 : 0, ttl: 0.3, spread: 1.3 });
+    if ((smoke[i] -= dt) > 0) return;
     if (t.work > 0.1) {
       smoke[i] = 0.09;
       effects.puff(t.exhaust(_v, Math.random() < 0.5 ? 1 : -1), { size: 0.8 + t.work * 0.5, life: 1.1, drift });
       if (Math.random() < 0.5) effects.puff({ x: p.x, y: p.y + 0.4, z: p.z }, { color: '#a08463', size: 2.2, life: 1.2, rise: 0.8, opacity: 0.3, drift });
-    } else if (hurt > 0.6) {
-      smoke[i] = 0.3 - hurt * 0.15;
-      effects.puff({ x: p.x + (Math.random() - 0.5), y: p.y + 2.6, z: p.z + (Math.random() - 0.5) }, { color: '#2b2826', size: 1.5 + hurt, life: 2.4, rise: 3.2, opacity: 0.55, drift });
     } else if (p === game.current && game.phase === 'aim') {
       smoke[i] = 0.7;
       effects.puff(t.exhaust(_v, Math.random() < 0.5 ? 1 : -1), { size: 0.6, life: 1.0, opacity: 0.3, drift });
@@ -1601,7 +1603,8 @@ function soundScape(dt) {
       if (!shell || dist < shell.dist) shell = { dist, falling: Math.max(0, Math.min(1, -pr.vel[1] / 45)) };
     }
   }
-  sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep });
+  sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep,
+    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z) });
 }
 
 // ---------------------------------------------------------------- HUD
@@ -2543,6 +2546,7 @@ function tick(dt, draw = true) {
   craft.update(dt);
   soundScape(dt);
   music.update(dt, game ? timeScale : 1);
+  if (game) effects.wind = game.wind;
   effects.update(dt * timeScale);
   updateCamera(dt);
   updateAimAids();

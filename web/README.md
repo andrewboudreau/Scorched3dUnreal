@@ -30,7 +30,7 @@ packs** (or P) then opens a review panel (`src/review.js`):
 
 - **Sounds**: play any of them, or put one in for a game event (cannon, small,
   medium, big and far blasts, impacts, tank hits, wreck parts, jet, teleport,
-  shell whoosh, UI click). **Use pack in game** does all of them by name, so the
+  shell whoosh, UI click, debris patter, ground thump, fire crackle). **Use pack in game** does all of them by name, so the
   next shot sounds like the pack; **layer** plays the synth underneath, and the
   Test row fires each event on the spot.
 - **Skies**: an HDRI replaces the sky and its light, and the game's sun (and its
@@ -84,7 +84,8 @@ landscape. See `docs/mobile.md`.
 **Settings** (⚙, bottom right on a desktop, on every screen) holds the sound:
 Master, Effects and Music levels, each with a mute, and the music track. Master
 sits under the device's own volume (a web page cannot set that), so it starts at
-full. Also full screen where the browser allows it, and the resource-pack review
+full. Also **Graphics > Fire and smoke** (Full, or Light, the default on phones: fewer
+flames, puffs and embers), full screen where the browser allows it, and the resource-pack review
 where packs are served.
 
 **Guide** (Settings > Guide, from the launch screen or mid-match) is a short in-game

@@ -25,6 +25,8 @@
     <Content Include="..\src\**" Link="wwwroot\src\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\manifest.webmanifest" Link="wwwroot\manifest.webmanifest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\img\**" Link="wwwroot\img\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\fx\**" Link="wwwroot\fx\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\sfx\**" Link="wwwroot\sfx\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\vendor\**" Link="wwwroot\vendor\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

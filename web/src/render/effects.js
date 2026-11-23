@@ -1,10 +1,48 @@
 import * as THREE from 'three';
 import { sceneryStandIns } from './sceneryMesh.js';
+import { loadAtlas } from './fxAtlas.js';
 
-// Short-lived visual effects: fireballs, debris, smoke, shell trails.
+// Short-lived visual effects: fireballs, debris, smoke, shell trails, and the
+// small fires that keep burning on craters, hurt tanks and wrecks.
+//
+// Everything is pooled sprites (no real lights beyond the three flash lights),
+// with counts capped by the effects quality: 'full', or 'light' for phones.
 
 const FLASHES = 3;        // explosion lights that can glow at once
 const DEBRIS_MAX = 240;   // debris chunks in the air at once
+const EMBERS_MAX = 160;   // glowing sparks in the air at once
+
+// What each quality level allows. `puffs` scales smoke counts, `billows` is
+// the fire sprites in a blast, `embers` scales sparks; the caps bound sprites
+// alive at once for burning things and shell trails; `gap` is metres between
+// trail puffs; `clumps` is the flame clumps one fire may have, `clumpCap` all of them.
+export const QUALITY = {
+  full: { puffs: 1, billows: 4, embers: 1, fireCap: 90, trailCap: 40, gap: 3.2, emitters: 24, ring: 6, debris: 1, clumps: 4, clumpCap: 24 },
+  light: { puffs: 0.55, billows: 2, embers: 0.45, fireCap: 34, trailCap: 16, gap: 6, emitters: 10, ring: 3, debris: 0.6, clumps: 2, clumpCap: 8 },
+};
+export const QUALITY_KEY = 'craterfall.fxQuality';
+// Phones (and ?mobile=1) start on Light; anything chosen in Settings wins.
+export function readQuality() {
+  try {
+    const v = globalThis.localStorage?.getItem(QUALITY_KEY);
+    if (v in QUALITY) return v;
+  } catch { /* private mode */ }
+  const phone = /[?&]mobile=1/.test(globalThis.location?.search || '') || !!globalThis.matchMedia?.('(pointer: coarse)').matches;
+  return phone ? 'light' : 'full';
+}
+
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+// A fireball cooling: white-yellow, orange, dull red, out. `k` runs 0..1.
+const FIRE_STOPS = [new THREE.Color('#fff2c4'), new THREE.Color('#ffa43a'), new THREE.Color('#cf4a14'), new THREE.Color('#4a1608')];
+function fireColor(out, k) {
+  const f = clamp01(k) * (FIRE_STOPS.length - 1);
+  const i = Math.min(FIRE_STOPS.length - 2, Math.floor(f));
+  return out.copy(FIRE_STOPS[i]).lerp(FIRE_STOPS[i + 1], f - i);
+}
+const _c1 = new THREE.Color();
+const _c2 = new THREE.Color();
+const rnd = (a, b) => a + Math.random() * (b - a);
+let TRAIL_FX = null;      // the Effects that shell trails borrow (set by its constructor)
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -28,6 +66,18 @@ export class Effects {
   constructor(scene) {
     this.scene = scene;
     this.items = [];
+    this.time = 0;
+    this.wind = [0, 0];                 // main.js keeps this at the game's wind
+    this.setQuality(readQuality());
+    this.live = { fire: 0, trail: 0 };  // sprites alive per capped kind
+    this.emitters = new Map();          // things that keep burning
+    this.heat = new Map();              // key -> time a hit keeps it burning until
+    this.craters = 0;
+    this.clumpCount = 0;                // flame clumps alive (each is three sprites)
+    this.camera = null;                 // set by warm(); flames lean across the screen with the wind
+    this.atlasReady = false;
+    this.atlas = loadAtlas(undefined, () => { this.atlasReady = true; });
+    TRAIL_FX = this;
     this.smokeTex = radialTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
     this.glowTex = radialTexture('rgba(255,240,200,1)', 'rgba(255,120,30,0)');
     this.warpTex = radialTexture('rgba(235,252,255,1)', 'rgba(90,200,255,0)');
@@ -58,6 +108,17 @@ export class Effects {
     scene.add(this.debris);
     this.chunks = [];
     this.prime = 0;
+    // Embers: glowing sparks thrown from a blast, one additive Points draw.
+    this.ember = { n: 0, p: new Float32Array(EMBERS_MAX * 3), c: new Float32Array(EMBERS_MAX * 3), v: new Float32Array(EMBERS_MAX * 3), life: new Float32Array(EMBERS_MAX), max: new Float32Array(EMBERS_MAX) };
+    const eg = new THREE.BufferGeometry();
+    eg.setAttribute('position', new THREE.BufferAttribute(this.ember.p, 3).setUsage(THREE.DynamicDrawUsage));
+    eg.setAttribute('color', new THREE.BufferAttribute(this.ember.c, 3).setUsage(THREE.DynamicDrawUsage));
+    eg.setDrawRange(0, 0);
+    this.emberMat = new THREE.PointsMaterial({ size: 1.1, map: this.glowTex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.embers = new THREE.Points(eg, this.emberMat);
+    this.embers.frustumCulled = false;
+    this.embers.visible = false;
+    scene.add(this.embers);
     // Hidden stand-ins for the shader variants that come and go with shells
     // (missile skin, roller ball, exhaust, trails, probe beams). They never
     // render and are never disposed, which keeps those programs compiled
@@ -73,13 +134,31 @@ export class Effects {
       new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]),
         new THREE.LineBasicMaterial({ transparent: true })),
     );
+    this.keep.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)),
+      new THREE.PointsMaterial({ map: this.glowTex, vertexColors: false, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })));
     scene.add(this.keep);
+  }
+
+  setQuality(name) {
+    this.quality = name in QUALITY ? name : 'full';
+    this.q = QUALITY[this.quality];
+    // Trim what is already burning down to the new limits.
+    if (this.emitters) this.trimEmitters();
+  }
+
+  // A random cell of the sheet ('fire', 'flash', 'flame', 'smokeDark',
+  // 'smokeLight'); a plain soft blob until the sheet has loaded.
+  pick(kind) {
+    if (!this.atlasReady) return kind === 'smokeDark' || kind === 'smokeLight' ? this.smokeTex : this.glowTex;
+    const a = this.atlas[kind];
+    return a[Math.floor(Math.random() * a.length)];
   }
 
   // Compile every shader the scene can need (hidden objects included, with
   // the scene's lights in place) so nothing stalls on first use mid-match.
   // `compileAsync` lets the driver build them in parallel where it can.
   async warm(renderer, camera) {
+    this.camera = camera;
     const g = new THREE.Group();
     g.visible = false;
     g.add(...sceneryStandIns());
@@ -100,14 +179,37 @@ export class Effects {
     m.map = map;
     m.color.set(color);
     m.opacity = 0;
+    m.rotation = 0;
+    sm.center.set(0.5, 0.5);
+    sm.visible = true;
     m.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending;
     sm.scale.set(1, 1, 1);
     this.scene.add(sm);
     return sm;
   }
 
+  // Queue a finished-when-`max` effect. `cap` ('fire' or 'trail') counts it
+  // against that kind's limit until it is released.
+  add(it, cap = null) {
+    if (cap) { it.cap = cap; this.live[cap]++; }
+    this.items.push(it);
+    return it;
+  }
+
+  // Ground height under (x, z), or null when the game has not said yet.
+  ground(x, z) { return this.groundAt ? this.groundAt(x, z) : null; }
+
+  // A blast: a flash of light, a white-hot burst, a fireball (the low-poly
+  // sphere with sprite billows round it), a ring of dust and a column of
+  // smoke that lingers and leans with the wind, plus sparks and flying earth.
+  // Everything scales with `radius`; a big weapon is a bigger, longer event.
   explosion(pos, radius) {
     const [x, y, z] = pos;
+    const q = this.q;
+    const size = Math.min(1.7, Math.max(0.55, radius / 12));       // 1 is a medium blast
+    const gy = this.ground(x, z);
+    const low = gy == null || y - gy < radius * 0.8 + 1;           // on the ground, not an air burst
+
     // Fireball.
     const fire = this.freeFires.pop() || new THREE.Mesh(this.fireGeo, new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
     const fireMat = fire.material;
@@ -116,7 +218,7 @@ export class Effects {
     fire.position.set(x, y, z);
     fire.scale.setScalar(radius * 0.35);
     this.scene.add(fire);
-    this.items.push({ life: 0, max: 0.7, obj: fire, pool: this.freeFires, update: (it, t) => {
+    this.items.push({ life: 0, max: 0.55 + 0.1 * size, obj: fire, pool: this.freeFires, update: (it, t) => {
       const k = t / it.max;
       fire.scale.setScalar(radius * (0.35 + 0.9 * Math.sqrt(k)));
       fireMat.opacity = 1 - k;
@@ -142,8 +244,39 @@ export class Effects {
       glow.material.opacity = 1 - k;
     } });
 
+    // White-hot burst: a ragged flash that blooms and is gone in a blink.
+    const hot = this.sprite(this.pick('flash'), '#ffffff', true);
+    hot.position.set(x, y + radius * 0.25, z);
+    hot.material.rotation = rnd(0, 6.3);
+    this.items.push({ life: 0, max: 0.22 + 0.1 * size, obj: hot, pool: this.freeSprites, update: (it, t) => {
+      const k = t / it.max;
+      hot.scale.setScalar(radius * (2.2 + 2.2 * Math.sqrt(k)));
+      hot.material.opacity = (1 - k) ** 1.6;
+    } });
+
+    // Fire billows round the sphere: the body of the fireball.
+    const billows = Math.round(q.billows + (radius > 14 ? 1 : 0));
+    for (let i = 0; i < billows; i++) {
+      const b = this.sprite(this.pick('fire'), '#ffffff', true);
+      const a = rnd(0, 6.3), r = radius * rnd(0.1, 0.45);
+      b.position.set(x + Math.cos(a) * r, y + radius * rnd(0, 0.5), z + Math.sin(a) * r);
+      b.material.rotation = rnd(0, 6.3);
+      const spin = rnd(-0.8, 0.8), rise = rnd(1.5, 3.5) * (0.6 + size * 0.4);
+      const from = radius * rnd(0.9, 1.3), to = radius * rnd(2.3, 3.2);
+      const max = rnd(0.75, 1.2) * (0.75 + size * 0.35);
+      this.items.push({ life: -i * 0.045, max, obj: b, pool: this.freeSprites, update: (it, t, dt) => {
+        if (t < 0) return;
+        const k = t / it.max;
+        b.position.y += rise * dt * (1 - k);
+        b.material.rotation += spin * dt;
+        b.scale.setScalar(from + (to - from) * (1 - (1 - k) * (1 - k)));
+        fireColor(b.material.color, k * 0.8);
+        b.material.opacity = Math.min(1, t * 14) * (1 - k) ** 1.3 * 0.95;
+      } });
+    }
+
     // Debris chunks thrown out of the crater.
-    const n = Math.min(40, Math.round(radius * 1.6), DEBRIS_MAX - this.chunks.length);
+    const n = Math.min(Math.round(40 * q.debris), Math.round(radius * 1.6 * q.debris), DEBRIS_MAX - this.chunks.length);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = radius * (0.3 + Math.random() * 0.8);
@@ -156,23 +289,367 @@ export class Effects {
       });
     }
 
-    // Smoke column: a small blast (flak) gets a few puffs, so a dozen at once stay cheap.
-    const puffs = Math.max(4, Math.min(10, Math.round(radius * 0.9)));
+    // Glowing embers: sparks that arc out, wink and fall.
+    this.sparks(x, y + radius * 0.2, z, Math.round((5 + radius * 1.1) * q.embers), radius);
+
+    // A low ring of dust pushed out along the ground.
+    if (low) {
+      const ring = Math.round(q.ring * Math.min(1.5, size + 0.3));
+      for (let i = 0; i < ring; i++) {
+        const sm = this.sprite(this.pick('smokeLight'), '#a68b69');
+        const a = (i / ring) * 6.28 + rnd(-0.3, 0.3);
+        const dx = Math.cos(a), dz = Math.sin(a), out = radius * rnd(0.9, 1.5);
+        const px = x + dx * radius * 0.3, pz = z + dz * radius * 0.3;
+        sm.position.set(px, (gy ?? y) + 1, pz);
+        sm.material.rotation = rnd(0, 6.3);
+        const max = rnd(1.5, 2.3);
+        this.items.push({ life: 0, max, obj: sm, pool: this.freeSprites, update: (it, t) => {
+          const k = t / it.max, e = 1 - (1 - k) * (1 - k);
+          sm.position.x = px + dx * out * e + this.wind[0] * 0.8 * t;
+          sm.position.z = pz + dz * out * e + this.wind[1] * 0.8 * t;
+          sm.position.y = (this.ground(sm.position.x, sm.position.z) ?? y) + 1 + 2.5 * e;
+          sm.scale.setScalar(radius * (0.7 + 0.9 * k));
+          sm.material.opacity = Math.min(1, t * 6) * 0.42 * (1 - k) ** 1.4;
+        } });
+      }
+    }
+
+    // Smoke column: it rises 3 to 6 s, thins as it grows and leans with the
+    // wind more the higher it gets. A small blast (flak) gets a few puffs, so
+    // a dozen at once stay cheap.
+    const puffs = Math.max(4, Math.min(13, Math.round((2 + radius * 0.7) * q.puffs)));
+    const stay = 2.4 + Math.min(3.2, radius * 0.17);
     for (let i = 0; i < puffs; i++) {
-      const sm = this.sprite(this.smokeTex, '#57504a');
-      sm.position.set(x + (Math.random() - 0.5) * radius, y + Math.random() * radius * 0.5, z + (Math.random() - 0.5) * radius);
-      const rise = 2 + Math.random() * 4;
-      const dx = (Math.random() - 0.5) * 2, dz = (Math.random() - 0.5) * 2;
-      const size = radius * (1.2 + Math.random());
-      sm.scale.setScalar(size * 0.6);
-      this.items.push({ life: -i * 0.05, max: 3.5 + Math.random() * 2, obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
+      const dark = Math.random() < 0.4;
+      const sm = this.sprite(this.pick(dark ? 'smokeDark' : 'smokeLight'), dark ? '#f0e8e0' : '#a8a29b');
+      const px = x + rnd(-0.5, 0.5) * radius * 0.7, pz = z + rnd(-0.5, 0.5) * radius * 0.7;
+      sm.position.set(px, y + (i / puffs) * radius * 0.7, pz);
+      sm.material.rotation = rnd(0, 6.3);
+      const spin = rnd(-0.25, 0.25), rise = rnd(3, 5.5) + size * 1.5;
+      const w = radius * rnd(0.9, 1.7);
+      const peak = dark ? 0.62 : 0.5;
+      this.items.push({ life: -i * 0.07, max: stay + rnd(0, 1.2), obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
         if (t < 0) return;
         const k = t / it.max;
-        sm.position.x += dx * dt; sm.position.y += rise * dt; sm.position.z += dz * dt;
-        sm.scale.setScalar(size * (0.6 + k * 1.8));
-        sm.material.opacity = Math.min(0.5, t * 3) * (1 - k) ** 1.5;
+        sm.position.y += rise * (1 - 0.7 * k) * dt;
+        sm.position.x += this.wind[0] * 1.8 * (0.3 + k) * dt;
+        sm.position.z += this.wind[1] * 1.8 * (0.3 + k) * dt;
+        sm.material.rotation += spin * dt;
+        sm.scale.setScalar(w * (0.5 + 1.6 * Math.sqrt(k)));
+        sm.material.opacity = Math.min(1, t * 4) * peak * (1 - k) ** 1.3;
       } });
     }
+
+    // The crater keeps smouldering after the blast.
+    if (low && radius >= 5) {
+      this.burn(`crater${this.craters++ % 64}`, x, (gy ?? y) + 0.3, z, {
+        flame: Math.min(0.85, 0.2 + radius * 0.03), flameFor: 4 + radius * 0.4,
+        smoke: 0.6, ttl: Math.min(18, 6 + radius * 0.6), size: Math.min(2.4, 0.8 + radius * 0.07),
+        spread: Math.max(1.5, radius * 0.3), ground: true,
+      });
+    }
+  }
+
+  // ---- embers ----
+
+  // `n` glowing sparks leaving (x, y, z), flung out and up and pulled down.
+  sparks(x, y, z, n, radius) {
+    const e = this.ember;
+    n = Math.min(n, EMBERS_MAX - e.n);
+    for (let i = 0; i < n; i++, e.n++) {
+      const k = e.n, a = rnd(0, 6.283), s = radius * rnd(0.4, 1.3), j = k * 3;
+      e.p[j] = x; e.p[j + 1] = y; e.p[j + 2] = z;
+      e.v[j] = Math.cos(a) * s; e.v[j + 1] = radius * rnd(0.8, 2.0); e.v[j + 2] = Math.sin(a) * s;
+      e.life[k] = 0; e.max[k] = rnd(0.9, 2.2);
+    }
+  }
+
+  updateEmbers(dt) {
+    const e = this.ember;
+    let w = 0;
+    for (let i = 0; i < e.n; i++) {
+      const j = i * 3;
+      e.life[i] += dt;
+      if (e.life[i] >= e.max[i]) continue;
+      e.v[j + 1] -= 9.81 * 0.7 * dt;
+      e.v[j] += this.wind[0] * 0.5 * dt; e.v[j + 2] += this.wind[1] * 0.5 * dt;
+      e.p[j] += e.v[j] * dt; e.p[j + 1] += e.v[j + 1] * dt; e.p[j + 2] += e.v[j + 2] * dt;
+      const g = this.ground(e.p[j], e.p[j + 2]);
+      if (g != null && e.p[j + 1] < g) continue;                     // landed
+      const k = e.life[i] / e.max[i];
+      const flick = 0.75 + 0.25 * Math.sin(this.time * 40 + i * 7);
+      const o = w * 3;
+      // Moving down the array: copy a survivor into its new slot.
+      e.p[o] = e.p[j]; e.p[o + 1] = e.p[j + 1]; e.p[o + 2] = e.p[j + 2];
+      e.v[o] = e.v[j]; e.v[o + 1] = e.v[j + 1]; e.v[o + 2] = e.v[j + 2];
+      e.life[w] = e.life[i]; e.max[w] = e.max[i];
+      const glow = (1 - k) * flick;
+      e.c[o] = glow; e.c[o + 1] = glow * (0.55 - 0.3 * k); e.c[o + 2] = glow * 0.18;
+      w++;
+    }
+    const was = e.n;
+    e.n = w;
+    this.embers.visible = w > 0;
+    if (w > 0 || was > 0) {
+      const g = this.embers.geometry;
+      g.setDrawRange(0, w);
+      g.attributes.position.needsUpdate = true;
+      g.attributes.color.needsUpdate = true;
+    }
+  }
+
+  // ---- things that keep burning ----
+
+  // Start, or keep alive, a small fire: flames and a thin plume of smoke.
+  // `key` names it (calling again moves it and renews it). Options:
+  //   flame, smoke   0..1 how much of each
+  //   ttl            seconds it lasts from now (it thins out over the last bit)
+  //   size, spread   how big the flames are, and how far apart they start
+  //   ground         follow the ground height under it (a crater)
+  //   flameFor       seconds the flames last, dying down to embers (0: steady while kept alive)
+  // A caller that keeps a fire going while some condition holds calls this
+  // every frame with a short ttl; when the condition ends, so does the fire.
+  burn(key, x, y, z, { flame = 0.5, smoke = 0.5, ttl = 1, size = 1, spread = 0.8, ground = false, fade = null, flameFor = 0 } = {}) {
+    // A fresh hit (see ignite) lights it up whatever the caller says.
+    const hot = (this.heat.get(key) ?? 0) - this.time;
+    if (hot > 0) { flame = Math.max(flame, 0.2 + 0.4 * clamp01(hot / 2)); smoke = Math.max(smoke, 0.5); }
+    if (flame <= 0.04 && smoke <= 0.04) { this.dropEmitter(key); return; }
+    let e = this.emitters.get(key);
+    if (!e) {
+      if (this.emitters.size >= this.q.emitters) this.trimEmitters(1);
+      e = { x, y, z, flame, smoke, size, spread, ground, until: 0, fade: 1, born: this.time, flameFor, clumps: null, smokeT: Math.random() * 0.5 };
+      this.emitters.set(key, e);
+    }
+    e.x = x; e.y = y; e.z = z;
+    e.flame = flame; e.smoke = smoke; e.size = size; e.spread = spread; e.ground = ground;
+    e.until = Math.max(e.until, this.time + ttl);
+    e.fade = fade ?? Math.min(ttl, 2.5);
+  }
+
+  dropEmitter(key) {
+    const e = this.emitters.get(key);
+    if (e) this.stopClumps(e);
+    this.emitters.delete(key);
+  }
+
+  // Set `key`'s fire (see burn) going for `secs` from now, even if it is not
+  // burning on its own: a tank that has just been hit.
+  ignite(key, secs) {
+    this.heat.set(key, Math.max(this.heat.get(key) ?? 0, this.time + secs));
+  }
+
+  // Keep at most the quality's limit, dropping the ones nearest to going out
+  // (`room` leaves space for that many new ones).
+  trimEmitters(room = 0) {
+    const max = this.q.emitters - room;
+    if (this.emitters.size <= max) return;
+    const order = [...this.emitters].sort((a, b) => a[1].until - b[1].until);
+    for (const [k] of order.slice(0, this.emitters.size - max)) this.dropEmitter(k);
+  }
+
+  // How much fire is burning near (x, y, z), 0 to about 1.5: it sets how loud
+  // the crackle is. Distance is what thins it.
+  fireLevel(x, y, z) {
+    let sum = 0;
+    for (const e of this.emitters.values()) {
+      const left = clamp01((e.until - this.time) / e.fade);
+      if (left <= 0) continue;
+      const d = Math.hypot(e.x - x, e.y - y, e.z - z);
+      sum += left * (e.flame * this.flameHeat(e) + e.smoke * 0.4) * e.size ** 0.5 / (1 + (d / 45) ** 2);
+    }
+    return Math.min(1.5, sum);
+  }
+
+  // 1 while a fire's flames are at full strength, falling to 0 as they die down.
+  flameHeat(e) {
+    return e.flameFor > 0 ? Math.sqrt(clamp01(1 - (this.time - e.born) / e.flameFor)) : 1;
+  }
+
+  updateEmitters(dt) {
+    const q = this.q;
+    const slow = this.quality === 'light' ? 1.7 : 1;      // Light: fewer, bigger gaps
+    for (const [key, e] of this.emitters) {
+      const left = clamp01((e.until - this.time) / e.fade);
+      if (left <= 0) { this.dropEmitter(key); continue; }
+      let y = e.y;
+      if (e.ground) { const g = this.ground(e.x, e.z); if (g != null) y = g + 0.3; }
+      const heat = this.flameHeat(e);
+      if (e.flame > 0.04 && (heat > 0.02 || left > 0.02)) this.updateClumps(e, y, dt, left, heat);
+      else if (e.clumps) this.stopClumps(e);
+      const smoke = e.smoke * left;
+      if (smoke > 0.04 && (e.smokeT -= dt) <= 0) {
+        e.smokeT = rnd(0.7, 1.3) * 0.5 * slow / (0.25 + smoke);
+        if (this.live.fire < q.fireCap) this.plume(e, y, smoke);
+      }
+    }
+  }
+
+  // ---- flame clumps ----
+
+  stopClumps(e) {
+    if (!e.clumps) return;
+    for (const c of e.clumps) {
+      for (const sp of [c.glow, c.body, c.tongue]) { this.scene.remove(sp); this.freeSprites.push(sp); }
+    }
+    this.clumpCount -= e.clumps.length;
+    e.clumps = null;
+  }
+
+  // One clump of fire: a warm glow on the ground, a body of red-orange wisps
+  // and a yellow-white tongue in it. Each has its own pace and frame so they
+  // never move together; the frames are the Kenney wisps and tongues, swapped
+  // like the pages of a flipbook.
+  newClump(e, index) {
+    const a = rnd(0, 6.283), r = Math.sqrt(Math.random()) * e.spread;
+    return {
+      ox: Math.cos(a) * r, oz: Math.sin(a) * r,
+      size: index === 0 ? rnd(0.95, 1.3) : rnd(0.5, 1.0),           // the first is the big one
+      t: rnd(0, 20), ph: rnd(0, 6.283), flip: Math.random() < 0.5 ? -1 : 1,
+      bRate: rnd(6, 11), tRate: rnd(8, 14), bi: Math.floor(Math.random() * 4), ti: Math.floor(Math.random() * 2),
+      bT: 0, tT: 0, wispT: rnd(0.2, 0.9),
+      glow: this.sprite(this.glowTex, '#ff6a1a', true),
+      body: this.sprite(this.pick('fire'), '#ffc080', true),
+      tongue: this.sprite(this.pick('flame'), '#ffd27a', true),
+    };
+  }
+
+  updateClumps(e, y, dt, left, heat) {
+    const q = this.q;
+    const power = e.flame * left * heat;                 // 0..~1 how hot the flames are
+    if (!e.clumps) e.clumps = [];
+    // A hotter fire, a bigger one, has more clumps; they are added once and
+    // go out one by one (the last made first) as the fire dies down.
+    const want = Math.min(q.clumps, Math.max(1, Math.round(1 + e.size * 1.2 * (0.4 + e.flame * 1.6))));
+    while (e.clumps.length > q.clumps) {
+      const c = e.clumps.pop();
+      for (const sp of [c.glow, c.body, c.tongue]) { this.scene.remove(sp); this.freeSprites.push(sp); }
+      this.clumpCount--;
+    }
+    while (e.clumps.length < want && this.clumpCount < q.clumpCap && heat > 0.5) {
+      e.clumps.push(this.newClump(e, e.clumps.length));
+      this.clumpCount++;
+    }
+    // Which way the wind leans the flames on screen.
+    let lean = 0;
+    if (this.camera) {
+      const m = this.camera.matrixWorld.elements;
+      lean = -Math.max(-0.4, Math.min(0.4, (this.wind[0] * m[0] + this.wind[1] * m[2]) * 0.035));
+    }
+    const slow = this.quality === 'light' ? 1.5 : 1;
+    for (let i = 0; i < e.clumps.length; i++) {
+      const c = e.clumps[i];
+      c.t += dt;
+      const px = e.x + c.ox, pz = e.z + c.oz;
+      const gy = e.ground ? (this.ground(px, pz) ?? y) + 0.1 : y;
+      // How alive this clump is: later ones go out first.
+      const s = clamp01(power * 2 - i * 0.14);
+      // Embers: after the flames the ground keeps glowing a while.
+      const ember = (1 - heat) * left * Math.min(1, e.flame * 2.2);
+      const flick = 1 + 0.16 * Math.sin(c.t * c.bRate * 0.9 + c.ph) + 0.1 * Math.sin(c.t * 21 + c.ph * 2.3);
+      const br = 0.82 + 0.18 * Math.sin(c.t * 13 + c.ph * 1.7);
+      const H = 1.9 * e.size * c.size * (0.3 + 0.7 * s) * flick;      // flame height, metres
+      const W = H * 0.62;
+
+      const g = c.glow;
+      const glowK = 0.38 + 0.5 * (1 - s);
+      fireColor(g.material.color, glowK);
+      g.position.set(px, gy + 0.2, pz);
+      g.scale.setScalar(Math.max(0.5, e.size * c.size * 3.0) * (0.85 + 0.15 * flick));
+      g.material.opacity = (0.12 + 0.4 * s) * (0.8 + 0.2 * br) * Math.max(left, 0.0) + ember * 0.3 * br;
+
+      const on = s > 0.03;
+      c.body.visible = c.tongue.visible = on;
+      if (!on) continue;
+      if ((c.bT -= dt) <= 0) {
+        c.bT = (1 / c.bRate) * slow;
+        c.bi = (c.bi + 1 + Math.floor(Math.random() * 2)) % 4;
+        c.body.material.map = this.atlasReady ? this.atlas.fire[c.bi] : this.glowTex;
+        c.flip = Math.random() < 0.3 ? -c.flip : c.flip;
+      }
+      if ((c.tT -= dt) <= 0) {
+        c.tT = (1 / c.tRate) * slow;
+        c.ti = 1 - c.ti;
+        c.tongue.material.map = this.atlasReady ? this.atlas.flame[c.ti] : this.glowTex;
+      }
+      const tilt = lean + 0.09 * Math.sin(c.t * 7 + c.ph);
+      const b = c.body;
+      b.center.set(0.5, 0.3);
+      b.position.set(px, gy + 0.25, pz);
+      b.scale.set(W * 1.5 * c.flip, H * 1.25, 1);
+      b.material.rotation = tilt;
+      fireColor(b.material.color, 0.12 + 0.55 * (1 - s));
+      b.material.opacity = Math.min(1, s * 1.8) * br * 0.85;
+
+      const t = c.tongue;
+      t.center.set(0.5, 0.28);
+      t.position.set(px, gy, pz);
+      t.scale.set(W * 1.3 * c.flip * (1 + 0.1 * Math.sin(c.t * 17 + c.ph)), H * 1.5, 1);
+      t.material.rotation = tilt * 1.2 + 0.05 * Math.sin(c.t * 11 + c.ph);
+      fireColor(t.material.color, 0.06 + 0.45 * (1 - s));
+      t.material.opacity = Math.min(1, s * 1.6) * (0.75 + 0.25 * br);
+
+      // A thin wisp of smoke from the tip while the flames are lively.
+      if (s > 0.25 && (c.wispT -= dt) <= 0) {
+        c.wispT = rnd(0.5, 1.1) * slow / (0.4 + s);
+        if (this.live.fire < q.fireCap) this.wisp(px + this.wind[0] * 0.25 + lean * -H * 0.5, gy + H * 0.95, pz + this.wind[1] * 0.25, 0.7 + 0.4 * e.size * c.size, s);
+      }
+    }
+  }
+
+  // A small puff of smoke that peels off a flame's tip, climbs and fades.
+  wisp(x, y, z, size, s) {
+    const sm = this.sprite(this.pick('smokeDark'), '#cfc7bf');
+    sm.position.set(x, y, z);
+    sm.material.rotation = rnd(0, 6.3);
+    const rise = rnd(1.6, 2.6), max = rnd(1.6, 2.6);
+    this.add({ life: 0, max, obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
+      const k = t / it.max;
+      sm.position.y += rise * (1 - 0.5 * k) * dt;
+      sm.position.x += this.wind[0] * 1.6 * (0.3 + k) * dt;
+      sm.position.z += this.wind[1] * 1.6 * (0.3 + k) * dt;
+      sm.scale.setScalar(size * (0.5 + 1.6 * k));
+      sm.material.opacity = Math.min(1, t * 4) * 0.3 * s * (1 - k) ** 1.2;
+    } }, 'fire');
+  }
+
+  // A thin wisp of smoke that climbs, leans with the wind and fades.
+  plume(e, y, power) {
+    const dark = Math.random() < 0.7;
+    const sm = this.sprite(this.pick(dark ? 'smokeDark' : 'smokeLight'), dark ? '#e6dfd8' : '#8f8982');
+    const a = rnd(0, 6.28), r = Math.random() * e.spread * 0.6;
+    sm.position.set(e.x + Math.cos(a) * r, y + 0.9 * e.size, e.z + Math.sin(a) * r);
+    sm.material.rotation = rnd(0, 6.3);
+    const s = e.size * rnd(1.3, 2.0);
+    const rise = rnd(2, 3.2);
+    const peak = (dark ? 0.5 : 0.38) * (0.5 + power * 0.5);
+    this.add({ life: 0, max: rnd(2.6, 4.2), obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
+      const k = t / it.max;
+      sm.position.y += rise * (1 - 0.5 * k) * dt;
+      sm.position.x += this.wind[0] * 1.8 * (0.3 + k) * dt;
+      sm.position.z += this.wind[1] * 1.8 * (0.3 + k) * dt;
+      sm.scale.setScalar(s * (0.7 + 2.2 * k));
+      sm.material.opacity = Math.min(1, t * 3) * peak * (1 - k) ** 1.2;
+    } }, 'fire');
+  }
+
+  // ---- shell trails ----
+
+  // One puff of smoke left behind a shell in flight; it hangs, grows and fades
+  // in about a second. Called by ShellVisual as the shell moves.
+  trail(pos, color, scale = 1) {
+    if (this.live.trail >= this.q.trailCap) return;
+    const sm = this.sprite(this.pick('smokeLight'), color);
+    sm.position.set(pos[0], pos[1], pos[2]);
+    sm.material.rotation = rnd(0, 6.3);
+    const s = rnd(1.1, 1.6) * scale;
+    const max = rnd(1.0, 1.5);
+    const dx = rnd(-0.6, 0.6), dy = rnd(0.2, 0.9), dz = rnd(-0.6, 0.6);
+    this.add({ life: 0, max, obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
+      const k = t / it.max;
+      sm.position.x += (dx + this.wind[0] * 0.8) * dt; sm.position.y += dy * dt; sm.position.z += (dz + this.wind[1] * 0.8) * dt;
+      sm.scale.setScalar(s * (0.6 + 1.6 * k));
+      sm.material.opacity = Math.min(1, t * 10) * 0.4 * (1 - k) ** 1.5;
+    } }, 'trail');
   }
 
   // Bits of a building thrown about as it breaks: a short, low spray.
@@ -252,6 +729,7 @@ export class Effects {
     this.puff(pos, { color: '#8d8982', size: 2.2, life: 1.1, rise: 0.6, opacity: 0.4 });
   }
 
+  // A cannon firing: a bright flash and a drift of gun smoke.
   muzzleFlash(pos) {
     const glow = this.sprite(this.glowTex, '#ffffff', true);
     glow.position.set(...pos);
@@ -261,9 +739,32 @@ export class Effects {
       glow.scale.setScalar(8 * (1 - t / it.max) + 2);
       glow.material.opacity = 1 - t / it.max;
     } });
+    const hot = this.sprite(this.pick('flash'), '#ffe2a0', true);
+    hot.position.set(...pos);
+    hot.material.rotation = rnd(0, 6.3);
+    this.items.push({ life: 0, max: 0.14, obj: hot, pool: this.freeSprites, update: (it, t) => {
+      const k = t / it.max;
+      hot.scale.setScalar(3 + 4 * Math.sqrt(k));
+      hot.material.opacity = (1 - k) ** 1.5;
+    } });
+    const n = this.quality === 'light' ? 1 : 3;
+    for (let i = 0; i < n; i++) {
+      const sm = this.sprite(this.pick('smokeLight'), '#aaa39b');
+      sm.position.set(pos[0], pos[1], pos[2]);
+      sm.material.rotation = rnd(0, 6.3);
+      const dx = rnd(-1.2, 1.2), dy = rnd(0.4, 1.4), dz = rnd(-1.2, 1.2), s = rnd(1.6, 2.6);
+      this.items.push({ life: -i * 0.05, max: rnd(1.4, 2.2), obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
+        if (t < 0) return;
+        const k = t / it.max;
+        sm.position.x += (dx + this.wind[0] * 1.2) * dt; sm.position.y += dy * dt; sm.position.z += (dz + this.wind[1] * 1.2) * dt;
+        sm.scale.setScalar(s * (0.5 + 1.8 * k));
+        sm.material.opacity = Math.min(1, t * 8) * 0.34 * (1 - k) ** 1.4;
+      } });
+    }
   }
 
   update(dt) {
+    this.time += dt;
     for (const f of this.flashes) {
       if (f.light.intensity <= 0) continue;
       f.life += dt;
@@ -280,6 +781,8 @@ export class Effects {
     }
     this.items.length = w;
     this.updateDebris(dt);
+    this.updateEmbers(dt);
+    this.updateEmitters(dt);
   }
 
   updateDebris(dt) {
@@ -319,6 +822,7 @@ export class Effects {
   }
 
   release(it) {
+    if (it.cap) this.live[it.cap]--;
     this.scene.remove(it.obj);
     if (it.pool) it.pool.push(it.obj);
     else if (it.obj.material && !it.sharedMat) it.obj.material.dispose?.();
@@ -330,6 +834,11 @@ export class Effects {
     this.chunks.length = 0;
     this.debris.count = 0;
     this.debris.visible = false;
+    this.ember.n = 0;
+    this.embers.visible = false;
+    for (const e of this.emitters.values()) this.stopClumps(e);
+    this.emitters.clear();
+    this.heat.clear();
     for (const f of this.flashes) f.light.intensity = 0;
   }
 }
@@ -381,6 +890,9 @@ export class ShellVisual {
       this.mesh.visible = false;      // until it knows which way it is pointing
     }
     this.last = null;
+    this.trailAt = null;          // where the last smoke puff was left
+    this.puffColor = new THREE.Color(color).lerp(new THREE.Color('#d9d4ce'), 0.7);
+    this.smokes = !ball && !probe;
     this.max = 400;
     this.points = new Float32Array(this.max * 3);
     this.count = 0;
@@ -414,6 +926,14 @@ export class ShellVisual {
     }
     this.points.set(pos, this.count * 3);
     this.count++;
+    // A short trail of smoke behind a shell, one puff every few metres.
+    if (this.smokes && TRAIL_FX) {
+      const t = this.trailAt;
+      if (!t || Math.hypot(pos[0] - t[0], pos[1] - t[1], pos[2] - t[2]) >= TRAIL_FX.q.gap) {
+        this.trailAt = [pos[0], pos[1], pos[2]];
+        TRAIL_FX.trail(pos, this.puffColor);
+      }
+    }
     this.line.geometry.setDrawRange(0, this.count);
     this.line.geometry.attributes.position.needsUpdate = true;
   }
