@@ -17,6 +17,7 @@ import { TankMesh } from './render/tankMesh.js';
 import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual, QUALITY_KEY } from './render/effects.js';
 import { Sky } from './render/sky.js';
+import { Rain } from './render/rain.js';
 import { Moons } from './render/moons.js';
 import { GravityLines } from './render/gravityLines.js';
 import { AimArc, Gunner } from './gunner.js';
@@ -52,6 +53,7 @@ $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const sky = new Sky(scene);   // sun, sky light, fog, clouds
+const rain = new Rain(scene);  // streaks, a grey sky and a hiss in a Rain round
 const moons = new Moons(scene);   // the floating isles' moons
 const gravityLines = new GravityLines(scene);   // flux lines while a well pulls a shell
 if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
@@ -238,6 +240,7 @@ function disposeMatch() {
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
+  rain.clear();
   lastLand.clear();
   aimArc.hide();
   dials.reset();
@@ -1615,7 +1618,7 @@ function soundScape(dt) {
     }
   }
   sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep,
-    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z) });
+    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount });
 }
 
 // ---------------------------------------------------------------- HUD
@@ -1928,6 +1931,7 @@ function customOptions() {
     fog: $('opt-fog').value === '1',
     ...builder.lists(),
     lab: testParams.lab || null,
+    modifier: testParams.modifier || null,
   };
 }
 
@@ -1937,7 +1941,7 @@ $('play').onclick = () => {
   phoneFullscreen(touch);
   if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
-  startMatch(defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab));
+  startMatch({ ...defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab), modifier: testParams.modifier || null });
 };
 
 $('start').onclick = () => {
@@ -2541,6 +2545,11 @@ function tick(dt, draw = true) {
     camGoal = _menuGoal.set(Math.cos(t) * 600, 300, Math.sin(t) * 600);
   }
   day = dayLock ?? day + Math.max(-dt * 0.5, Math.min(dt * 0.012, dayGoal - day));
+  // Rain while a Rain round is being played; it stops when the round ends.
+  rain.update(dt, camera, { on: !!(game?.drag && !['roundOver', 'matchOver', 'shop'].includes(game.phase)),
+    wind: game ? game.wind : [0, 0], light: effects.quality === 'light', groundAt: game && !game.terrain.under ? (x, z) => game.terrain.heightAt(x, z) : null });
+  sky.setWeather(rain.amount);
+  effects.damp = rain.amount;
   sky.setDay(day);
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   moons.update(performance.now() / 1000);

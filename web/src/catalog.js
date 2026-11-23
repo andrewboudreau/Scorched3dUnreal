@@ -334,6 +334,7 @@ function perkNeeds(p) {
   if (p.unlock) bits.push(...mods.map((m) => `owns no ${nameOf(MODS, m)}`));
   if (p.levelUp) bits.push(...mods.map((m) => `owns ${nameOf(MODS, m)}, below its top level (${MODS.find((d) => d.id === m)?.maxLevel ?? '?'})`));
   if (p.needsMod) bits.push('owns at least one mod');
+  if (p.dragScale) bits.push('the match can roll a drag modifier (Rain)');
   if (mods.length) bits.push(`at most ${MOD_DRAFT.cap} mod-level perks a match`);
   if (p.stack > 1) bits.push(`up to ${p.stack} copies`);
   return bits;

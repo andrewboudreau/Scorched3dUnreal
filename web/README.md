@@ -37,6 +37,7 @@ page loads and override both Random and what Custom match remembers.
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
 | `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
+| `modifier` | a round modifier id: `rain`, `lowgrav`, `gale`, `calm`, `soft`, `goldrush`, `fulltanks`, `clear` | Every round is that modifier. |
 
 An online room rewrites the address to `?room=`, so set test params on the
 host's page before creating the room. The host's choices travel to everyone.
@@ -50,7 +51,7 @@ packs** (or P) then opens a review panel (`src/review.js`):
 
 - **Sounds**: play any of them, or put one in for a game event (cannon, small,
   medium, big and far blasts, impacts, tank hits, wreck parts, jet, teleport,
-  shell whoosh, UI click, debris patter, ground thump, fire crackle). **Use pack in game** does all of them by name, so the
+  shell whoosh, UI click, debris patter, ground thump, fire crackle, and a rain loop for Rain rounds). **Use pack in game** does all of them by name, so the
   next shot sounds like the pack; **layer** plays the synth underneath, and the
   Test row fires each event on the spot.
 - **Skies**: an HDRI replaces the sky and its light, and the game's sun (and its
@@ -455,6 +456,7 @@ second column beside the first. On a phone the players box sits top right.
   | Field Repairs | repair 6 hit points at the start of each of your turns (each volley) |
   | Shock Mounts | no damage from falling into craters |
   | Heavy Rounds | wind pushes your shots 35% less |
+  | Streamlined Shells | rain drags your shells half as much (only offered when the match can roll Rain) |
   | Shrapnel | plain Shells throw two bomblets onward from where they land |
   | Tracer Rounds | see the first 45 m of your shot while you aim |
   | Orbital Mechanic | gain a Gravity Orbiter at level 1 (only offered if you have none) |
@@ -478,9 +480,14 @@ second column beside the first. On a phone the players box sits top right.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (much stronger wind), Dead calm, Low gravity,
-  Soft ground (craters a third bigger), Gold rush (double pay) and Full tanks
-  (double fuel). The same one never comes up twice in a row. CPU tanks aim
-  with the round's gravity and wind.
+  Rain (air drag on every shell: a power 60 shot at 45 degrees lands about 16%
+  short, long lobs lose more and flat shots less, so add power and aim
+  flatter), Soft ground (craters a third bigger), Gold rush (double pay) and
+  Full tanks (double fuel). The same one never comes up twice in a row. CPU
+  tanks, the aim arc and the Survey Satellite all fly with the round's
+  gravity, wind and drag. Rain falls around the camera (fewer drops on Light),
+  greys the sky and the fog, puts crater fires out sooner and hisses softly; a
+  pack sound picked for the Rain event in the pack review replaces the hiss.
 - **Daylight and life.** The sun moves from late morning to a golden late
   afternoon over the match (never night). Clouds drift with the wind and dim
   the ground beneath them, small flocks circle and scatter from blasts and
@@ -506,7 +513,8 @@ second column beside the first. On a phone the players box sits top right.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
-  clouds (`sky.js`, with the space sky of the floating isles), the isles' moons
+  clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round),
+  the falling rain (`rain.js`), the isles' moons
   (`moons.js`), the flux lines that show a moon or an orbiter pulling a shell
   (`gravityLines.js`, driven by the pure `core/gravityPull.js`), the flocks
   (`birds.js`), the isles' passing craft (`craft.js`), the Survey Satellite's

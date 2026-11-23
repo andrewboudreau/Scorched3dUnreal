@@ -6,9 +6,11 @@ import { simulateShot, stepProjectile, makeProjectile, launchVelocity, groundCon
 import { solveShot } from '../src/core/ai.js';
 import { makeRng } from '../src/core/rng.js';
 import { Game } from '../src/core/game.js';
-import { MODIFIER_BY_ID, PERK_BY_ID, RAIN_DRAG } from '../src/core/perks.js';
+import { MODIFIERS, MODIFIER_BY_ID, PERKS, PERK_BY_ID, RAIN_DRAG } from '../src/core/perks.js';
 import { muzzleOrigin } from '../src/core/tank.js';
 import { surveyConditions, solveSite, SURVEY } from '../src/core/survey.js';
+import { GROUP_BY_ID, parseTestParams } from '../src/builder.js';
+import { modifierRows, perkRows } from '../src/guide.js';
 
 function flatField(h = 0) {
   const t = new Heightfield({ size: 800, resolution: 200 });
@@ -158,4 +160,25 @@ test('Streamlined Shells halve the drag, and only come up when the match can rol
   assert.ok(!dry.perkFits(dry.players[1], PERK_BY_ID.streamlined), 'no rain, no streamlining');
   const off = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 5, resolution: 64, modifiers: ['rain'], perks: ['hull'] });
   assert.ok(!off.perkFits(off.players[1], PERK_BY_ID.streamlined), 'the builder turned it off');
+});
+
+test('Rain shows up in the match builder and the guide on its own', () => {
+  assert.ok(GROUP_BY_ID.modifiers.items.some((it) => it.id === 'rain' && /add power/.test(it.desc)));
+  assert.ok(GROUP_BY_ID.perks.items.some((it) => it.id === 'streamlined'));
+  assert.ok(modifierRows(MODIFIERS).some((r) => r.name === 'Rain' && /aim flatter/.test(r.text)));
+  assert.ok(perkRows(PERKS).some((r) => r.name === 'Streamlined Shells'));
+});
+
+test('?modifier=rain makes every round a Rain round', () => {
+  assert.deepEqual(parseTestParams('?modifier=Rain'), { modifier: 'rain' });
+  assert.deepEqual(parseTestParams('?modifier=hail'), {}, 'unknown ids are ignored');
+  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 5, resolution: 64, modifier: 'rain' });
+  g.start();
+  assert.equal(g.modifier.id, 'rain');
+  g.endRound();
+  g.startRound();
+  assert.equal(g.modifier.id, 'rain', 'and the next one');
+  assert.equal(g.drag, RAIN_DRAG);
+  const bogus = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 5, resolution: 64, modifier: 'hail' });
+  assert.equal(bogus.cfg.modifier, null);
 });

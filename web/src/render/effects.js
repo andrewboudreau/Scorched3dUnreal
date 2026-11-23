@@ -115,6 +115,7 @@ export class Effects {
     this.items = [];
     this.time = 0;
     this.wind = [0, 0];                 // main.js keeps this at the game's wind
+    this.damp = 0;                      // 0..1, rain (render/rain.js amount): craters smoulder shorter
     this.setQuality(readQuality());
     this.live = { fire: 0, trail: 0 };  // sprites alive per capped kind
     this.emitters = new Map();          // things that keep burning
@@ -390,9 +391,10 @@ export class Effects {
 
     // The crater keeps smouldering after the blast.
     if (low && radius >= 5) {
+      const wet = 1 - 0.55 * this.damp;   // rain puts them out sooner
       this.burn(`crater${this.craters++ % 64}`, x, (gy ?? y) + 0.3, z, {
-        flame: Math.min(0.85, 0.2 + radius * 0.03), flameFor: 4 + radius * 0.4,
-        smoke: 0.6, ttl: Math.min(18, 6 + radius * 0.6), size: Math.min(2.4, 0.8 + radius * 0.07),
+        flame: Math.min(0.85, 0.2 + radius * 0.03) * (1 - 0.3 * this.damp), flameFor: (4 + radius * 0.4) * wet,
+        smoke: 0.6, ttl: Math.min(18, 6 + radius * 0.6) * wet, size: Math.min(2.4, 0.8 + radius * 0.07),
         spread: Math.max(1.5, radius * 0.3), ground: true,
       });
     }

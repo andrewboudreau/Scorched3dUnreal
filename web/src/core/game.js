@@ -95,6 +95,8 @@ export class Game {
     // normalizeModLab): who has the Survey Satellite and its labels, and who has
     // each other mod ('perk', the default: from the perk draft; 'shop'; 'all' at a level; or 'off').
     lab = null,
+    // A testing aid (?modifier=rain): every round is this modifier, rolled or not.
+    modifier = null,
   }) {
     const known = (list, all) => (Array.isArray(list) ? list.filter((id) => all.some((x) => x.id === id)) : null);
     const noTwists = twists === false;
@@ -104,6 +106,7 @@ export class Game {
       perks: noTwists ? [] : known(perks, PERKS),
       modifiers: noTwists ? [] : known(modifiers, MODIFIERS),
       lab: { ...normalizeLab(lab), ...normalizeModLab(lab) },
+      modifier: MODIFIER_BY_ID[modifier] ? modifier : null,
     };
     this.cfg.twists = this.draftOn || MODIFIERS.some((m) => this.modifierOn(m.id));   // kept for anything that still reads it
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
@@ -217,7 +220,8 @@ export class Game {
   startRound() {
     this.round++;
     const t = this.terrain;
-    const mod = this.modifier = pickModifier(this.rogue, this.modifier.id, (m) => this.modifierFits(m));
+    const mod = this.modifier = this.cfg.modifier ? MODIFIER_BY_ID[this.cfg.modifier]
+      : pickModifier(this.rogue, this.modifier.id, (m) => this.modifierFits(m));
     this.gravity = GRAVITY * (mod.gravity || 1);
     this.drag = mod.drag || 0;
     this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
