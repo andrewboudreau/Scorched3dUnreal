@@ -8,7 +8,8 @@ takes over. Backlog and work in progress are GitHub issues labelled
 ## Where it's going
 
 Today Craterfall is a **playable sandbox**: a place to try weapons, mods and
-rules quickly, with Lab options so the host can bend the rules for a test.
+rules quickly, with a match builder so the host can tick which weapons, perks
+and round modifiers are in play, and query params to pin a test down.
 
 The long-term goal is **roguelike player-versus-player battles**: short runs
 where you draft upgrades between rounds and fight other people. Two game modes:
@@ -57,7 +58,7 @@ sign in.
 | Kind | What it is | Spent how | Examples |
 | --- | --- | --- | --- |
 | **Weapons** | Ammo, fired one shot at a time | Each shot uses a round | Shell, Flak, Breacher, Guided Missile, Roller |
-| **Mods** | Equipment deployed onto the field or mounted on the tank. It has health and/or charges or a lifetime, can be shot down, and wears out. Gained and levelled through perks (the host's Lab can sell them in the armory, hand them to everyone, or turn them off) | Deployed; then lost, destroyed or expired, and ready again on the owner's next turn | Survey Satellite, Gravity Orbiter, Missile Defense, drones |
+| **Mods** | Equipment deployed onto the field or mounted on the tank. It has health and/or charges or a lifetime, can be shot down, and wears out. Gained and levelled through perks (the host can untick a mod's cards to turn it off; `?sat=` / `?orbiter=` hand everyone one for testing) | Deployed; then lost, destroyed or expired, and ready again on the owner's next turn | Survey Satellite, Gravity Orbiter, Missile Defense, drones |
 | **Perks** | Roguelike advancements drafted between rounds. They change your numbers, unlock mods or level them up | Kept for the match | Heavy Rounds, Double Strike, Orbital Mechanic, Tighter Orbit |
 | **Abilities** (idea) | Active powers on a cooldown, usually granted by a perk or a mod | Cooldown in turns | Signal jam pulse, emergency hop |
 
@@ -66,8 +67,9 @@ Mods are tracked in #10.
 **Mods come from perks.** The draft offers an unlock card for a mod you do
 not have, then level-up cards for one you do, up to its top level. A draft
 holds at most one mod card, and a tank takes at most four mod levels from
-perks in a match. By default the armory does not sell mods; the host's Lab
-can put them there, give everyone one at a set level, or turn them off.
+perks in a match. The armory does not sell mods. The host can untick a mod's
+cards in the match builder to turn it off; `?sat=` and `?orbiter=` give
+everyone one at a set level for testing.
 
 **Deploying a mod uses your turn**: you don't fire that turn. In return the
 mod persists. It carries over into the next round and stays until it is

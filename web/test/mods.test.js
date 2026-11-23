@@ -15,7 +15,7 @@ import { PERK_BY_ID, MOD_DRAFT, isModPerk, perkCount } from '../src/core/perks.j
 // Survey Satellite.
 
 const mk = (opts = {}) => {
-  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 5, resolution: 64, twists: false, maxTurnsPerRound: 30, ...opts });
+  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 3, seed: 5, resolution: 64, modifiers: [], maxTurnsPerRound: 30, ...opts });
   g.start();
   return g;
 };
@@ -296,7 +296,7 @@ test('mods: deploying takes the turn, and a mod wears out after its turns', () =
 });
 
 test('mods: a deployed mod survives into the next round, over its owner\'s new spot', () => {
-  const g = mk({ lab: { orbiter: 'all', orbiterLevel: 2, satellite: 'all', level: 2 } });
+  const g = mk({ twists: false, lab: { orbiter: 'all', orbiterLevel: 2, satellite: 'all', level: 2 } });
   const [a, b] = g.players;
   g.deployFor(a, 'orbiter');
   g.deployFor(a, 'satellite');

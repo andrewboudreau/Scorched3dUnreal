@@ -118,7 +118,7 @@
       <!-- Custom match: collapsed by default (the choice is remembered). In an online room it is the lobby, always open. -->
       <section id="custom" class="custom">
         <button id="custom-toggle" class="custom-head" aria-expanded="false" aria-controls="custom-body">
-          <span>Custom match</span><small>tanks, rounds, wind, terrain and more</small><i class="chev" aria-hidden="true"></i>
+          <span>Custom match</span><small>tanks, rounds, wind, terrain, weapons, perks</small><i class="chev" aria-hidden="true"></i>
         </button>
         <div id="custom-body">
           <div id="setup-players"></div>
@@ -128,17 +128,12 @@
           </div>
       <div class="options">
         <label>Rounds <select id="opt-rounds"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select></label>
-        <label>Wind <select id="opt-wind"><option value="0">Calm</option><option value="0.8">Breezy</option><option value="1.5" selected>Gusty</option><option value="2.5">Gale</option></select></label>
-        <label>Terrain <select id="opt-hills"><option value="20">Rolling</option><option value="45" selected>Hilly</option><option value="80">Mountains</option><option value="isles">Floating isles</option></select></label>
+        <label>Wind <select id="opt-wind"><option value="random" selected>Random</option><option value="0">Calm</option><option value="0.8">Breezy</option><option value="1.5">Gusty</option><option value="2.5">Gale</option></select></label>
+        <label>Terrain <select id="opt-hills"><option value="random" selected>Random</option><option value="20">Rolling</option><option value="45">Hilly</option><option value="80">Mountains</option><option value="isles">Floating isles</option></select></label>
         <label>Firing <select id="opt-firing"><option value="volley" selected>Together (volley)</option><option value="turns">Take turns</option></select></label>
-        <label>Twists <select id="opt-twists"><option value="1" selected>Perks and modifiers</option><option value="0">Off</option></select></label>
         <label title="You only see what is near your tank, or what a Scout Missile lights up">Fog of war <select id="opt-fog"><option value="0" selected>Off</option><option value="1">On</option></select></label>
-        <fieldset class="lab" title="Testing lab: house rules for this match">
-          <legend>Lab</legend>
-          <label title="A satellite that projects a grid of cells, some labelled with the turret and power that land there. Perks: won and levelled in the draft between rounds">Satellite <select id="opt-sat"><option value="perk" selected>Perks</option><option value="shop">In the armory</option><option value="all1">Everyone · L1 (no wind)</option><option value="all2">Everyone · L2 (wind)</option><option value="all3">Everyone · L3 (more labels)</option><option value="off">Off</option></select></label>
-          <label title="A small gravity well that circles your tank and bends enemy shells. Deploying it takes a turn. Perks: won and levelled in the draft between rounds">Orbiter <select id="opt-orbiter"><option value="perk" selected>Perks</option><option value="shop">In the armory</option><option value="all1">Everyone · L1</option><option value="all2">Everyone · L2</option><option value="all3">Everyone · L3 (binary)</option><option value="off">Off</option></select></label>
-          <label title="How many of the satellite's cells carry a label">Sat labels <select id="opt-sat-labels"><option value="few">Few</option><option value="some" selected>Some</option><option value="many">Many</option></select></label>
-        </fieldset>
+        <!-- Weapons, Perks and Round modifiers: checkbox groups built by src/builder.js -->
+        <div id="opt-groups" class="opt-groups"></div>
       </div>
           <button id="start" class="primary">Start match</button>
         </div>

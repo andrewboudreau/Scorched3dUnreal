@@ -32,6 +32,7 @@ import { ModsUI, modShopCards } from './modsui.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
+import { MatchBuilder, matchConditions, conditionsLabel, parseTestParams } from './builder.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -343,9 +344,9 @@ function handleEvents() {
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
-        if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds}`, 1800);
+        if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)}`, 1800);
         else {
-          banner(`Round ${e.round}: ${game.modifier.name}`, game.modifier.desc, 3000);
+          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg)}` : game.modifier.desc, 3000);
           bannerHold = performance.now() + 2800;
         }
         break;
@@ -1909,18 +1910,23 @@ $('remove-player').onclick = () => {
   if (setupRows.length > 2) { setupRows.pop(); renderSetup(); }
 };
 
-// The Lab options (host only): who has the Survey Satellite, and how many of its cells are labelled.
-function labChoice() {
-  const v = $('opt-sat').value;
-  const o = $('opt-orbiter').value;
-  return { satellite: v.startsWith('all') ? 'all' : v, level: Number(v.slice(3)) || 1, labels: $('opt-sat-labels').value,
-    orbiter: o.startsWith('all') ? 'all' : o, orbiterLevel: Number(o.slice(3)) || 1 };
-}
+// Testing aids from the query string (builder.js parseTestParams): forced wind
+// and terrain, and the old Lab's mods for everyone. Read once at load: an
+// online room rewrites the address.
+const testParams = parseTestParams(location.search);
+const builder = new MatchBuilder($('opt-groups'));
 
-// The Terrain menu: how hilly the meadows are, or the floating isles.
-function terrainChoice() {
-  const v = $('opt-hills').value;
-  return v === 'isles' ? { hills: 45, world: 'isles' } : { hills: Number(v), world: 'meadow' };
+// The Custom match options as config (host only online). Random wind and
+// terrain are rolled here, once, so the config holds concrete values and every
+// screen builds the same world.
+function customOptions() {
+  return {
+    rounds: Number($('opt-rounds').value),
+    ...matchConditions({ wind: $('opt-wind').value, terrain: $('opt-hills').value }, testParams),
+    fog: $('opt-fog').value === '1',
+    ...builder.lists(),
+    lab: testParams.lab || null,
+  };
 }
 
 $('play').onclick = () => {
@@ -1929,7 +1935,7 @@ $('play').onclick = () => {
   phoneFullscreen(touch);
   if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
-  startMatch(defaultMatch(humanName()));
+  startMatch(defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab));
 };
 
 $('start').onclick = () => {
@@ -1939,14 +1945,7 @@ $('start').onclick = () => {
     // The host starts the room's match; everyone's screen starts it when the message comes round.
     if (!session.isHost || session.game) return;
     if (lobbySeats().length + lobbyCpus().length < 2) { $('net-note').textContent = 'Add a CPU tank, or wait for someone to join.'; return; }
-    session.start({
-      rounds: Number($('opt-rounds').value),
-      maxWind: Number($('opt-wind').value),
-      ...terrainChoice(),
-      twists: $('opt-twists').value === '1',
-      fog: $('opt-fog').value === '1',
-      lab: labChoice(),
-    }, lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
+    session.start(customOptions(), lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
     $('start').disabled = true;
     return;
   }
@@ -1954,13 +1953,8 @@ $('start').onclick = () => {
   $('setup').classList.add('hidden');
   startMatch({
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
-    rounds: Number($('opt-rounds').value),
-    maxWind: Number($('opt-wind').value),
-    ...terrainChoice(),
-    twists: $('opt-twists').value === '1',
+    ...customOptions(),
     firing: $('opt-firing').value,
-    fog: $('opt-fog').value === '1',
-    lab: labChoice(),
   });
 };
 
@@ -2012,7 +2006,7 @@ function showRoundResult(kind) {
     return;
   }
   $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
-  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.cfg.twists ? 'Continue to the perk draft' : 'Continue to the armory';
+  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.draftOn ? 'Continue to the perk draft' : 'Continue to the armory';
   $('ro-table').innerHTML = standingsTable([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
 }
@@ -2096,7 +2090,7 @@ function openShopFor(pid) {
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog)).map((it) => {
+    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog) && (!WEAPON_BY_ID[it.id] || game.weaponOn(it.id))).map((it) => {
       const isW = !!WEAPON_BY_ID[it.id];
       const info = ITEM_INFO[it.id];
       const have = isW ? p.inventory[it.id] || 0 : info.have(p);
@@ -2588,7 +2582,7 @@ scene.add(menuMesh.group, menuScenery.group);
 sky.fit(menuField.terrain.half);
 birds.reset(menuField.terrain, 5);
 
-wireLaunch({ rows: setupRows, render: renderSetup });   // the Custom section and the name field (launch.js)
+wireLaunch({ rows: setupRows, render: renderSetup, builder });   // the Custom section and the name field (launch.js)
 renderSetup();
 $('loading').classList.add('hidden');
 frame();

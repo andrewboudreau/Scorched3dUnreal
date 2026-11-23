@@ -21,6 +21,26 @@ To try online play locally, run `node tools/devserver.mjs` instead. It serves
 the game on the same port and adds the rooms API, so two browser tabs can play
 each other.
 
+### Testing query params
+
+Add these to the address to make a test repeatable. They are read once when the
+page loads and override both Random and what Custom match remembers.
+
+| Param | Values | What it does |
+| --- | --- | --- |
+| `mobile` | (none) | Forces the touch layout on a desktop. |
+| `packs` | (none) | Loads the redistributable resource packs for review (see below). |
+| `room` | a 4-letter code | Opens that online room's invite; this is what the invite link carries. |
+| `wind` | `calm`, `breezy`, `gusty`, `gale`, or a number 0 to 5 | Forces the match wind (Play and Custom). |
+| `terrain` | `rolling`, `hilly`, `mountains`, `isles` | Forces the terrain. |
+| `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
+| `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
+| `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
+| `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
+
+An online room rewrites the address to `?room=`, so set test params on the
+host's page before creating the room. The host's choices travel to everyone.
+
 ### Reviewing resource packs
 
 The dev server also mounts the asset library's resource packs, from
@@ -90,8 +110,8 @@ where packs are served.
 
 **Guide** (Settings > Guide, from the launch screen or mid-match) is a short in-game
 page in tabs: Basics, Controls (touch first, then keys), Weapons, Mods and perks
-(with the rock-paper-scissors) and Lab. `src/guide.js` builds the weapon, mod and
-perk lists from `core/weapons.js`, `mods.js` and `perks.js`, reading every field
+(with the rock-paper-scissors) and Match builder. `src/guide.js` builds the weapon, mod,
+perk and round modifier lists from `core/weapons.js`, `mods.js` and `perks.js`, reading every field
 defensively, so it follows the data and skips what it cannot describe. It is loaded
 the first time it opens (styles in `css/guide.css`). Keys typed in it never reach
 the game; Esc, the ✕ or a tap outside closes it. Its content builders are tested in
@@ -113,13 +133,38 @@ second column beside the first. On a phone the players box sits top right.
 - **The launch screen** (`src/launch.js`, `#setup`). It shows the title, one
   **Your name** field (`#net-name`; it names your tank and your online seat) and a
   big **Play**, which starts you against two Normal CPUs with the default
-  options. Below it is **Play online** (the room list, create and join), then a
-  collapsed **Custom match** holding the tank rows (add or remove, human or
-  CPU), rounds, wind, terrain, firing, twists, fog of war and the Lab. **Start
-  match** in there starts the configured match. Whether Custom was open, the
-  options you last chose and your CPU rows are kept in localStorage
-  (`craterfall.custom`), so the next visit opens as you left it; Play ignores
-  them and always uses the defaults. In an online room the Custom section is the
+  options (everything on, wind and terrain Random). Below it is **Play online**
+  (the room list, create and join), then a collapsed **Custom match**, the match
+  builder: the tank rows (add or remove, human or CPU), Rounds, Wind, Terrain,
+  Firing and Fog of war, then three checkbox groups, **Weapons**, **Perks** and
+  **Round modifiers** (`src/builder.js`). Each group is shut by default, its
+  summary saying "All" or "7 of 12"; open, it has an All box and a grid of
+  ticks with each name and its first line. **Start match** in there starts the
+  configured match. Whether Custom was open, the options you last chose, what
+  you unticked and your CPU rows are kept in localStorage (`craterfall.custom`,
+  version 3: it stores what is *off*, so anything new arrives ticked), so the
+  next visit opens as you left it; Play ignores them and always uses the
+  defaults.
+  - *Wind* and *Terrain* default to **Random**: one is picked when the match
+    starts (in `main.js`, never in the deterministic core) and the round banner
+    names it, e.g. "Round 1 of 3 · Hilly · Gusty wind". Random wind is Calm,
+    Breezy, Gusty or Gale (Breezy and Gusty twice as likely); Random terrain is
+    Rolling, Hilly, Mountains or, half as often as each of those, the Floating
+    isles. Online the host rolls and sends the concrete values in the match
+    config, so every screen builds the same world.
+  - *Weapons*: an unticked weapon is gone for the match: not in the armory, the
+    starting kit, a perk's hand-out (Quartermaster, the fog's free Scout) or the
+    CPUs' hands. The Shell is always on.
+  - *Perks*: an unticked perk is never offered, to humans or CPUs. Mods come
+    only from their cards, so unticking Orbital Mechanic or Sat Recon turns that
+    mod off, and its level-up cards never come up without it. With every perk
+    off there is no draft.
+  - *Round modifiers*: Clear skies is one of the ticks; with all off every round
+    is plain. With the wind on Calm, Gale and Dead calm sit out.
+  - The core takes these as allow-lists in its config (`weapons`, `perks`,
+    `modifiers`; null means all) and filters with its seeded rng, so online
+    screens agree. The old `twists: false` still works and means no perks and
+    no modifiers. In an online room the Custom section is the
   lobby: always open, with no Play. On a phone the screen fills the screen
   rather than floating as a card, and tapping Play or Start also goes full
   screen where the browser allows it (not iPhone Safari).
@@ -289,9 +334,9 @@ second column beside the first. On a phone the players box sits top right.
   Mechanic, Sat Recon) gives you one at level 1; once you have it, level-up
   cards (Tighter Orbit, Sharper Optics) raise it a level at a time to level 3.
   A draft holds at most one mod card, more often while you own no mod, and a
-  tank takes at most four mod levels from perks in a match. The host's Lab can
-  instead sell mods in the armory (a Mods section at its end, a level at a
-  time), hand everyone one, or turn them off. A mod you own is *ready*.
+  tank takes at most four mod levels from perks in a match. Unticking a mod's
+  cards under Custom match > Perks turns it off; `?sat=` and `?orbiter=` hand
+  everyone one for testing (see Testing query params). A mod you own is *ready*.
   Deploying it is your whole turn: on a phone, tap its button at the top of
   the Fire column (ORB / SAT) and tap again to confirm; on a desktop press B
   twice, or use the button in the player card. In a volley, deploying is the
@@ -305,11 +350,11 @@ second column beside the first. On a phone the players box sits top right.
   directly, blasts hurt any mod in reach, and **Flak** is the anti-air
   answer: it also bursts by an enemy mod and its burst hurts every enemy mod
   near it. Shooting one down pays 60. CPU tanks like the orbiter cards in the
-  draft (and buy one when the Lab puts mods in the armory). Each Normal or
+  draft. Each Normal or
   Hard CPU has its own way of timing the deploy for the match: some put it up
   at once, some fire a ranging shot first and deploy while their aim is still
   off, some wait until they are hurt.
-- **Gravity Orbiter** (mod; from perks, or 180, then 220, then 260 in an armory match; lasts 6, 7 or 8 turns; 30 to 50 hp). Small
+- **Gravity Orbiter** (mod; from perks; lasts 6, 7 or 8 turns; 30 to 50 hp). Small
   gravity wells circle your tank about 13 m out and 9 m up, and bend every
   enemy shell that passes near (your own shells fly through them). A shell that
   hits an orb is spent there and hurts it. Level 1 is one well, level 2 a
@@ -322,7 +367,7 @@ second column beside the first. On a phone the players box sits top right.
   more, the higher the orbiter's level: against a level 3 orbiter a Normal
   CPU lands about half as many hits as against a bare tank, a Hard one about
   two thirds. Easy CPUs fire as if the wells were not there.
-- **Survey Satellite** (mod; from perks, or 200, then 260, then 300 in an armory match). Deploy it and it goes
+- **Survey Satellite** (mod; from perks). Deploy it and it goes
   up 70 m over your tank, where it stays (a battery of 5, 6 or 7 turns, 20 to 30 hp) until
   shot down or spent; Flak or a direct hit brings it down. While it
   is up and you plan, it shines its beam down on the enemy nearest your
@@ -340,13 +385,12 @@ second column beside the first. On a phone the players box sits top right.
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
   only on their own aim. The CPU neither drafts nor buys it.
-- **Lab** (Custom match, host only; travels in the match config online).
-  *Satellite* and *Orbiter*: **Perks** (default: won and levelled in the
-  draft), **In the armory** (sold a level at a time, and the draft still
-  offers it), **Everyone · L1/L2/L3** (everyone has one ready at that level
-  from the start; the draft can level it up), or **Off**. A match config
-  saved with the old value `shop` is an armory match. *Sat labels*: few,
-  some or many.
+- **Mod rules in the config.** The old Lab menu is gone; the core still
+  reads `lab` in the match config (`satellite` / `orbiter`: `perk`, `shop`,
+  `all` or `off`, with a level, and the satellite's `labels`), so old configs
+  and tests keep working. The launch screen only ever sends `perk` (or `all`
+  from `?sat=` / `?orbiter=`), with labels `some` unless `?labels=` says
+  otherwise. An old saved Custom with the Lab Off unticks that mod's cards.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
   its silo and a farmhouse, sometimes a windmill), or a lone watchtower or
@@ -390,8 +434,8 @@ second column beside the first. On a phone the players box sits top right.
   same on every screen. CPU tanks (Normal and Hard) hop when stuck in a hole
   at least 4 m deep and out of fuel for a drive, in the direction that
   leaves it least in a hole.
-- **Perk draft.** With Twists on (the default, on the setup screen), after
-  every round each tank picks one of three random perks before it shops. They
+- **Perk draft.** After every round each tank picks one of three random perks
+  (from those ticked under Custom match > Perks; with none ticked there is no draft) before it shops. They
   last the whole match and stack; CPU tanks pick for themselves. In hotseat
   each human gets their own draft and armory in turn, with the hand-off named
   on the button. Owned perks show as tags on the player card and scoreboard.
@@ -429,7 +473,7 @@ second column beside the first. On a phone the players box sits top right.
   both shots travel in the one plan and a reload goes as an empty plan. CPU tanks
   that hold it double when they have the range on a target or can finish it, and
   sit out the reload. A reload does not carry into the next round.
-- **Round modifiers.** With Twists on, each round rolls one and announces it on
+- **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (much stronger wind), Dead calm, Low gravity,
   Soft ground (craters a third bigger), Gold rush (double pay) and Full tanks
@@ -482,7 +526,9 @@ second column beside the first. On a phone the players box sits top right.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
-  draft, modifiers, driving and fuel (`twists.test.js`), road routing (`paths.test.js`),
+  draft, modifiers, driving and fuel (`twists.test.js`), the match builder's
+  allow-lists, Random rolls and query params (`builder.test.js`), the launch
+  screen's saved state and its migrations (`launch.test.js`), road routing (`paths.test.js`),
   aim history and both firing modes (`volley.test.js`), jump jets, Teleport and Flak
   (`jets.test.js`), whole CPU-only matches, and
   online matches between several simulated screens with deliberate drift,

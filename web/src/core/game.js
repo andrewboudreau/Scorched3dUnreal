@@ -5,7 +5,7 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, spl
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField } from './ai.js';
 import { Scenery, standing } from './scenery.js';
-import { PERK_BY_ID, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT } from './perks.js';
+import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT } from './perks.js';
 import { normalizeLab } from './survey.js';
 import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
 
@@ -74,7 +74,18 @@ export class Game {
     hills = 45,
     world = 'meadow',   // 'meadow', or 'isles': floating isles in open sky, with moons that pull on shells
     maxTurnsPerRound = 40,
-    twists = true,      // perk drafts and round modifiers (core/perks.js)
+    // What the match uses (the Custom match checkboxes): each a list of the ids
+    // that are on, or null for all of them. A weapon that is off is never in
+    // an inventory, the armory or a perk's hand-out; the Shell (and the hidden
+    // fragments other shells break into) is always on. A perk that is off is
+    // never drafted; with every perk off there is no draft. A round modifier
+    // that is off is never rolled. Ids this build does not know are dropped.
+    weapons = null,
+    perks = null,
+    modifiers = null,
+    // The old switch for perks and round modifiers together (saved states and
+    // online messages from before the lists): false turns both lists off.
+    twists = true,
     firing = 'turns',   // 'turns', or 'volley': everyone plans, then all fire together
     fog = false,        // fog of war: see FOG
     // Online play (core/netplay.js): the ids of the tanks played on this
@@ -85,7 +96,16 @@ export class Game {
     // each other mod ('perk', the default: from the perk draft; 'shop'; 'all' at a level; or 'off').
     lab = null,
   }) {
-    this.cfg = { rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, twists, firing, local, fog, lab: { ...normalizeLab(lab), ...normalizeModLab(lab) } };
+    const known = (list, all) => (Array.isArray(list) ? list.filter((id) => all.some((x) => x.id === id)) : null);
+    const noTwists = twists === false;
+    this.cfg = {
+      rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, firing, local, fog,
+      weapons: known(weapons, WEAPONS),
+      perks: noTwists ? [] : known(perks, PERKS),
+      modifiers: noTwists ? [] : known(modifiers, MODIFIERS),
+      lab: { ...normalizeLab(lab), ...normalizeModLab(lab) },
+    };
+    this.cfg.twists = this.draftOn || MODIFIERS.some((m) => this.modifierOn(m.id));   // kept for anything that still reads it
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
     this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
@@ -103,7 +123,7 @@ export class Game {
       money: 0,
       score: 0,
       wins: 0,
-      inventory: { ...START_INVENTORY, ...(local ? { guided: 0 } : {}) },   // no steering online
+      inventory: this.startInventory(),
       jets: START_JETS,
       mods: {},          // equipment: id -> { bought, level, state, hp, turns, ... } (core/mods.js)
       status: [],        // status effects to come ({ kind, source, strength, turns }); none yet
@@ -158,6 +178,35 @@ export class Game {
   get volleyMode() { return this.cfg.firing === 'volley'; }
   alivePlayers() { return this.players.filter((p) => p.alive); }
 
+  // ---------- what this match uses (cfg.weapons, cfg.perks, cfg.modifiers) ----------
+
+  // The Shell (infinite) and the hidden fragments of other shells are always on.
+  weaponOn(id) {
+    const w = WEAPON_BY_ID[id];
+    if (!w) return false;
+    return !!(w.infinite || w.hidden) || !this.cfg.weapons || this.cfg.weapons.includes(id);
+  }
+  perkOn(id) { return !!PERK_BY_ID[id] && (!this.cfg.perks || this.cfg.perks.includes(id)); }
+  modifierOn(id) { return !!MODIFIER_BY_ID[id] && (!this.cfg.modifiers || this.cfg.modifiers.includes(id)); }
+  // Is there a perk draft between rounds at all?
+  get draftOn() { return PERKS.some((k) => this.perkOn(k.id)); }
+
+  // What every tank starts the match with, less any weapon that is off (and
+  // no Guided Missile online: no steering there).
+  startInventory() {
+    const inv = { ...START_INVENTORY, ...(this.cfg.local ? { guided: 0 } : {}) };
+    for (const id of Object.keys(inv)) if (!this.weaponOn(id)) inv[id] = 0;
+    return inv;
+  }
+
+  // A round modifier this match can roll: on in the list, and not one about
+  // the wind when the match has none (Calm): a Gale or Dead calm round would
+  // contradict the host's Wind or do nothing.
+  modifierFits(m) {
+    if (!this.modifierOn(m.id)) return false;
+    return !((m.wind || m.calm) && !(this.cfg.maxWind > 0));
+  }
+
   start() {
     this.startRound();
   }
@@ -167,7 +216,7 @@ export class Game {
   startRound() {
     this.round++;
     const t = this.terrain;
-    const mod = this.modifier = this.cfg.twists ? pickModifier(this.rogue, this.modifier.id) : MODIFIER_BY_ID.clear;
+    const mod = this.modifier = pickModifier(this.rogue, this.modifier.id, (m) => this.modifierFits(m));
     this.gravity = GRAVITY * (mod.gravity || 1);
     this.maxWind = mod.calm ? 0 : this.cfg.maxWind * (mod.wind || 1);
     const starts = this.placeTanks();
@@ -189,9 +238,9 @@ export class Game {
       p.pendingFuel = 0;
       p.hitsHere = 0;
       for (const id of p.perks) {
-        for (const [w, n] of Object.entries(PERK_BY_ID[id].roundAmmo || {})) p.inventory[w] = (p.inventory[w] || 0) + n;
+        for (const [w, n] of Object.entries(PERK_BY_ID[id].roundAmmo || {})) if (this.weaponOn(w)) p.inventory[w] = (p.inventory[w] || 0) + n;
       }
-      if (this.cfg.fog) p.inventory.scout = (p.inventory.scout || 0) + 1;   // a free scout each round
+      if (this.cfg.fog && this.weaponOn('scout')) p.inventory.scout = (p.inventory.scout || 0) + 1;   // a free scout each round
       p.alive = true;
       p.falling = false;
       p.vy = 0;
@@ -855,7 +904,7 @@ export class Game {
     for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
       const ownsMod = MODS.some((d) => this.modLevel(p, d.id) > 0);
-      const offer = this.cfg.twists ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k), ownsMod ? MOD_DRAFT.then : MOD_DRAFT.first) : [];
+      const offer = this.draftOn ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k), ownsMod ? MOD_DRAFT.then : MOD_DRAFT.first) : [];
       if (!offer.length) continue;
       if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue));
       else this.draft[p.id] = offer;
@@ -865,12 +914,16 @@ export class Game {
     if (!this.humans.length) this.closeShop();
   }
 
-  // Leave mod perks out of the draft when they could do nothing for `p`, or
-  // are not its turn yet: a mod the host's Lab turned off or one already at
-  // its top level; an unlock for a mod it owns, a level-up for one it does
-  // not; any mod level once it has taken MOD_DRAFT.cap of them this match; or
-  // (needsMod) anything for a tank that owns no mod at all.
+  // Leave perks out of the draft when the match has them off (cfg.perks), or
+  // when they could do nothing for `p`: hand-outs of weapons that are all off;
+  // and mod perks that could do nothing or are not its turn yet: a mod the
+  // host's Lab turned off or one already at its top level; an unlock for a mod
+  // it owns, a level-up for one it does not, or a level-up whose unlock card
+  // is off; any mod level once it has taken MOD_DRAFT.cap of them this match;
+  // or (needsMod) anything for a tank that owns no mod at all.
   perkFits(p, perk) {
+    if (!this.perkOn(perk.id)) return false;
+    if (perk.roundAmmo && !Object.keys(perk.roundAmmo).some((w) => this.weaponOn(w))) return false;
     if (perk.needsMod && !MODS.some((d) => this.modLevel(p, d.id) > 0)) return false;
     const ids = Object.keys(perk.mods || {});
     if (ids.length && (p.perks || []).filter((k) => PERK_BY_ID[k]?.mods).length >= MOD_DRAFT.cap) return false;
@@ -879,6 +932,7 @@ export class Game {
       const have = def ? this.modLevel(p, id) : 0;
       if (!def || modLab(this.cfg.lab, id).mode === 'off' || have >= def.maxLevel) return false;
       if ((perk.unlock && have > 0) || (perk.levelUp && have < 1)) return false;
+      if (perk.levelUp && !PERKS.some((k) => k.unlock && k.mods?.[id] && this.perkOn(k.id))) return false;
     }
     return true;
   }
@@ -903,6 +957,7 @@ export class Game {
   priceOf(p, id) {
     const it = WEAPON_BY_ID[id] || ITEMS.find((x) => x.id === id);
     if (!MOD_BY_ID[id] && (!it || !(it.price > 0))) return Infinity;
+    if (WEAPON_BY_ID[id] && !this.weaponOn(id)) return Infinity;   // off in this match: not for sale
     const base = MOD_BY_ID[id] ? modPrice(this.cfg.lab, p, id) : it.price;   // a mod is priced per level
     if (!Number.isFinite(base)) return Infinity;
     return Math.round((base * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;

@@ -133,9 +133,13 @@ export const MODIFIERS = [
 
 export const MODIFIER_BY_ID = Object.fromEntries(MODIFIERS.map((m) => [m.id, m]));
 
-// `last` is the previous round's modifier id, so a twist never repeats back to back.
-export function pickModifier(rng, last = null) {
-  const pool = MODIFIERS.filter((m) => m.id === 'clear' || m.id !== last);
+// `last` is the previous round's modifier id, so a twist never repeats back to
+// back. `allow(modifier)` can leave some out (the match's Round modifiers
+// list, game.modifierFits); with none left the round is Clear skies, and no
+// dice are rolled.
+export function pickModifier(rng, last = null, allow = () => true) {
+  const pool = MODIFIERS.filter((m) => allow(m) && (m.id === 'clear' || m.id !== last));
+  if (!pool.length) return MODIFIER_BY_ID.clear;
   let roll = rng.range(0, pool.reduce((s, m) => s + m.weight, 0));
   for (const m of pool) { roll -= m.weight; if (roll <= 0) return m; }
   return pool[0];
