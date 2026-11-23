@@ -238,6 +238,20 @@ second column beside the first. On a phone the players box sits top right.
   how far out it is ("top 98 m up, 199 m out"). On level ground a shell comes
   down about twice as far out as its top. It stops short of the landing on
   purpose: that is still yours to judge (or the Rangefinder's).
+- **Angle dials** (Settings > Angle dials, on by default). While you aim, two
+  thin gauges sit on your own tank so you can read the turret and the barrel
+  on the tank itself. A ring lies on the ground round it, hugging the terrain,
+  with a tick every 15° and a number every 45° (0 is east, +x, and the numbers
+  grow to the right of your aim, as in the turret readout on the card); an
+  amber arrow shows where the turret points, with its reading, and a faint
+  white one where your last shot went. A quarter arc stands beside the barrel,
+  on the side the camera is on, from 0° level to 90° straight up with a number
+  every 15°, an amber needle for the barrel and a faint one for the last shot.
+  The readings are the card's, digit for digit. They fade out in flight, in
+  the sight and in the overview. Seen from right behind the barrel, the arc's
+  plane would be edge on, so it turns up to 50° toward you. Pure layout and
+  the saved setting are in `src/dialmath.js`; the drawing is
+  `src/render/dials.js`.
 - **Sight** (G, or SIGHT on a phone). The camera rides behind and above your
   turret, looking down its line, so the middle of the screen is where you
   point. A compass tape across the top lines up with the world: bearings

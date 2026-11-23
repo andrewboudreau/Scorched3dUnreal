@@ -23,6 +23,7 @@ import { AimArc, Gunner } from './gunner.js';
 import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
+import { AngleDials } from './render/dials.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
@@ -75,6 +76,7 @@ const birds = new Birds(scene);
 const craft = new AlienCraft(scene);   // over the isles, where birds would be
 const effects = new Effects(scene);
 const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
+const dials = new AngleDials(scene);             // turret and elevation gauges on your tank while you aim
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
 const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
@@ -237,6 +239,7 @@ function disposeMatch() {
   sky.setSpace(false);
   lastLand.clear();
   aimArc.hide();
+  dials.reset();
   satView.reset();
   modsUi.reset();
   floor.visible = birds.bodies.visible = birds.wings.visible = true;
@@ -1251,6 +1254,7 @@ function lastShotText(p) {
 function updateAimAids() {
   const p = planning();
   aimArc.update(game, p, camera);
+  dials.update({ game, p: killCam || overview || gunner.active ? null : p, camera, dt: lastDt });
   const enemies = [];
   for (const q of p ? game.players : []) {
     if (q === p || !q.alive) continue;
@@ -1474,6 +1478,7 @@ settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', op
   get: () => music.trackId, set: (id) => { sound.ensure(); music.select(id); } });
 settings.group('more', 'Screen and tools');
 if (canFullscreen()) settings.add({ id: 'full', group: 'more', label: () => (isFullscreen() ? 'Leave full screen' : 'Full screen'), run: toggleFullscreen });
+settings.add({ id: 'dials', group: 'more', label: () => `Angle dials: ${dials.enabled ? 'on' : 'off'}`, hint: 'turret and elevation, on your tank', run: () => { dials.setEnabled(!dials.enabled); return true; } });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 
 const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
