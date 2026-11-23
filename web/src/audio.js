@@ -1,6 +1,7 @@
 // Synthesised sound. One-shots (cannon, blasts, debris, ticks, chirps, bleats)
 // plus quiet beds that `update` keeps in step with the game: wind, a shell's
-// whistle, the engine and a fire crackle near anything burning.
+// whistle, the engine, a fire crackle near anything burning and rain in a
+// Rain round.
 //
 // A few Kenney samples (CC0, in sfx/) sit under the synth as defaults for
 // 'debris' (the patter after a big blast) and 'thump' (the low body of a big
@@ -232,6 +233,35 @@ export class Sound {
     cs.connect(ch).connect(cg).connect(this.fx);
     cs.start(0, Math.random() * 3);
     this.fireBed = { gain: cg, hiss: this.loopNoise('bandpass', 2600, 0.7), next: 0 };
+    // Rain: a soft high hiss of drops over a low wash, silent until it rains.
+    this.rainBed = { hiss: this.loopNoise('highpass', 1700, 0.3), wash: this.loopNoise('lowpass', 520, 0.5), loop: null };
+  }
+
+  // A sample chosen for 'rain' in the pack review loops in place of the synth
+  // bed; `level` 0..1. The loop restarts when a different sample is chosen.
+  rainLoop(level) {
+    const takes = this.samples.rain;
+    const bed = this.rainBed;
+    const buffer = takes?.length ? takes[0] : null;
+    if (bed.loop && (bed.loop.buffer !== buffer || level <= 0.001)) {
+      const old = bed.loop;
+      old.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.3);
+      setTimeout(() => { try { old.src.stop(); } catch { /* already stopped */ } }, 1500);
+      bed.loop = null;
+    }
+    if (!buffer || level <= 0.001) return false;
+    if (!bed.loop) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(gain).connect(this.fx);
+      src.start(0, Math.random() * Math.max(0, buffer.duration - 0.1));
+      bed.loop = { src, gain, buffer };
+    }
+    bed.loop.gain.gain.setTargetAtTime(level * 0.45 * this.sampleLevel, this.ctx.currentTime, 0.4);
+    return true;
   }
 
   // Called every frame.
@@ -240,7 +270,8 @@ export class Sound {
   //   shell     null, or { dist, falling } for the shell in flight
   //   birds / sheep   distance from the camera to the nearest, or Infinity
   //   fire      0..~1.5, how much is burning near the camera
-  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0 } = {}) {
+  //   rain      0..1, how hard it is raining (render/rain.js amount)
+  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0, rain = 0 } = {}) {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
@@ -271,6 +302,13 @@ export class Sound {
       this.fireBed.next = (0.3 + Math.random() * 0.6) / level;
       this.sample('crackle', 0, { gain: 0.18 * level });
     }
+
+    // Rain: quiet, with a slow swell so it never sits flat. A pack sample
+    // chosen for 'rain' replaces it.
+    const wetOwn = this.rainLoop(rain) && this.samplesMode === 'replace';
+    const swell = 0.85 + 0.15 * Math.sin(t * 0.29) * Math.sin(t * 0.61 + 2);
+    ease(this.rainBed.hiss.gain.gain, wetOwn ? 0 : rain * 0.05 * swell, 0.5);
+    ease(this.rainBed.wash.gain.gain, wetOwn ? 0 : rain * 0.035, 0.6);
 
     if ((this.nextChirp -= dt) <= 0) {
       this.nextChirp = 3 + Math.random() * 7;

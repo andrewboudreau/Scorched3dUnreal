@@ -255,10 +255,10 @@ export class SatelliteView {
     const sites = surveySites({ cx: c.x, cz: c.z, seed }).sort((a, b) => a.d - b.d).slice(0, MAX_SITES);
     // Enemy Gravity Orbiters: the clock stands still while you plan, so their wells do too.
     const orbit = game.orbitField ? game.orbitField(p) : {};
-    const cond = surveyConditions(level, { wind: game.wind, windK: game.windShare(p), gravity: game.gravity, wells: t.wells, ...orbit });
+    const cond = surveyConditions(level, { wind: game.wind, windK: game.windShare(p), gravity: game.gravity, drag: game.shellDrag(p), wells: t.wells, ...orbit });
     const orbKey = cond.field ? `${cond.t0.toFixed(3)}:${game.orbiterWells().length}` : '';
     const groundKey = `${game.round}.${game.ground?.ops.length || 0}`;
-    this.cache.setKey([p.x, p.y, p.z].map((n) => n.toFixed(2)).join() + `|${p.elev.toFixed(1)}|${level}|${cond.wind.join()}|${cond.windK}|${cond.gravity}|${groundKey}|${orbKey}`);
+    this.cache.setKey([p.x, p.y, p.z].map((n) => n.toFixed(2)).join() + `|${p.elev.toFixed(1)}|${level}|${cond.wind.join()}|${cond.windK}|${cond.gravity}|${cond.drag}|${groundKey}|${orbKey}`);
     const share = labelShare(game.cfg.lab, level);
     const marked = labelledSites(sites, share, SURVEY.radius + SURVEY.spacing * 0.5);
     this.cache.step(marked, SOLVES_PER_FRAME, (s, guess) => solveSite({

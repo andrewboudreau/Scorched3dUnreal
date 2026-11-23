@@ -16,6 +16,8 @@
 //   regen         hit points repaired at the start of each of the owner's turns
 //   noFall        no damage from falling
 //   windScale     change to how hard the wind pushes the owner's shots
+//   dragScale     change to how hard air drag (a Rain round) slows the owner's
+//                 shots; only offered when the match can roll a drag modifier
 //   shrapnel      bomblets a plain Shell throws onward from where it lands
 //   tracer        metres of predicted flight drawn while aiming
 //   doubleStrike  the owner may queue two shots in one turn (see game.js STRIKE)
@@ -44,6 +46,7 @@ export const PERKS = [
   { id: 'repairs', tag: 'FR', name: 'Field Repairs', desc: 'Repair 6 hit points at the start of each of your turns.', regen: 6 },
   { id: 'shocks', tag: 'SM', name: 'Shock Mounts', desc: 'Falling into a crater no longer hurts.', noFall: true },
   { id: 'heavyrounds', tag: 'HR', name: 'Heavy Rounds', desc: 'Wind pushes your shots 35% less.', windScale: -0.35 },
+  { id: 'streamlined', tag: 'SS', name: 'Streamlined Shells', desc: 'Rain drags your shells half as much.', dragScale: -0.5 },
   { id: 'shrapnel', tag: 'SH', name: 'Shrapnel', desc: 'Your plain Shells throw two bomblets onward from where they land.', shrapnel: 2 },
   { id: 'tracer', tag: 'TR', name: 'Tracer Rounds', desc: 'See the first 45 m of your shot while you aim.', tracer: 45 },
   { id: 'double', tag: 'DS', name: 'Double Strike', fromRound: 3, doubleStrike: true,
@@ -121,11 +124,20 @@ export function aiPickPerk(offer, rng) {
 //   wind      multiplies the wind limit      calm     no wind at all
 //   gravity   multiplies gravity on shells   crater   multiplies crater size
 //   pay       multiplies all money earned    fuel     multiplies driving fuel
+//   drag      air drag on shells, per metre (ballistics.stepProjectile: the
+//             shell slows by drag * speed^2), so long, fast lobs lose the most
+//
+// Rain's drag 0.0007 takes a power 60 shot at 45 degrees with no wind about
+// 16% short of its dry range (367 m on the flat down to about 308 m); a flat
+// 20 degree shot at the same power loses about 10%, a 70 degree lob about 17%,
+// and a power 90 shot at 45 degrees about 30% (test/rain.test.js).
+export const RAIN_DRAG = 0.0007;
 export const MODIFIERS = [
   { id: 'clear', name: 'Clear skies', desc: 'Nothing unusual this round.', weight: 2 },
   { id: 'gale', name: 'Gale', desc: 'The wind is much stronger.', wind: 1.8, weight: 1 },
   { id: 'calm', name: 'Dead calm', desc: 'No wind at all.', calm: true, weight: 1 },
   { id: 'lowgrav', name: 'Low gravity', desc: 'Shells fly further: ease off the power.', gravity: 0.7, weight: 1 },
+  { id: 'rain', name: 'Rain', desc: 'Rain drags your shells down short: add power, aim flatter.', drag: RAIN_DRAG, weight: 1 },
   { id: 'soft', name: 'Soft ground', desc: 'Craters are a third bigger.', crater: 1.3, weight: 1 },
   { id: 'goldrush', name: 'Gold rush', desc: 'All pay is doubled this round.', pay: 2, weight: 1 },
   { id: 'fulltanks', name: 'Full tanks', desc: 'Everyone has double fuel.', fuel: 2, weight: 1 },

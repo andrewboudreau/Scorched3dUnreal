@@ -20,6 +20,14 @@ const SPACE = {
   top: new THREE.Color('#03040d'), mid: new THREE.Color('#0b0d26'), horizon: new THREE.Color('#2a1f4d'), bottom: new THREE.Color('#05061a'),
   sun: new THREE.Color('#fff4e6'),
 };
+// A Rain round (render/rain.js): the day's colours lean toward these by the
+// rain's amount, the sun dims and the fog closes in.
+const WET = {
+  skyLight: new THREE.Color('#b4bcc6'), groundLight: new THREE.Color('#4e4a44'),
+  top: new THREE.Color('#4f5c6c'), mid: new THREE.Color('#7f8b98'), horizon: new THREE.Color('#a9b0b8'), cloud: new THREE.Color('#8d959e'),
+  mix: 0.7, sun: 0.5, fogNear: 260, fogFar: 1500,
+};
+const FOG = { near: 700, far: 2600 };
 const CLOUD_SPAN = 1500;
 
 const M = new THREE.Matrix4();
@@ -34,7 +42,9 @@ export class Sky {
     this.half = 400;
     this.sunDir = new THREE.Vector3(0.55, 0.62, 0.35).normalize();
     this.horizon = DAY.horizon.clone();
-    scene.fog = new THREE.Fog(this.horizon, 700, 2600);
+    scene.fog = new THREE.Fog(this.horizon, FOG.near, FOG.far);
+    this.fog = scene.fog;
+    this.wet = 0;                 // 0..1, how much a Rain round greys the day (setWeather)
 
     this.dome = new THREE.Mesh(
       new THREE.SphereGeometry(4500, 32, 16),
@@ -160,6 +170,16 @@ export class Sky {
     this.setDay(d < 0 ? 0 : d);
   }
 
+  // Rain (render/rain.js amount, 0..1): a greyer, dimmer sky and closer fog.
+  setWeather(k) {
+    k = Math.max(0, Math.min(1, k));
+    if (Math.abs(k - this.wet) < 0.004 && (k > 0 || this.wet === 0)) return;
+    this.wet = k;
+    const d = this.day;
+    this.day = -1;
+    this.setDay(d < 0 ? 0 : d);
+  }
+
   // Low-poly clouds: every cloud is a handful of flattened blobs, and all the
   // blobs of all the clouds are one InstancedMesh.
   buildClouds(scene) {
@@ -226,6 +246,29 @@ export class Sky {
       U.mid.value.copy(SPACE.mid);
       this.horizon.copy(SPACE.horizon);
     }
+    const r = this.space ? 0 : this.wet;
+    if (r > 0) {
+      const m = r * WET.mix;
+      this.sun.intensity *= 1 - WET.sun * r;
+      this.hemi.intensity *= 1 - 0.15 * r;
+      this.hemi.color.lerp(WET.skyLight, m);
+      this.hemi.groundColor.lerp(WET.groundLight, m);
+      U.top.value.lerp(WET.top, m);
+      U.mid.value.lerp(WET.mid, m);
+      this.horizon.lerp(WET.horizon, m);
+      this.cloudMaterial.color.lerp(WET.cloud, m);
+    }
+    this.cloudMaterial.emissiveIntensity = 0.6 * (1 - 0.6 * r);
+    // The fog's own colour (not the dome's horizon) greys too; the dry one is kept to go back to.
+    if (r > 0) {
+      this.fogDry ??= this.fog.color.clone();
+      this.fog.color.copy(this.fogDry).lerp(WET.horizon, r * 0.85);
+    } else if (this.fogDry) {
+      this.fog.color.copy(this.fogDry);
+      this.fogDry = null;
+    }
+    this.fog.near = FOG.near + (WET.fogNear - FOG.near) * r;
+    this.fog.far = FOG.far + (WET.fogFar - FOG.far) * r;
     this.place();
   }
 

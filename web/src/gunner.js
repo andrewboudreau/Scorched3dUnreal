@@ -78,7 +78,7 @@ export class AimArc {
   update(game, p, camera) {
     if (!p) { if (this.line.visible) this.hide(); return; }
     if (!this.label.isConnected) this.labels.appendChild(this.label);
-    const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.terrain.wells.length].map((n) => (+n).toFixed(3)).join();
+    const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, game.terrain.wells.length].map((n) => (+n).toFixed(3)).join();
     if (key !== this.key) {
       this.key = key;
       this.trace(game, p);
@@ -101,6 +101,7 @@ export class AimArc {
     const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power));
     pr.g = game.gravity;
     pr.windK = game.windShare(p);
+    pr.drag = game.shellDrag(p);
     if (t.wells.length) pr.wells = t.wells;
     let n = 0;
     const put = (q) => { this.pos[n * 3] = q[0]; this.pos[n * 3 + 1] = q[1]; this.pos[n * 3 + 2] = q[2]; n++; };

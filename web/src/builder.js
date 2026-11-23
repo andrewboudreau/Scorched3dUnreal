@@ -77,8 +77,9 @@ export function conditionsLabel(cfg) {
 // ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|isles,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
 // ?sat=1|2|3 and ?orbiter=1|2|3 (every tank starts with that mod at that
-// level), ?labels=few|some|many (the satellite's labelled cells).
-// Returns { maxWind?, terrain?, lab? }: only what the string asks for.
+// level), ?labels=few|some|many (the satellite's labelled cells),
+// ?modifier=rain (any round modifier id: every round is that one).
+// Returns { maxWind?, terrain?, lab?, modifier? }: only what the string asks for.
 export function parseTestParams(search) {
   const q = new URLSearchParams(search || '');
   const out = {};
@@ -101,6 +102,8 @@ export function parseTestParams(search) {
   const labels = (q.get('labels') || '').toLowerCase();
   if (['few', 'some', 'many'].includes(labels)) lab.labels = labels;
   if (Object.keys(lab).length) out.lab = lab;
+  const mod = (q.get('modifier') || '').toLowerCase();
+  if (MODIFIERS.some((m) => m.id === mod)) out.modifier = mod;
   return out;
 }
 
