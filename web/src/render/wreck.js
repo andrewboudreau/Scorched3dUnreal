@@ -13,6 +13,8 @@ const _q = new THREE.Quaternion();
 const _qs = new THREE.Quaternion();
 const _axis = new THREE.Vector3();
 const SOOT = new THREE.Color('#1d1a17');
+const WRECK_BURN = 50;           // seconds a wreck keeps burning
+let wrecks = 0;
 
 // Charred copies of a tank's materials, one per original. Same material types
 // and features as the live tank, so no new shader is compiled mid-match.
@@ -51,6 +53,7 @@ export class Wreck {
     this.pieces = [];
     this.time = 0;
     this.burn = 0;
+    this.fireKey = `wreck${wrecks++}`;
     scene.add(this.group);
 
     tank.root.updateMatrixWorld(true);
@@ -202,6 +205,11 @@ export class Wreck {
   smoke(dt) {
     const hull = this.pieces[0].obj.position;
     const t = this.time;
+    // The hulk smoulders for most of a minute: flames and a plume that thin out.
+    if (t < WRECK_BURN) {
+      const left = 1 - t / WRECK_BURN;
+      this.fx.burn(this.fireKey, hull.x, hull.y + 0.6, hull.z, { flame: 0.3 + 0.5 * left, smoke: 0.45 + 0.4 * left, ttl: 0.3, size: 1.25, spread: 1.1 });
+    }
     if (t < 9 && (this.burn -= dt) <= 0) {
       const k = Math.max(0, 1 - t / 9);
       this.burn = 0.12 + (1 - k) * 0.3;

@@ -119,6 +119,7 @@ export class PackReview {
         <button data-test="fire">Cannon</button><button data-test="small">Small</button><button data-test="medium">Medium</button>
         <button data-test="big">Big</button><button data-test="far">Far</button><button data-test="impact">Impact</button>
         <button data-test="hit">Hit</button><button data-test="wreck">Wreck</button><button data-test="jet">Jet</button><button data-test="warp">Warp</button>
+        <button data-test="debris">Debris</button><button data-test="crackle">Crackle</button>
       </div>`);
     }
     if (kinds.has('sky')) {
@@ -144,7 +145,7 @@ export class PackReview {
     const test = {
       fire: () => s.fire(0), small: () => s.explode(6, 60), medium: () => s.explode(12, 60), big: () => s.explode(20, 60),
       far: () => s.explode(14, 450), impact: () => s.thud(20), hit: () => s.hit(20), wreck: () => s.thud(20, 'wreck'),
-      jet: () => s.jet(10), warp: () => s.warp(10),
+      jet: () => s.jet(10), warp: () => s.warp(10), debris: () => s.debris(18, 40), crackle: () => s.crackle(0),
     };
     for (const b of this.el.querySelectorAll('.rv-tools [data-test]')) b.addEventListener('click', () => test[b.dataset.test]());
   }

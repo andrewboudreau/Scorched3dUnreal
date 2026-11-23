@@ -1,6 +1,11 @@
-// Synthesised sound, no assets. One-shots (cannon, blasts, ticks, chirps,
-// bleats) plus three quiet beds that `update` keeps in step with the game:
-// wind, a shell's whistle and the engine.
+// Synthesised sound. One-shots (cannon, blasts, debris, ticks, chirps, bleats)
+// plus quiet beds that `update` keeps in step with the game: wind, a shell's
+// whistle, the engine and a fire crackle near anything burning.
+//
+// A few Kenney samples (CC0, in sfx/) sit under the synth as defaults for
+// 'debris' (the patter after a big blast) and 'thump' (the low body of a big
+// blast); see DEFAULT_SAMPLES. Anything chosen in the pack review for the same
+// event wins over them.
 //
 // Levels: every effect goes through `fx` (the Effects level and mute), music
 // through its own bus (music.js), and both through `master` (the Master level,
@@ -24,6 +29,13 @@ export function saveLevel(key, v) {
 // behind their flash, which read as lag. Distance only muffles and quiets.
 const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are dropped past this
 
+// Built-in samples (files in sfx/, each as .ogg with an .mp3 fallback). They
+// load after the audio context first starts.
+const DEFAULT_SAMPLES = {
+  debris: ['earth-impact-rock-2', 'earth-impact-rock-3', 'metal-debris-small-2', 'metal-debris-small-3', 'metal-debris-small-5'],
+  thump: ['earth-impact-thud-1', 'earth-impact-thud-3', 'explosion-distant-3'],
+};
+
 export class Sound {
   constructor() {
     this.ctx = null;
@@ -36,6 +48,7 @@ export class Sound {
     // Recorded samples standing in for (or under) the synth, per event; only
     // the pack review (src/review.js) sets these. See sample().
     this.samples = {};
+    this.defaults = {};      // the built-in ones, by event; used when none are set
     this.samplesMode = 'replace';
     this.sampleLevel = 1;
   }
@@ -43,15 +56,15 @@ export class Sound {
   // Play one of the samples set for `event` (a random take, slightly
   // re-pitched so repeats differ), quieter and duller with distance like the
   // synth. True if the synth should then be skipped.
-  sample(event, dist = 0, { gain = 1, delay = 0 } = {}) {
-    const takes = this.samples[event];
+  sample(event, dist = 0, { gain = 1, delay = 0, rate = 1 } = {}) {
+    const takes = this.samples[event]?.length ? this.samples[event] : this.defaults[event];
     if (!takes?.length) return false;
     const ctx = this.ensure();
     if (!ctx || this.silent) return true;
     const { k, cutoff } = this.far(dist);
     const src = ctx.createBufferSource();
     src.buffer = takes[Math.floor(Math.random() * takes.length)];
-    src.playbackRate.value = 0.95 + Math.random() * 0.1;
+    src.playbackRate.value = rate * (0.95 + Math.random() * 0.1);
     const g = ctx.createGain();
     g.gain.value = gain * k * this.sampleLevel;
     let out = this.fx;
@@ -88,10 +101,47 @@ export class Sound {
       this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = this.noise.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.crackleTail = this.makeCrackle(2.6, (t) => 70 * (1 - t) ** 1.6 + 4);
+      this.crackleBed = this.makeCrackle(4, () => 16);
       this.startBeds();
+      this.loadDefaults();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return this.ctx;
+  }
+
+  // Fetch and decode the built-in samples (quietly skipping any that fail).
+  async loadDefaults() {
+    const ctx = this.ctx;
+    for (const [event, names] of Object.entries(DEFAULT_SAMPLES)) {
+      const bufs = [];
+      for (const n of names) {
+        for (const ext of ['ogg', 'mp3']) {        // e.g. Safari without Opus: try the mp3
+          try {
+            const r = await fetch(new URL(`../sfx/${n}.${ext}`, import.meta.url));
+            if (!r.ok) continue;
+            bufs.push(await ctx.decodeAudioData(await r.arrayBuffer()));
+            break;
+          } catch { /* try the next */ }
+        }
+      }
+      if (bufs.length) this.defaults[event] = bufs;
+    }
+  }
+
+  // A buffer of sparse, tiny noise ticks: fire crackling. `density(t)` is ticks
+  // a second at fraction t of the way through.
+  makeCrackle(seconds, density) {
+    const ctx = this.ctx, sr = ctx.sampleRate;
+    const len = Math.floor(sr * seconds);
+    const buf = ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      if (Math.random() >= density(i / len) / sr) continue;
+      const amp = 0.25 + Math.random() * 0.75, n = Math.floor(sr * (0.002 + Math.random() * 0.007));
+      for (let j = 0; j < n && i + j < len; j++) d[i + j] += (Math.random() * 2 - 1) * amp * Math.exp(-j / (n * 0.3));
+    }
+    return buf;
   }
 
   // Nothing would be heard: skip making the voices.
@@ -170,6 +220,18 @@ export class Sound {
     });
     ef.connect(eg).connect(this.fx);
     this.engine = { gain: eg, filter: ef, oscs };
+    // Fire: a loop of crackles over a faint hiss, silent until something burns near.
+    const cs = ctx.createBufferSource();
+    cs.buffer = this.crackleBed;
+    cs.loop = true;
+    const ch = ctx.createBiquadFilter();
+    ch.type = 'highpass';
+    ch.frequency.value = 900;
+    const cg = ctx.createGain();
+    cg.gain.value = 0;
+    cs.connect(ch).connect(cg).connect(this.fx);
+    cs.start(0, Math.random() * 3);
+    this.fireBed = { gain: cg, hiss: this.loopNoise('bandpass', 2600, 0.7), next: 0 };
   }
 
   // Called every frame.
@@ -177,7 +239,8 @@ export class Sound {
   //   driving   0..1, how hard a tank near the camera is working
   //   shell     null, or { dist, falling } for the shell in flight
   //   birds / sheep   distance from the camera to the nearest, or Infinity
-  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity } = {}) {
+  //   fire      0..~1.5, how much is burning near the camera
+  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0 } = {}) {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
@@ -197,6 +260,17 @@ export class Sound {
     const near = shell ? 1 / (1 + shell.dist / 140) : 0;
     ease(this.whistle.gain.gain, shell ? near * (0.05 + 0.2 * shell.falling) : 0, 0.1);
     if (shell) ease(this.whistle.filter.frequency, 2300 - 1100 * shell.falling, 0.15);
+
+    // Fire crackle: quiet, so it sits under everything else. A sample chosen
+    // for 'crackle' stands in for the synthesised bed.
+    const level = Math.min(1, fire);
+    const own = this.samples.crackle?.length;
+    ease(this.fireBed.gain.gain, own ? 0 : level * 0.075, 0.4);
+    ease(this.fireBed.hiss.gain.gain, level * 0.012, 0.5);
+    if (own && level > 0.05 && (this.fireBed.next -= dt) <= 0) {
+      this.fireBed.next = (0.3 + Math.random() * 0.6) / level;
+      this.sample('crackle', 0, { gain: 0.18 * level });
+    }
 
     if ((this.nextChirp -= dt) <= 0) {
       this.nextChirp = 3 + Math.random() * 7;
@@ -269,6 +343,82 @@ export class Sound {
     this.burst({ dur: 0.07, freq: 3200, q: 0.9, type: 'bandpass', gain: 0.75 * k, delay, cutoff });
     this.burst({ dur: 0.5, freq: 1900, sweepTo: 180, gain: 0.6 * k, thump: 130, delay, cutoff });
     this.burst({ dur: 1.1, freq: 420, sweepTo: 90, gain: 0.22 * k, delay: delay + 0.05, cutoff });
+    // The sub-bass punch in the chest, and the barrel's ringing tail.
+    this.sub({ from: 80, to: 34, dur: 0.5, gain: 0.28 * Math.max(k, 1 / (1 + dist / 600)), delay, cutoff });
+    this.tail({ gain: 0.05 * k, delay: delay + 0.12, cutoff, speed: 1.6 });
+  }
+
+  // A low sine that drops in pitch: the part of a blast you feel more than hear.
+  // Bass carries far, so callers keep this louder at range than the rest.
+  sub({ from, to, dur, gain, delay = 0, cutoff = 0 }) {
+    const ctx = this.ensure();
+    if (!ctx || this.silent || gain <= 0.001) return;
+    const t = ctx.currentTime + delay;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(from, t);
+    o.frequency.exponentialRampToValueAtTime(to, t + dur * 0.8);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    let out = this.fx;
+    if (cutoff) {
+      out = ctx.createBiquadFilter();
+      out.type = 'lowpass';
+      out.frequency.value = Math.max(cutoff, 160);     // never so dull the bass goes
+      out.connect(this.fx);
+    }
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  // The crackle of a blast dying away: a handful of tiny ticks thinning out.
+  // `speed` > 1 plays it faster (shorter, higher).
+  tail({ gain, delay = 0, cutoff = 0, speed = 1 }) {
+    const ctx = this.ensure();
+    if (!ctx || this.silent || gain <= 0.001) return;
+    const t = ctx.currentTime + delay;
+    const src = ctx.createBufferSource();
+    src.buffer = this.crackleTail;
+    src.playbackRate.value = speed * (0.9 + Math.random() * 0.2);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 600;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    let out = this.fx;
+    if (cutoff) {
+      out = ctx.createBiquadFilter();
+      out.type = 'lowpass';
+      out.frequency.value = cutoff;
+      out.connect(this.fx);
+    }
+    src.connect(hp).connect(g).connect(out);
+    src.start(t, Math.random() * 0.1);
+  }
+
+  // The patter of earth and bits coming back down after a big blast, a
+  // second or so on. Softer and sparser the farther away.
+  debris(radius, dist = 0) {
+    if (this.silent || radius < 9 || dist > 450) return;
+    const { k, cutoff } = this.far(dist);
+    const n = Math.min(7, Math.round(2 + radius * 0.25));
+    for (let i = 0; i < n; i++) {
+      const delay = 0.55 + Math.random() * (0.5 + radius * 0.05) + i * 0.07;
+      const gain = (0.1 + Math.random() * 0.1) * Math.max(k, 0.25);
+      if (!this.sample('debris', dist, { gain, delay, rate: 0.85 + Math.random() * 0.5 })) {
+        this.burst({ dur: 0.05 + Math.random() * 0.06, freq: 700 + Math.random() * 1800, q: 1.4, type: 'bandpass', gain: gain * 0.8, delay, cutoff });
+      }
+    }
+  }
+
+  // A burst of crackling: the test for the crackle sound, and what a sample
+  // chosen for it plays.
+  crackle(dist = 0, gain = 0.3) {
+    if (this.sample('crackle', dist, { gain })) return;
+    this.tail({ gain: gain * 0.4, speed: 0.8 });
   }
 
   explode(radius = 10, dist = 0) {
@@ -276,15 +426,26 @@ export class Sound {
     // only half the distance treatment).
     const far = dist > 320 && this.samples['explode-far'];
     const size = radius < 9 ? 'explode-small' : radius < 16 ? 'explode-medium' : 'explode-big';
-    if (far ? this.sample('explode-far', dist / 2, { gain: 0.9 }) : this.sample(size, dist, { gain: 0.7 + Math.min(0.3, radius / 60) })) return;
     const s = Math.min(1.6, radius / 12);
+    // Extra body under any blast, recorded or not: a deep thump, then the
+    // patter of debris coming down.
+    if (radius >= 8) this.sample('thump', dist, { gain: 0.35 + 0.25 * s, rate: 0.7 - 0.1 * Math.min(1, s) });
+    this.debris(radius, dist);
+    if (far ? this.sample('explode-far', dist / 2, { gain: 0.9 }) : this.sample(size, dist, { gain: 0.7 + Math.min(0.3, radius / 60) })) return;
     const { k, cutoff } = this.far(dist);
+    // Far blasts are muffled twice over: the air takes the highs, and the
+    // distant ones roll in as a dull boom with little crack.
+    const dull = dist > 150 ? 0.55 : 1;
+    const body = cutoff ? cutoff * dull : 0;
     // A sharp crack on top at any range: without it a far, muffled blast has a
     // soft start, and a soft start sounds late.
-    this.burst({ dur: 0.1, freq: 2200, q: 0.8, type: 'bandpass', gain: 0.45 * Math.max(k, 0.35) });
-    this.burst({ dur: 1.0 + s, freq: 1400, sweepTo: 80, gain: (0.6 + s * 0.4) * k, thump: 70, cutoff });
-    // The rumble that rolls back off the hills.
-    this.burst({ dur: 1.8 + s, freq: 240, sweepTo: 60, gain: 0.2 * k * s, delay: 0.35, cutoff: cutoff ? Math.min(cutoff, 500) : 500 });
+    this.burst({ dur: 0.1, freq: 2200, q: 0.8, type: 'bandpass', gain: 0.45 * Math.max(k, 0.35) * (dist > 320 ? 0.7 : 1), cutoff: dist > 150 ? Math.max(900, cutoff * 1.5) : 0 });
+    this.burst({ dur: 1.0 + s, freq: 1400, sweepTo: 80, gain: (0.6 + s * 0.4) * k, thump: 70, cutoff: body });
+    // The sub-bass boom: it carries, so it falls off slower than the rest.
+    this.sub({ from: 105, to: 27, dur: 0.9 + 0.9 * s, gain: (0.3 + 0.25 * s) * Math.max(k, 1 / (1 + dist / 700)), cutoff: body });
+    // The rumble that rolls back off the hills, and the crackle of it dying.
+    this.burst({ dur: 1.8 + s, freq: 240, sweepTo: 60, gain: 0.2 * k * s, delay: 0.35, cutoff: body ? Math.min(body, 500) : 500 });
+    this.tail({ gain: 0.12 * k * s, delay: 0.2 + 0.1 * s, cutoff: body ? Math.min(body * 1.2, 5000) : 0, speed: 1 / (0.8 + 0.3 * s) });
   }
 
   // `kind`: 'impact' (shells rolling, mounds, landings, props) or 'wreck' (parts of a dead tank).
