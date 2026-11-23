@@ -35,6 +35,7 @@ import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './setti
 import { defaultMatch, humanName, phoneFullscreen, wireLaunch } from './launch.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, conditionsLabel, parseTestParams } from './builder.js';
+import { clampCameraY } from './camlimit.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -1387,10 +1388,9 @@ function updateCamera(dt) {
     if (Math.abs(dTheta) < 0.01 && Math.abs(_sGoal.phi - _sCur.phi) < 0.01 && Math.abs(_sGoal.radius - _sCur.radius) < 1) camGoal = null;
   }
   controls.update();
-  // Never let the camera sink into the hills.
+  // Never let the camera sink into the hills (under an isle it stays below it).
   const field = game ? game.terrain : menuField.terrain;
-  const ground = field.inBounds(camera.position.x, camera.position.z) ? field.heightAt(camera.position.x, camera.position.z) : floor.position.y;
-  if (camera.position.y < ground + 4) camera.position.y = ground + 4;
+  camera.position.y = clampCameraY(field, camera.position.x, camera.position.y, camera.position.z, 4, floor.position.y + 4);
   shake *= Math.exp(-dt * 5);
   lastShake.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   camera.position.add(lastShake);

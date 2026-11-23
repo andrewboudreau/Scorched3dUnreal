@@ -330,7 +330,9 @@ second column beside the first. On a phone the players box sits top right.
   fade in around it, with a few curving to the shell itself, and fade out again
   once it is clear. Shots
   can come at an isle from below: a blast in the underside eats upward, and once
-  the rock between top and underside is gone the ground is open sky. A tank
+  the rock between top and underside is gone the ground is open sky. The
+  orbit camera keeps 4 m clear of the ground: over an isle's top, or under its
+  underside when you take it below (`src/camlimit.js`). A tank
   over a hole falls, and a tank that falls into the void is lost (the kill goes
   to whoever blew the ground out). Now and then a strange craft or two drifts
   high across the sky, pausing to hover, where birds would be. A shell that misses everything drops away into the void. You
