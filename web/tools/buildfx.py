@@ -20,7 +20,7 @@ COLS = ROWS = 4
 # Row by row, left to right. Must match CELLS in src/render/fxAtlas.js.
 SPRITES = [
     'explosion-1', 'explosion-3', 'explosion-5', 'explosion-8',
-    'flash-2', 'flash-5', 'flame-5', 'flame-6',
+    'flash-2', 'flash-5', 'explosion-2', 'explosion-6',
     'smoke-black-1', 'smoke-black-8', 'smoke-black-15', 'smoke-black-22',
     'smoke-white-puff-1', 'smoke-white-puff-8', 'smoke-white-puff-15', 'smoke-white-puff-22',
 ]

@@ -15,10 +15,11 @@ const EMBERS_MAX = 160;   // glowing sparks in the air at once
 // What each quality level allows. `puffs` scales smoke counts, `billows` is
 // the fire sprites in a blast, `embers` scales sparks; the caps bound sprites
 // alive at once for burning things and shell trails; `gap` is metres between
-// trail puffs; `clumps` is the flame clumps one fire may have, `clumpCap` all of them.
+// trail puffs; `clumps` is the flame clumps one fire may have, `clumpCap` all of them, `flames` the
+// overlapping tongues in a clump.
 export const QUALITY = {
-  full: { puffs: 1, billows: 4, embers: 1, fireCap: 90, trailCap: 40, gap: 3.2, emitters: 24, ring: 6, debris: 1, clumps: 4, clumpCap: 24 },
-  light: { puffs: 0.55, billows: 2, embers: 0.45, fireCap: 34, trailCap: 16, gap: 6, emitters: 10, ring: 3, debris: 0.6, clumps: 2, clumpCap: 8 },
+  full: { puffs: 1, billows: 4, embers: 1, fireCap: 90, trailCap: 40, gap: 3.2, emitters: 24, ring: 6, debris: 1, clumps: 3, clumpCap: 14, flames: 4 },
+  light: { puffs: 0.55, billows: 2, embers: 0.45, fireCap: 34, trailCap: 16, gap: 6, emitters: 10, ring: 3, debris: 0.6, clumps: 2, clumpCap: 6, flames: 3 },
 };
 export const QUALITY_KEY = 'craterfall.fxQuality';
 // Phones (and ?mobile=1) start on Light; anything chosen in Settings wins.
@@ -62,6 +63,52 @@ function radialTexture(inner, outer) {
   return t;
 }
 
+// ---- procedural flames ----
+
+const hash1 = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+function vnoise(x, seed) {
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return hash1(i * 7.13 + seed) * (1 - u) + hash1((i + 1) * 7.13 + seed) * u;
+}
+const smooth = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+
+// A soft teardrop of fire drawn from scratch (no sprite sheet): a wide rounded
+// base that tapers to a ragged, swaying tip, noise licks cut into its edges, a
+// deep red edge into an orange core, and yellow only low in the core. Never
+// pure white. Its base is the bottom edge of the image.
+function flameTexture(seed) {
+  const W = 96, H = 144;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    const v = 1 - (y + 0.5) / H;                              // 0 at the base, 1 at the tip
+    const base = v < 0.2 ? Math.sqrt(Math.max(0, 1 - ((0.2 - v) / 0.2) ** 2)) : 1;
+    let hw = 0.86 * base * Math.pow(1 - v, 0.8);
+    hw *= 0.74 + 0.5 * vnoise(v * 7, seed);                   // licks along the edge
+    const cx = 0.3 * v * v * (vnoise(v * 2.4, seed + 9) * 2 - 1);   // the tip leans
+    for (let x = 0; x < W; x++) {
+      const u = ((x + 0.5) / W) * 2 - 1;
+      const d = Math.abs(u - cx) / Math.max(hw, 0.001);
+      if (hw < 0.02 || d >= 1) continue;
+      const e = 1 - d;                                        // 0 at the edge, 1 along the middle
+      const a = smooth(0, 0.5, e) * (1 - 0.35 * v * v);
+      const core = Math.pow(e, 1.1);
+      const hot = Math.min(1, core * Math.pow(1 - v, 1.6) * 1.2);
+      let r = 205 + 50 * core, gr = 52 + 100 * core, b = 14 + 16 * core;
+      r += (255 - r) * hot; gr += (205 - gr) * hot; b += (80 - b) * hot;
+      const j = (y * W + x) * 4;
+      img.data[j] = r; img.data[j + 1] = gr; img.data[j + 2] = b; img.data[j + 3] = 255 * a;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const FLAME_ASPECT = 1.4;      // a flame is this much taller than it is wide
+
 export class Effects {
   constructor(scene) {
     this.scene = scene;
@@ -80,6 +127,7 @@ export class Effects {
     TRAIL_FX = this;
     this.smokeTex = radialTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
     this.glowTex = radialTexture('rgba(255,240,200,1)', 'rgba(255,120,30,0)');
+    this.flameTex = [3, 17, 41, 77].map(flameTexture);
     this.warpTex = radialTexture('rgba(235,252,255,1)', 'rgba(90,200,255,0)');
     this.fireGeo = new THREE.IcosahedronGeometry(1, 2);
     this.debrisGeo = new THREE.TetrahedronGeometry(0.6);
@@ -146,7 +194,7 @@ export class Effects {
     if (this.emitters) this.trimEmitters();
   }
 
-  // A random cell of the sheet ('fire', 'flash', 'flame', 'smokeDark',
+  // A random cell of the sheet ('fire', 'flash', 'smokeDark',
   // 'smokeLight'); a plain soft blob until the sheet has loaded.
   pick(kind) {
     if (!this.atlasReady) return kind === 'smokeDark' || kind === 'smokeLight' ? this.smokeTex : this.glowTex;
@@ -488,28 +536,36 @@ export class Effects {
 
   stopClumps(e) {
     if (!e.clumps) return;
-    for (const c of e.clumps) {
-      for (const sp of [c.glow, c.body, c.tongue]) { this.scene.remove(sp); this.freeSprites.push(sp); }
-    }
+    for (const c of e.clumps) this.freeClump(c);
     this.clumpCount -= e.clumps.length;
     e.clumps = null;
   }
 
-  // One clump of fire: a warm glow on the ground, a body of red-orange wisps
-  // and a yellow-white tongue in it. Each has its own pace and frame so they
-  // never move together; the frames are the Kenney wisps and tongues, swapped
-  // like the pages of a flipbook.
+  freeClump(c) {
+    for (const sp of [c.glow, ...c.flames.map((f) => f.sp)]) { this.scene.remove(sp); this.freeSprites.push(sp); }
+  }
+
+  // One clump of fire: a warm glow on the ground and a few flames overlapping
+  // at slightly different sizes and leans. Each flame has its own pace, shape
+  // (a few drawn variants swapped like the pages of a flipbook) and flicker,
+  // so they never move together.
   newClump(e, index) {
     const a = rnd(0, 6.283), r = Math.sqrt(Math.random()) * e.spread;
+    const cs = index === 0 ? rnd(0.95, 1.3) : rnd(0.55, 1.0);          // the first is the big one
+    const flames = [];
+    const n = this.q.flames;
+    for (let k = 0; k < n; k++) {
+      const sp = this.sprite(this.flameTex[0], '#ffffff', true);
+      sp.center.set(0.5, 0.02);
+      flames.push({
+        sp, size: k === 0 ? 1 : rnd(0.5, 0.9), dx: k === 0 ? 0 : rnd(-0.5, 0.5) * cs, dz: k === 0 ? 0 : rnd(-0.5, 0.5) * cs,
+        lean: k === 0 ? 0 : rnd(-0.3, 0.3), ph: rnd(0, 6.283), r1: rnd(5, 9), r2: rnd(14, 24), sway: rnd(1.2, 2.6),
+        rate: rnd(3, 6), vi: Math.floor(Math.random() * 4), T: rnd(0, 0.3), flip: Math.random() < 0.5 ? -1 : 1,
+      });
+    }
     return {
-      ox: Math.cos(a) * r, oz: Math.sin(a) * r,
-      size: index === 0 ? rnd(0.95, 1.3) : rnd(0.5, 1.0),           // the first is the big one
-      t: rnd(0, 20), ph: rnd(0, 6.283), flip: Math.random() < 0.5 ? -1 : 1,
-      bRate: rnd(6, 11), tRate: rnd(8, 14), bi: Math.floor(Math.random() * 4), ti: Math.floor(Math.random() * 2),
-      bT: 0, tT: 0, wispT: rnd(0.2, 0.9),
-      glow: this.sprite(this.glowTex, '#ff6a1a', true),
-      body: this.sprite(this.pick('fire'), '#ffc080', true),
-      tongue: this.sprite(this.pick('flame'), '#ffd27a', true),
+      ox: Math.cos(a) * r, oz: Math.sin(a) * r, size: cs, t: rnd(0, 20), ph: rnd(0, 6.283), wispT: rnd(0.2, 0.9),
+      flames, glow: this.sprite(this.glowTex, '#ff6a1a', true),
     };
   }
 
@@ -519,12 +575,8 @@ export class Effects {
     if (!e.clumps) e.clumps = [];
     // A hotter fire, a bigger one, has more clumps; they are added once and
     // go out one by one (the last made first) as the fire dies down.
-    const want = Math.min(q.clumps, Math.max(1, Math.round(1 + e.size * 1.2 * (0.4 + e.flame * 1.6))));
-    while (e.clumps.length > q.clumps) {
-      const c = e.clumps.pop();
-      for (const sp of [c.glow, c.body, c.tongue]) { this.scene.remove(sp); this.freeSprites.push(sp); }
-      this.clumpCount--;
-    }
+    const want = Math.min(q.clumps, Math.max(1, Math.round(1 + e.size * 1.1 * (0.4 + e.flame * 1.4))));
+    while (e.clumps.length > q.clumps) { this.freeClump(e.clumps.pop()); this.clumpCount--; }
     while (e.clumps.length < want && this.clumpCount < q.clumpCap && heat > 0.5) {
       e.clumps.push(this.newClump(e, e.clumps.length));
       this.clumpCount++;
@@ -545,53 +597,42 @@ export class Effects {
       const s = clamp01(power * 2 - i * 0.14);
       // Embers: after the flames the ground keeps glowing a while.
       const ember = (1 - heat) * left * Math.min(1, e.flame * 2.2);
-      const flick = 1 + 0.16 * Math.sin(c.t * c.bRate * 0.9 + c.ph) + 0.1 * Math.sin(c.t * 21 + c.ph * 2.3);
-      const br = 0.82 + 0.18 * Math.sin(c.t * 13 + c.ph * 1.7);
-      const H = 1.9 * e.size * c.size * (0.3 + 0.7 * s) * flick;      // flame height, metres
-      const W = H * 0.62;
+      const br = 0.84 + 0.16 * Math.sin(c.t * 13 + c.ph * 1.7);
 
       const g = c.glow;
-      const glowK = 0.38 + 0.5 * (1 - s);
-      fireColor(g.material.color, glowK);
-      g.position.set(px, gy + 0.2, pz);
-      g.scale.setScalar(Math.max(0.5, e.size * c.size * 3.0) * (0.85 + 0.15 * flick));
-      g.material.opacity = (0.12 + 0.4 * s) * (0.8 + 0.2 * br) * Math.max(left, 0.0) + ember * 0.3 * br;
+      fireColor(g.material.color, 0.38 + 0.5 * (1 - s));
+      const gs = Math.max(0.5, e.size * c.size * 3.2) * (0.9 + 0.1 * br);
+      g.position.set(px, gy + gs * 0.3, pz);
+      g.scale.setScalar(gs);
+      g.material.opacity = (0.1 + 0.3 * s) * (0.8 + 0.2 * br) * left + ember * 0.3 * br;
 
       const on = s > 0.03;
-      c.body.visible = c.tongue.visible = on;
-      if (!on) continue;
-      if ((c.bT -= dt) <= 0) {
-        c.bT = (1 / c.bRate) * slow;
-        c.bi = (c.bi + 1 + Math.floor(Math.random() * 2)) % 4;
-        c.body.material.map = this.atlasReady ? this.atlas.fire[c.bi] : this.glowTex;
-        c.flip = Math.random() < 0.3 ? -c.flip : c.flip;
+      let topY = gy, topH = 0;
+      for (const f of c.flames) {
+        f.sp.visible = on;
+        if (!on) continue;
+        f.T -= dt;
+        if (f.T <= 0) {
+          f.T = (1 / f.rate) * slow * rnd(0.8, 1.2);
+          f.vi = (f.vi + 1 + Math.floor(Math.random() * 3)) % 4;
+          f.sp.material.map = this.flameTex[f.vi];
+          if (Math.random() < 0.25) f.flip = -f.flip;
+        }
+        const flick = 1 + 0.15 * Math.sin(c.t * f.r1 + f.ph) + 0.09 * Math.sin(c.t * f.r2 + f.ph * 1.9);
+        const H = 2.0 * e.size * c.size * f.size * (0.28 + 0.72 * s) * flick;
+        const sway = lean + f.lean + 0.1 * Math.sin(c.t * f.sway + f.ph);
+        f.sp.position.set(px + f.dx, gy, pz + f.dz);
+        f.sp.scale.set((H / FLAME_ASPECT) * f.flip * (1 + 0.07 * Math.sin(c.t * f.r2 * 0.7 + f.ph)), H, 1);
+        f.sp.material.rotation = sway;
+        fireColor(f.sp.material.color, 0.24 + 0.45 * (1 - s));
+        f.sp.material.opacity = Math.min(1, s * 1.8) * (0.42 + 0.16 * br) * (0.85 + 0.15 * Math.sin(c.t * f.r2 * 1.3 + f.ph));
+        if (H > topH) { topH = H; topY = gy + H; }
       }
-      if ((c.tT -= dt) <= 0) {
-        c.tT = (1 / c.tRate) * slow;
-        c.ti = 1 - c.ti;
-        c.tongue.material.map = this.atlasReady ? this.atlas.flame[c.ti] : this.glowTex;
-      }
-      const tilt = lean + 0.09 * Math.sin(c.t * 7 + c.ph);
-      const b = c.body;
-      b.center.set(0.5, 0.3);
-      b.position.set(px, gy + 0.25, pz);
-      b.scale.set(W * 1.5 * c.flip, H * 1.25, 1);
-      b.material.rotation = tilt;
-      fireColor(b.material.color, 0.12 + 0.55 * (1 - s));
-      b.material.opacity = Math.min(1, s * 1.8) * br * 0.85;
-
-      const t = c.tongue;
-      t.center.set(0.5, 0.28);
-      t.position.set(px, gy, pz);
-      t.scale.set(W * 1.3 * c.flip * (1 + 0.1 * Math.sin(c.t * 17 + c.ph)), H * 1.5, 1);
-      t.material.rotation = tilt * 1.2 + 0.05 * Math.sin(c.t * 11 + c.ph);
-      fireColor(t.material.color, 0.06 + 0.45 * (1 - s));
-      t.material.opacity = Math.min(1, s * 1.6) * (0.75 + 0.25 * br);
 
       // A thin wisp of smoke from the tip while the flames are lively.
       if (s > 0.25 && (c.wispT -= dt) <= 0) {
         c.wispT = rnd(0.5, 1.1) * slow / (0.4 + s);
-        if (this.live.fire < q.fireCap) this.wisp(px + this.wind[0] * 0.25 + lean * -H * 0.5, gy + H * 0.95, pz + this.wind[1] * 0.25, 0.7 + 0.4 * e.size * c.size, s);
+        if (this.live.fire < q.fireCap) this.wisp(px + this.wind[0] * 0.25 + lean * -topH * 0.5, topY * 0.95 + gy * 0.05, pz + this.wind[1] * 0.25, 0.7 + 0.4 * e.size * c.size, s);
       }
     }
   }

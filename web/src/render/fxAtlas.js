@@ -10,9 +10,8 @@ const COLS = 4, ROWS = 4;
 
 // Cell indexes by kind.
 export const CELLS = {
-  fire: [0, 1, 2, 3],        // blobs of fire (additive)
+  fire: [0, 1, 2, 3, 6, 7],  // blobs of fire (additive)
   flash: [4, 5],             // white-hot bursts (additive)
-  flame: [6, 7],             // a single tongue of flame (additive)
   smokeDark: [8, 9, 10, 11], // soot (normal blending)
   smokeLight: [12, 13, 14, 15],
 };

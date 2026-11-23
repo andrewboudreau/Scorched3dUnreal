@@ -1575,7 +1575,10 @@ function tankSmoke(dt) {
     const t = tanks[i];
     const hurt = 1 - p.hp / p.maxHp;
     // A badly hurt tank (or one just hit) burns and smokes until it is repaired or dies.
-    effects.burn(`tank${i}`, p.x, p.y + 2.0, p.z, { flame: hurt > 0.65 ? (hurt - 0.5) * 1.3 : 0, smoke: hurt > 0.4 ? 0.15 + hurt * 0.6 : 0, ttl: 0.3, spread: 1.3 });
+    // It burns on the engine deck, on whichever side faces the camera.
+    const side = t.hull.worldToLocal(_v.copy(camera.position)).z >= 0 ? 1 : -1;
+    t.hull.localToWorld(_v.set(-2.5, 2.4, side * 0.9));
+    effects.burn(`tank${i}`, _v.x, _v.y, _v.z, { flame: hurt > 0.65 ? (hurt - 0.5) * 1.3 : 0, smoke: hurt > 0.4 ? 0.3 + hurt * 0.7 : 0, ttl: 0.3, spread: 1.1, size: 1.4 });
     if ((smoke[i] -= dt) > 0) return;
     if (t.work > 0.1) {
       smoke[i] = 0.09;

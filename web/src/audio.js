@@ -231,7 +231,7 @@ export class Sound {
     cg.gain.value = 0;
     cs.connect(ch).connect(cg).connect(this.fx);
     cs.start(0, Math.random() * 3);
-    this.fire = { gain: cg, hiss: this.loopNoise('bandpass', 2600, 0.7), next: 0 };
+    this.fireBed = { gain: cg, hiss: this.loopNoise('bandpass', 2600, 0.7), next: 0 };
   }
 
   // Called every frame.
@@ -265,10 +265,10 @@ export class Sound {
     // for 'crackle' stands in for the synthesised bed.
     const level = Math.min(1, fire);
     const own = this.samples.crackle?.length;
-    ease(this.fire.gain.gain, own ? 0 : level * 0.075, 0.4);
-    ease(this.fire.hiss.gain.gain, level * 0.012, 0.5);
-    if (own && level > 0.05 && (this.fire.next -= dt) <= 0) {
-      this.fire.next = (0.3 + Math.random() * 0.6) / level;
+    ease(this.fireBed.gain.gain, own ? 0 : level * 0.075, 0.4);
+    ease(this.fireBed.hiss.gain.gain, level * 0.012, 0.5);
+    if (own && level > 0.05 && (this.fireBed.next -= dt) <= 0) {
+      this.fireBed.next = (0.3 + Math.random() * 0.6) / level;
       this.sample('crackle', 0, { gain: 0.18 * level });
     }
 
