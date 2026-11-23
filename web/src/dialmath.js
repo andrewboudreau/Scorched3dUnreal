@@ -7,25 +7,29 @@
 // right of the aim), kept in [0, 360); elevation is 0 level to 90 straight up.
 
 export const YAW_STEP = 15;       // a tick every 15 degrees round the ring
-export const YAW_MAJOR = 45;      // a long tick, and a number, every 45
-export const ELEV_STEP = 15;      // a tick and a number every 15 up the arc
+export const YAW_MAJOR = 90;      // a long tick every 90 (0 / 90 / 180 / 270)
+export const ELEV_STEP = 15;      // a tick every 15 up the arc
+export const ELEV_MAJOR = 45;     // long ticks at 0, 45 and 90
+// No fixed numbers on either dial: they crowded the tank, above all on a
+// phone. The two live readings at the pointer tips carry the numbers.
 export const ELEV_MAX = 90;
 
-// Round the ring: 0, 15, ... 345. `major` ticks are long and carry a number.
+// Round the ring: 0, 15, ... 345. `major` ticks are long. `label` stays ''
+// (a number, if a dial ever wants one again).
 export function ringTicks() {
   const out = [];
   for (let deg = 0; deg < 360; deg += YAW_STEP) {
     const major = deg % YAW_MAJOR === 0;
-    out.push({ deg, major, label: major ? String(deg) : '' });
+    out.push({ deg, major, label: '' });
   }
   return out;
 }
 
-// Up the arc: 0, 15, ... 90, every one numbered; 0, 45 and 90 are long.
+// Up the arc: 0, 15, ... 90; 0, 45 and 90 are long. No numbers.
 export function elevTicks() {
   const out = [];
   for (let deg = 0; deg <= ELEV_MAX; deg += ELEV_STEP) {
-    out.push({ deg, major: deg % YAW_MAJOR === 0, label: String(deg) });
+    out.push({ deg, major: deg % ELEV_MAJOR === 0, label: '' });
   }
   return out;
 }

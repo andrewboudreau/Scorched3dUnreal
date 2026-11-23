@@ -38,6 +38,7 @@ function screen(camera, x, y, z) {
 }
 
 const FOV = 50;   // the sight's widest view; zoom divides it
+const LABEL_HOLD = 1500;   // ms the arc's words stay after the aim stops changing
 
 export class AimArc {
   constructor(scene, labels) {
@@ -64,6 +65,7 @@ export class AimArc {
     this.label.className = 'arc-peak hidden';
     this.labels = labels;   // cleared at each match start (main.js), so update() puts it back
     this.key = '';
+    this.changed = 0;     // when the aim last changed (performance.now ms): the words show for LABEL_HOLD after
     this.top = null;      // the top of the arc, [x, y, z], or where it hits first
     this.from = null;
   }
@@ -75,11 +77,17 @@ export class AimArc {
   }
 
   // Show the arc for this tank's aim now (p null: none). Call every frame.
-  update(game, p, camera) {
+  // The words ("top 98 m up, 191 m out") show only while the aim is changing,
+  // and fade LABEL_HOLD ms after it stops, leaving the dot at the top and the
+  // ring under it. `quiet` (the SIGHT view) never shows them: there the label
+  // would sit right where you aim.
+  update(game, p, camera, { quiet = false } = {}) {
     if (!p) { if (this.line.visible) this.hide(); return; }
     if (!this.label.isConnected) this.labels.appendChild(this.label);
     const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, game.terrain.wells.length].map((n) => (+n).toFixed(3)).join();
     if (key !== this.key) {
+      // The first trace for a new aim (a new turn) doesn't count as a change.
+      if (this.key) this.changed = performance.now();
       this.key = key;
       this.trace(game, p);
       this.line.material.color.set(p.color);
@@ -93,6 +101,7 @@ export class AimArc {
     const at = this.ground && screen(camera, this.ground[0], this.ground[1] + 4, this.ground[2]);
     const s = at || (this.top && screen(camera, this.top[0], this.top[1] + 3, this.top[2]));
     this.label.classList.toggle('hidden', !s);
+    this.label.classList.toggle('quiet', quiet || !(performance.now() - this.changed < LABEL_HOLD));
     if (s) this.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
   }
 

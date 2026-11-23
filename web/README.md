@@ -284,18 +284,22 @@ second column beside the first. On a phone the players box sits top right.
 - **Aim arc.** While you plan, a dashed line in your colour shows the shell's
   climb from the muzzle to the top of its flight, with this turn's wind and
   any moon's pull, and a ring on the ground under the top says how high and
-  how far out it is ("top 98 m up, 199 m out"). On level ground a shell comes
+  how far out it is ("top 98 m up, 199 m out"). The words show only while you
+  change the aim and fade 1.5 s after you stop, leaving the dot at the top and
+  the ring; the sight never shows them. On level ground a shell comes
   down about twice as far out as its top. It stops short of the landing on
   purpose: that is still yours to judge (or the Rangefinder's).
 - **Angle dials** (Settings > Angle dials, on by default). While you aim, two
   thin gauges sit on your own tank so you can read the turret and the barrel
   on the tank itself. A ring lies on the ground round it, hugging the terrain,
-  with a tick every 15° and a number every 45° (0 is east, +x, and the numbers
-  grow to the right of your aim, as in the turret readout on the card); an
+  with a tick every 15°, long at 0, 90, 180 and 270 (0 is east, +x, and
+  angles grow to the right of your aim, as in the turret readout on the card); an
   amber arrow shows where the turret points, with its reading, and a faint
   white one where your last shot went. A quarter arc stands beside the barrel,
-  on the side the camera is on, from 0° level to 90° straight up with a number
-  every 15°, an amber needle for the barrel and a faint one for the last shot.
+  on the side the camera is on, from 0° level to 90° straight up with a tick
+  every 15° (long at 0, 45 and 90), an amber needle for the barrel and a faint
+  one for the last shot. Neither dial prints fixed numbers (they crowded the
+  tank on a phone): the only numbers are the live readings at the pointer tips.
   The readings are the card's, digit for digit. They fade out in flight, in
   the sight and in the overview. Seen from right behind the barrel, the arc's
   plane would be edge on, so it turns up to 50° toward you. Pure layout and

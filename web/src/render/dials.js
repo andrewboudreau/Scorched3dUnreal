@@ -190,7 +190,7 @@ export class AngleDials {
     this.ring.frustumCulled = false;
     this.ring.renderOrder = 4;
     this.root.add(this.ring);
-    this.ringNums = this.ticks.filter((t) => t.major).map((t) => {
+    this.ringNums = this.ticks.filter((t) => t.label).map((t) => {
       const l = new Label({});
       l.set(t.label);
       l.deg = t.deg;
@@ -223,6 +223,7 @@ export class AngleDials {
       const len = t.major ? 1.7 : 1.0, w = 0.15;
       const r0 = ARC_R - len, r1 = ARC_R + 0.2;
       m.quad([c * r0 - s * w, s * r0 + c * w, 0], [c * r1 - s * w, s * r1 + c * w, 0], [c * r1 + s * w, s * r1 - c * w, 0], [c * r0 + s * w, s * r0 - c * w, 0]);
+      if (!t.label) continue;
       const l = new Label({ color: SKY });
       l.set(t.label);
       l.sprite.position.set(c * (ARC_R + 1.7), s * (ARC_R + 1.7), 0);

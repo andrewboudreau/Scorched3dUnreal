@@ -3,19 +3,19 @@ import assert from 'node:assert/strict';
 import { ringTicks, elevTicks, yawText, elevText, wrapDeg, yawDir, fadeStep, arcSide, loadDials, saveDials, DIALS_KEY } from '../src/dialmath.js';
 import { muzzleDirection } from '../src/core/ballistics.js';
 
-test('the ring has a tick every 15 degrees, long with a number every 45', () => {
+test('the ring has a tick every 15 degrees, long every 90, and no fixed numbers', () => {
   const t = ringTicks();
   assert.equal(t.length, 24);
   assert.deepEqual(t.map((x) => x.deg), [...Array(24).keys()].map((i) => i * 15));
-  const major = t.filter((x) => x.major);
-  assert.deepEqual(major.map((x) => x.label), ['0', '45', '90', '135', '180', '225', '270', '315']);
-  assert.ok(t.filter((x) => !x.major).every((x) => x.label === ''));
+  assert.deepEqual(t.filter((x) => x.major).map((x) => x.deg), [0, 90, 180, 270]);
+  assert.ok(t.every((x) => x.label === ''));
 });
 
-test('the elevation arc runs 0 to 90, numbered every 15, long at 0, 45 and 90', () => {
+test('the elevation arc runs 0 to 90 with a tick every 15, long at 0, 45 and 90, no numbers', () => {
   const t = elevTicks();
-  assert.deepEqual(t.map((x) => x.label), ['0', '15', '30', '45', '60', '75', '90']);
+  assert.deepEqual(t.map((x) => x.deg), [0, 15, 30, 45, 60, 75, 90]);
   assert.deepEqual(t.filter((x) => x.major).map((x) => x.deg), [0, 45, 90]);
+  assert.ok(t.every((x) => x.label === ''));
 });
 
 test('readings are printed exactly as the HUD prints them', () => {

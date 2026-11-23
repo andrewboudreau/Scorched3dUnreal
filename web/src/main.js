@@ -1258,7 +1258,7 @@ function lastShotText(p) {
 
 function updateAimAids() {
   const p = planning();
-  aimArc.update(game, p, camera);
+  aimArc.update(game, p, camera, { quiet: gunner.active });
   dials.update({ game, p: killCam || overview || gunner.active ? null : p, camera, dt: lastDt });
   const enemies = [];
   for (const q of p ? game.players : []) {
