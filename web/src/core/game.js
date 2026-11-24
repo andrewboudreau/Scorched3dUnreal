@@ -10,6 +10,7 @@ import { generateRidgeline, keepCrust, rowStarts, slump, RIDGE } from './ridgeli
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
 import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
+import { DEFAULT_TIME, resolveTime } from './timeofday.js';
 import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
@@ -110,6 +111,9 @@ export class Game {
     lab = null,
     // A testing aid (?modifier=rain): every round is this modifier, rolled or not.
     modifier = null,
+    // The time of day (core/timeofday.js): 'dawn', 'day', 'dusk', 'night' or
+    // 'random' (picked from the seed). Render-only: nothing in the rules reads it.
+    time = DEFAULT_TIME,
   }) {
     const known = (list, all) => (Array.isArray(list) ? list.filter((id) => all.some((x) => x.id === id)) : null);
     const noTwists = twists === false;
@@ -120,6 +124,7 @@ export class Game {
       modifiers: noTwists ? [] : known(modifiers, MODIFIERS),
       lab: { ...normalizeLab(lab), ...normalizeModLab(lab) },
       modifier: MODIFIER_BY_ID[modifier] ? modifier : null,
+      time: resolveTime(time, seed),
     };
     this.cfg.twists = this.draftOn || MODIFIERS.some((m) => this.modifierOn(m.id));   // kept for anything that still reads it
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }

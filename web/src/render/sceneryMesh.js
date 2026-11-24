@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BRIDGE, BUILDINGS, isBuilding } from '../core/scenery.js';
 import { addFogShade } from './terrainMesh.js';
+import { look } from './timeofday.js';
 import { ArtifactMesh } from './artifactMesh.js';
 
 // Draws core/scenery.js: one InstancedMesh per kind of prop, a merged bridge
@@ -24,6 +25,7 @@ const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 const BODY = new THREE.Matrix4();
 const LIMB = new THREE.Matrix4();
 const LEG_COLOUR = new THREE.Color('#3b3f52');
+const WINDOW = '#2f3b47';
 const VILLAGER_SCALE = 1.35;
 const WHITE = new THREE.Color('#ffffff');
 // Where each limb hangs from, in the villager's own space (x is forward):
@@ -51,15 +53,16 @@ function merge(parts) {
     M.compose(P.set(x, y, z), Q.setFromEuler(EULER.set(rotX, rotY, rotZ, 'YXZ')), S.set(sx, sy, sz));
     const a = g.attributes.position;
     c.set(colour);
+    const alpha = colour === WINDOW ? 0.5 : 1;    // a window is marked by its alpha: it shines after dark
     for (let i = 0; i < a.count; i++) {
       P.fromBufferAttribute(a, i).applyMatrix4(M);
       pos.push(P.x, P.y, P.z);
-      col.push(c.r, c.g, c.b);
+      col.push(c.r, c.g, c.b, alpha);
     }
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
   out.computeVertexNormals();
   return out;
 }
@@ -363,6 +366,17 @@ vec2 wWave(vec2 p, vec2 d, float k, float speed, float amp) { return d * amp * c
   normal = normalize(normal + (viewMatrix * vec4(rip, 0.0)).xyz);
 }`);
   };
+  // After dark the village's windows glow: the vertices marked by a half
+  // alpha (see merge) shine by `look.lit`.
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uLit = look.lit;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uLit;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+#ifdef USE_COLOR_ALPHA
+if (uLit > 0.0 && vColor.a < 0.9) totalEmissiveRadiance += vec3(1.0, 0.72, 0.36) * uLit * 1.3;
+#endif`);
+  };
   addFogShade(material, 'props');
   addFogShade(water, 'water');
   shared = { geo, tints, material, water, time };
@@ -521,6 +535,7 @@ export class SceneryMesh {
     const a = assets();
     const sc = this.scenery;
     a.time.value = time;
+    if (a.water.userData.tint !== look.preset.water) a.water.color.set(a.water.userData.tint = look.preset.water);   // the time of day's tint
     this.relics.sync(time);
     if (this.seen !== sc.version) {
       this.seen = sc.version;

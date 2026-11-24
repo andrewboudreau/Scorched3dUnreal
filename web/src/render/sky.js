@@ -1,18 +1,27 @@
 import * as THREE from 'three';
 import { groundShade, MAX_CLOUD_SHADOWS } from './terrainMesh.js';
+import { setLook } from './timeofday.js';
 
 // Sky dome, sun, sky light, fog and clouds. The sun crosses the sky over a
-// match: `setDay(0)` is late morning, `setDay(1)` a golden late afternoon. It
-// never gets dark; only the direction and the warmth of the light change.
+// match: `setDay(0)` is the match's start, `setDay(1)` its end. What the sky,
+// light, fog, shadows and water look like comes from the match's time of day
+// (render/timeofday.js, set with `setTime`): Dawn, Day (late morning to a golden
+// afternoon), Dusk or Night.
 
-const DAY = {
-  sun: new THREE.Color('#fff0d8'), skyLight: new THREE.Color('#cfe1ff'), groundLight: new THREE.Color('#6b5638'),
-  top: new THREE.Color('#1c63e8'), mid: new THREE.Color('#6fa8ee'), horizon: new THREE.Color('#b4d4f2'), cloud: new THREE.Color('#ffffff'),
-};
-const GOLD = {
-  sun: new THREE.Color('#ffc078'), skyLight: new THREE.Color('#ffdcc0'), groundLight: new THREE.Color('#70503a'),
-  top: new THREE.Color('#2a62d0'), mid: new THREE.Color('#86b2e6'), horizon: new THREE.Color('#f8c890'), cloud: new THREE.Color('#ffe6c8'),
-};
+const DEG = Math.PI / 180;
+const FOG_SPACE = new THREE.Color('#b4d4f2');   // the isles' own fog colour, whatever the time
+
+// One time's keyframe hexes as Colors, made once per time and kept.
+const KEYS = ['sun', 'sky', 'ground', 'top', 'mid', 'horizon', 'cloud', 'fog'];
+const kfCache = new Map();
+function keyframes(p) {
+  if (!kfCache.has(p.id)) {
+    const make = (f) => Object.fromEntries(KEYS.map((k) => [k, new THREE.Color(f[k])]));
+    kfCache.set(p.id, { a: make(p.a), b: make(p.b), glow: new THREE.Color(p.glow), bottom: new THREE.Color(p.bottom), water: new THREE.Color(p.water) });
+  }
+  return kfCache.get(p.id);
+}
+const WET_C = new THREE.Color();   // a Rain round's grey, dimmed for the time of day
 // The floating isles hang in open space: a dark sky with a violet glow low
 // down, stars all round (below as well), and a ringed planet.
 const SPACE = {
@@ -35,7 +44,7 @@ const WET = {
   top: new THREE.Color('#4f5c6c'), mid: new THREE.Color('#7f8b98'), horizon: new THREE.Color('#a9b0b8'), cloud: new THREE.Color('#8d959e'),
   mix: 0.7, sun: 0.5, fogNear: 260, fogFar: 1500,
 };
-const FOG = { near: 700, far: 2600 };
+const FOG = { near: 700, far: 2600 };   // the isles' and the ridgeline's fog distances
 const CLOUD_SPAN = 1500;
 
 const M = new THREE.Matrix4();
@@ -49,7 +58,7 @@ export class Sky {
     this.day = -1;
     this.half = 400;
     this.sunDir = new THREE.Vector3(0.55, 0.62, 0.35).normalize();
-    this.horizon = DAY.horizon.clone();
+    this.horizon = new THREE.Color('#b4d4f2');
     scene.fog = new THREE.Fog(this.horizon, FOG.near, FOG.far);
     this.fog = scene.fog;
     this.wet = 0;                 // 0..1, how much a Rain round greys the day (setWeather)
@@ -61,8 +70,8 @@ export class Sky {
         depthWrite: false,
         fog: false,
         uniforms: {
-          top: { value: DAY.top.clone() },
-          mid: { value: DAY.mid.clone() },
+          top: { value: new THREE.Color('#1c63e8') },
+          mid: { value: new THREE.Color('#6fa8ee') },
           horizon: { value: this.horizon },
           bottom: { value: new THREE.Color('#a39276') },
           sun: { value: this.sunDir },
@@ -111,9 +120,9 @@ export class Sky {
     );
     scene.add(this.dome);
 
-    this.hemi = new THREE.HemisphereLight(DAY.skyLight, DAY.groundLight, 0.8);
+    this.hemi = new THREE.HemisphereLight('#cfe1ff', '#6b5638', 0.8);
     scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(DAY.sun, 2.2);
+    this.sun = new THREE.DirectionalLight('#fff0d8', 2.2);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
     this.sun.shadow.bias = -0.0005;
@@ -126,7 +135,24 @@ export class Sky {
     this.buildSpace(scene);
     this.space = false;
     this.ridge = false;
-    this.setDay(0);
+    this.setTime('day');
+  }
+
+  // The match's time of day ('dawn', 'day', 'dusk' or 'night'): the sky,
+  // light, fog, shadows, water and the lights that come on in the dark all
+  // follow it. Called when a match starts, and with 'day' for the menu.
+  setTime(id) {
+    this.tod = setLook(id);
+    this.kf = keyframes(this.tod);
+    this.syncStars();
+    const d = this.day;
+    this.day = -1;
+    this.setDay(d < 0 ? 0 : d);
+  }
+
+  // Stars over the isles always, and over the meadows on a night.
+  syncStars() {
+    this.stars.visible = this.space || (this.tod.stars && !this.ridge);
   }
 
   // Stars and a ringed planet, shown only over the floating isles.
@@ -172,7 +198,8 @@ export class Sky {
   setSpace(on) {
     if (on === this.space) return;
     this.space = on;
-    this.stars.visible = this.planet.visible = on;
+    this.planet.visible = on;
+    this.syncStars();
     this.cloudMesh.visible = !on && !this.ridge;
     if (on) for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
     const d = this.day;
@@ -186,10 +213,7 @@ export class Sky {
     this.ridge = on;
     this.cloudMesh.visible = !on && !this.space;
     if (on) for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
-    // A dusk haze in the distance (the dry fog colour, if a Rain round has greyed it).
-    const fog = this.fogDry || this.fog.color;
-    this.fogMeadow ??= fog.clone();
-    fog.copy(on ? RIDGE.fog : this.fogMeadow);
+    this.syncStars();
     const d = this.day;
     this.day = -1;
     this.setDay(d < 0 ? 0 : d);
@@ -224,7 +248,7 @@ export class Sky {
       blobs += n;
     }
     this.cloudMaterial = new THREE.MeshStandardMaterial({
-      color: DAY.cloud.clone(), roughness: 1, flatShading: true, fog: false,
+      color: new THREE.Color('#ffffff'), roughness: 1, flatShading: true, fog: false,
       emissive: '#c3d3e6', emissiveIntensity: 0.6,
     });
     this.cloudMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), this.cloudMaterial, blobs);
@@ -244,24 +268,29 @@ export class Sky {
     k = Math.max(0, Math.min(1, k));
     if (Math.abs(k - this.day) < 0.0004) return;
     this.day = k;
-    const elev = (58 - 34 * k ** 1.4) * (Math.PI / 180);
-    const azim = 0.45 + 2.0 * k;
+    const T = this.tod, { a, b } = this.kf;
+    const elev = (T.elev[0] + (T.elev[1] - T.elev[0]) * k ** 1.4) * DEG;
+    const azim = T.azim[0] + T.azim[1] * k;
     this.sunDir.set(Math.cos(azim) * Math.cos(elev), Math.sin(elev), Math.sin(azim) * Math.cos(elev));
     const w = THREE.MathUtils.smoothstep(k, 0.35, 1);
-    this.sun.color.lerpColors(DAY.sun, GOLD.sun, w);
-    this.sun.intensity = 2.2 - 0.15 * w;
-    this.hemi.color.lerpColors(DAY.skyLight, GOLD.skyLight, w);
-    this.hemi.groundColor.lerpColors(DAY.groundLight, GOLD.groundLight, w);
-    this.hemi.intensity = 0.8 + 0.12 * w;
-    this.dome.material.uniforms.top.value.lerpColors(DAY.top, GOLD.top, w);
-    this.dome.material.uniforms.mid.value.lerpColors(DAY.mid, GOLD.mid, w);
-    this.horizon.lerpColors(DAY.horizon, GOLD.horizon, w);
-    this.cloudMaterial.color.lerpColors(DAY.cloud, GOLD.cloud, w);
+    this.sun.color.lerpColors(a.sun, b.sun, w);
+    this.sun.intensity = T.a.sunI + (T.b.sunI - T.a.sunI) * w;
+    this.sun.shadow.intensity = T.shadow;
+    this.hemi.color.lerpColors(a.sky, b.sky, w);
+    this.hemi.groundColor.lerpColors(a.ground, b.ground, w);
+    this.hemi.intensity = T.a.hemiI + (T.b.hemiI - T.a.hemiI) * w;
+    this.dome.material.uniforms.top.value.lerpColors(a.top, b.top, w);
+    this.dome.material.uniforms.mid.value.lerpColors(a.mid, b.mid, w);
+    this.horizon.lerpColors(a.horizon, b.horizon, w);
+    this.cloudMaterial.color.lerpColors(a.cloud, b.cloud, w);
     const U = this.dome.material.uniforms;
     U.space.value = this.space ? 1 : 0;
-    U.bottom.value.set(this.space ? SPACE.bottom : '#a39276');
+    U.bottom.value.copy(this.space ? SPACE.bottom : this.kf.bottom);
+    U.glow.value.copy(this.kf.glow);
     U.band.value = this.ridge ? RIDGE.band : 0.16;
-    if (this.ridge && !this.space) {
+    // The Ridgeline's own look is a dusk: on a Dusk match it keeps that one, and
+    // on the other times it takes the time's sky (with its own wide horizon band).
+    if (this.ridge && !this.space && T.id === 'dusk') {
       // Dusk all match long: the sun holds low in the south-west.
       this.sunDir.copy(RIDGE.dir);
       this.sun.color.copy(RIDGE.sun);
@@ -284,30 +313,34 @@ export class Sky {
       U.top.value.copy(SPACE.top);
       U.mid.value.copy(SPACE.mid);
       this.horizon.copy(SPACE.horizon);
+      this.sun.shadow.intensity = 1;
     }
     const r = this.space ? 0 : this.wet;
     if (r > 0) {
-      const m = r * WET.mix;
+      // The Rain round's greys, as bright as the time of day lets them be.
+      const m = r * WET.mix, wet = T.wet;
       this.sun.intensity *= 1 - WET.sun * r;
       this.hemi.intensity *= 1 - 0.15 * r;
-      this.hemi.color.lerp(WET.skyLight, m);
-      this.hemi.groundColor.lerp(WET.groundLight, m);
-      U.top.value.lerp(WET.top, m);
-      U.mid.value.lerp(WET.mid, m);
-      this.horizon.lerp(WET.horizon, m);
-      this.cloudMaterial.color.lerp(WET.cloud, m);
+      this.hemi.color.lerp(WET_C.copy(WET.skyLight).multiplyScalar(wet), m);
+      this.hemi.groundColor.lerp(WET_C.copy(WET.groundLight).multiplyScalar(wet), m);
+      U.top.value.lerp(WET_C.copy(WET.top).multiplyScalar(wet), m);
+      U.mid.value.lerp(WET_C.copy(WET.mid).multiplyScalar(wet), m);
+      this.horizon.lerp(WET_C.copy(WET.horizon).multiplyScalar(wet), m);
+      this.cloudMaterial.color.lerp(WET_C.copy(WET.cloud).multiplyScalar(wet), m);
     }
-    this.cloudMaterial.emissiveIntensity = 0.6 * (1 - 0.6 * r);
-    // The fog's own colour (not the dome's horizon) greys too; the dry one is kept to go back to.
-    if (r > 0) {
-      this.fogDry ??= this.fog.color.clone();
-      this.fog.color.copy(this.fogDry).lerp(WET.horizon, r * 0.85);
-    } else if (this.fogDry) {
-      this.fog.color.copy(this.fogDry);
-      this.fogDry = null;
-    }
-    this.fog.near = FOG.near + (WET.fogNear - FOG.near) * r;
-    this.fog.far = FOG.far + (WET.fogFar - FOG.far) * r;
+    this.cloudMaterial.emissiveIntensity = (this.space ? 0.6 : T.cloudGlow) * (1 - 0.6 * r);
+    // The fog: the time's own colour and distances over the meadows (and the
+    // ridgeline), the old ones over the isles and a Dusk ridgeline. Rain greys
+    // and closes it in.
+    const own = this.space || (this.ridge && T.id === 'dusk');
+    const fc = this.fog.color;
+    if (this.space) fc.copy(FOG_SPACE);
+    else if (own) fc.copy(RIDGE.fog);
+    else fc.lerpColors(a.fog, b.fog, w);
+    if (r > 0) fc.lerp(WET_C.copy(WET.horizon).multiplyScalar(T.wet), r * 0.85);
+    const near = own ? FOG.near : T.fogNear, far = own ? FOG.far : T.fogFar;
+    this.fog.near = near + (Math.min(near, WET.fogNear) - near) * r;
+    this.fog.far = far + (Math.min(far, WET.fogFar) - far) * r;
     this.place();
   }
 

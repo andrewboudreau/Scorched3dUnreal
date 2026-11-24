@@ -14,6 +14,7 @@
 import { WEAPONS } from './core/weapons.js';
 import { PERKS, MODIFIERS } from './core/perks.js';
 import { RIDGE } from './core/ridgeline.js';
+import { TIME_IDS, DEFAULT_TIME, timeName } from './core/timeofday.js';
 
 // ---------------------------------------------------------------- wind and terrain
 
@@ -68,20 +69,31 @@ export function matchConditions({ wind = RANDOM, terrain = RANDOM } = {}, forced
   return { maxWind, ...terrainConfig(t) };
 }
 
+// The Time of day select ('random' or an id) as the config's `time`. It is left
+// as 'random' here: the Game picks from its seed (core/timeofday.js), so every
+// screen of an online match agrees. `forced` (the query string) beats the select.
+export function matchTime(value = RANDOM, forced = {}) {
+  const v = forced.time ?? value;
+  return TIME_IDS.includes(v) ? v : RANDOM;
+}
+
 // What a match was dealt, in words: "Hilly · Gusty wind". A value no menu
-// offers (from the query string) shows as a number.
+// offers (from the query string) shows as a number. A dawn, dusk or night is
+// added at the end ("· Dusk"); the plain Day is not worth a word.
 export function conditionsLabel(cfg) {
   if (!cfg) return '';
   const w = WIND.find((x) => x.value === cfg.maxWind);
   const wind = w ? `${w.name} wind` : `Wind ${Number(cfg.maxWind) || 0}`;
   const t = cfg.world && cfg.world !== 'meadow' ? TERRAIN.find((x) => x.id === cfg.world) : TERRAIN.find((x) => Number(x.value) === cfg.hills);
   const ground = t ? t.name : `Hills ${cfg.hills}`;
-  return `${ground} · ${wind}`;
+  const time = cfg.time && cfg.time !== DEFAULT_TIME ? timeName(cfg.time) : '';
+  return `${ground} · ${wind}${time ? ` · ${time}` : ''}`;
 }
 
 // ---------------------------------------------------------------- the testing query string
 
 // ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|city|isles|ridgeline,
+// ?time=dawn|day|dusk|night,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
 // ?sat=1|2|3, ?orbiter=1|2|3, ?decoy=1|2|3 and ?pointdef=1|2|3 (every tank
 // starts with that mod at that level), ?labels=few|some|many (the satellite's labelled cells),
@@ -102,6 +114,8 @@ export function parseTestParams(search) {
   const terrain = (q.get('terrain') || '').toLowerCase();
   const t = TERRAIN.find((x) => x.id === terrain);
   if (t) out.terrain = t.value;
+  const time = (q.get('time') || '').toLowerCase();
+  if (TIME_IDS.includes(time)) out.time = time;
   const lab = {};
   const level = (k) => { const n = Number(q.get(k)); return [1, 2, 3].includes(n) ? n : 0; };
   if (level('sat')) Object.assign(lab, { satellite: 'all', level: level('sat') });

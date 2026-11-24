@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { addFogShade } from './terrainMesh.js';
+import { look } from './timeofday.js';
 
 // The Ridgeline's look (core/ridgeline.js): flat-shaded rock in banded strata.
 // The beds follow the world's height, so a crater wall cuts through them and
@@ -25,6 +26,7 @@ const uniforms = {
   uCrustLo: { value: new THREE.Color(CRUST_LOW) },
   uCrustHi: { value: new THREE.Color(CRUST_HIGH) },
   uLoose: { value: new THREE.Color(LOOSE) },
+  uLit: look.lit,   // 0 by day, 1 at night: the rock cools and darkens (render/timeofday.js)
 };
 
 // The colour of the rock at world point p: beds about 3 m thick, of uneven
@@ -35,6 +37,7 @@ uniform vec3 uDeep;
 uniform vec3 uCrustLo;
 uniform vec3 uCrustHi;
 uniform vec3 uLoose;
+uniform float uLit;
 varying vec3 vRidgeP;
 vec3 strataAt(vec3 p) {
   float y = p.y + sin(p.x * 0.019 + p.z * 0.011) * 2.2 + sin(p.x * 0.061 - p.z * 0.037) * 0.7;
@@ -70,7 +73,9 @@ diffuseColor.rgb *= strataAt(vRidgeP);`)
       // A share of the rock's own colour as glow, so beds in shadow (a crater's
       // far wall, a cliff face turned from the sun) keep their bands.
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-totalEmissiveRadiance += diffuseColor.rgb * 0.16;`);
+float night = smoothstep(0.8, 1.0, uLit);   // only Night: a Dusk ridge keeps its own red look
+totalEmissiveRadiance += diffuseColor.rgb * 0.16 * (1.0 - 0.4 * night);
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.66, 0.74, 1.0), night);`);
   };
   addFogShade(material, ground ? 'ridge-ground' : 'ridge-cliff');
 }

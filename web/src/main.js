@@ -38,7 +38,7 @@ import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { watchPortraitExit } from './portraitexit.js';
-import { MatchBuilder, matchConditions, conditionsLabel, parseTestParams } from './builder.js';
+import { MatchBuilder, matchConditions, matchTime, conditionsLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
 
 const $ = (id) => document.getElementById(id);
@@ -248,6 +248,7 @@ function disposeMatch() {
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
+  sky.setTime('day');      // the menu's own sky
   setRidgeWorld(false, { sky, floor });
   rain.clear();
   lastLand.clear();
@@ -263,6 +264,7 @@ function startMatch(config) {
   disposeMatch();
   scene.remove(menuMesh.group, menuScenery.group);
   game = new Game(config);
+  sky.setTime(game.cfg.time);      // before the tanks and the city, which light themselves by it
   terrainMesh = new TerrainMesh(game.terrain);
   sceneryMesh = new SceneryMesh(game.scenery);
   scene.add(terrainMesh.group, sceneryMesh.group);
@@ -1961,6 +1963,7 @@ function customOptions() {
   return {
     rounds: Number($('opt-rounds').value),
     ...matchConditions({ wind: $('opt-wind').value, terrain: $('opt-hills').value }, testParams),
+    time: matchTime($('opt-time').value, testParams),
     fog: $('opt-fog').value === '1',
     ...builder.lists(),
     lab: testParams.lab || null,
@@ -1974,7 +1977,7 @@ $('play').onclick = () => {
   phoneFullscreen(touch);
   if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
-  startMatch({ ...defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab), modifier: testParams.modifier || null });
+  startMatch({ ...defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab), modifier: testParams.modifier || null, time: matchTime('random', testParams) });
 };
 
 $('start').onclick = () => {
