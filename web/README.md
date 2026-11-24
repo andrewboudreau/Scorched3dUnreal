@@ -418,11 +418,16 @@ second column beside the first. On a phone the players box sits top right.
   undercuts sags to the angle of repose (`RIDGE.repose`, `slump`). The slump is
   a fixed local pass with no randomness, replayed from the ground ops like a
   crater, so every copy of the game gets the same ground. The ground is
-  flat-shaded rock in banded strata (`render/ridgeline.js`): a crater cuts
-  through the weathered crust and shows the beds, and the field's edges are
-  cut-away cliff faces. A dusk sky with no clouds, a few boulders and nothing
-  else: no grass, trees, water or villages. The overview (View) stands back
-  side on.
+  smooth sandstone in five broad, soft strata (`render/ridgeline.js`: rust,
+  warm sandstone, a cream band, terracotta, pale cap rock, with gently wavy
+  edges and no colour noise). Steep faces show the beds; flat tops and ledges
+  lie under pale dust, and ground a blast cut or heaped, with the slopes that
+  slumped from it, reads as lighter loose sand. Far rock fades into the haze and
+  the low floor clears into the horizon in a gradient, and the sky follows the
+  palette by time of day (warm haze by day, peach at dawn, deep orange at dusk,
+  cool at night). The field's edges are cut-away cliff faces. No clouds, a few
+  boulders and nothing else: no grass, trees, water or villages. The overview
+  (View) stands back side on.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
   they come from the **skill tree** between rounds. Each mod is a branch:
   rank 1 (Orbital Mechanic, Sat Recon, Smoke and Mirrors, Close-In Gunner)
@@ -659,7 +664,7 @@ second column beside the first. On a phone the players box sits top right.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
-  in `artifactMesh.js`), the Ridgeline's banded rock (`ridgeline.js`), the sky, sun and
+  in `artifactMesh.js`), the Ridgeline's strata (`ridgeline.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round; the time-of-day presets in `timeofday.js`),
   the falling rain (`rain.js`), the isles' moons
   (`moons.js`), the flux lines that show a moon or an orbiter pulling a shell

@@ -34,8 +34,16 @@ const SPACE = {
 // south-west that rakes across the ridges. No clouds: the profile stays crisp.
 const RIDGE = {
   sun: new THREE.Color('#ffd0a0'), skyLight: new THREE.Color('#a4a8e8'), groundLight: new THREE.Color('#6e4034'),
-  top: new THREE.Color('#141a44'), mid: new THREE.Color('#5b3f7e'), horizon: new THREE.Color('#f39a5c'), bottom: new THREE.Color('#4a2c3c'),
-  dir: new THREE.Vector3(-0.62, 0.36, 0.7).normalize(), band: 0.42, fog: new THREE.Color('#c98670'),
+  top: new THREE.Color('#141a44'), mid: new THREE.Color('#5b3f7e'), horizon: new THREE.Color('#ef7a36'), bottom: new THREE.Color('#4a2c3c'),
+  dir: new THREE.Vector3(-0.62, 0.36, 0.7).normalize(), band: 0.42, fog: new THREE.Color('#c4724c'),
+};
+// The other times of day over the Ridgeline lean toward these, so the sky and
+// haze share the rock's palette: a warm haze by day, peach at dawn, cool at
+// night. `k` is how far the time's own colours give way to them.
+const RIDGE_SKY = {
+  day: { top: new THREE.Color('#3f78c6'), mid: new THREE.Color('#a8c2dc'), horizon: new THREE.Color('#f5cd96'), k: 0.85 },
+  dawn: { top: new THREE.Color('#4a5aa2'), mid: new THREE.Color('#d6a0b0'), horizon: new THREE.Color('#f8bf98'), k: 0.7 },
+  night: { top: new THREE.Color('#050a22'), mid: new THREE.Color('#15224c'), horizon: new THREE.Color('#2a3c70'), k: 0.8 },
 };
 // A Rain round (render/rain.js): the day's colours lean toward these by the
 // rain's amount, the sun dims and the fog closes in.
@@ -315,6 +323,12 @@ export class Sky {
       this.horizon.copy(SPACE.horizon);
       this.sun.shadow.intensity = 1;
     }
+    const rs = this.ridge && !this.space ? RIDGE_SKY[T.id] : null;
+    if (rs) {
+      U.top.value.lerp(rs.top, rs.k * 0.7);
+      U.mid.value.lerp(rs.mid, rs.k);
+      this.horizon.lerp(rs.horizon, rs.k);
+    }
     const r = this.space ? 0 : this.wet;
     if (r > 0) {
       // The Rain round's greys, as bright as the time of day lets them be.
@@ -336,6 +350,7 @@ export class Sky {
     const fc = this.fog.color;
     if (this.space) fc.copy(FOG_SPACE);
     else if (own) fc.copy(RIDGE.fog);
+    else if (rs) fc.copy(this.horizon).multiplyScalar(0.94);   // the haze is the horizon's own colour
     else fc.lerpColors(a.fog, b.fog, w);
     if (r > 0) fc.lerp(WET_C.copy(WET.horizon).multiplyScalar(T.wet), r * 0.85);
     const near = own ? FOG.near : T.fogNear, far = own ? FOG.far : T.fogFar;
