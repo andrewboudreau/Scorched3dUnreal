@@ -228,3 +228,142 @@ test('city: traffic drives, keeps to the streets, and blasts wreck or scatter it
   // Traffic never goes in the snapshot.
   assert.ok(!JSON.stringify(g.snapshot()).includes('vehicles'));
 });
+
+// ---------- chunks: directional damage, gaps, falls, collapse ----------
+
+// Which of a building's chunks stand (1) or are gone (0).
+const alive = (b) => b.cells.map((v) => (v > 0 ? 1 : 0));
+
+test('city: buildings are cut into quadrant chunks in bands of floors', () => {
+  const { c } = lot([[0, 0, 10, 10, 6], [60, 0, 3.5, 10, 2], [0, 60, 15, 15, 12]]);
+  const [mid, thin, tower] = c.buildings;
+  assert.deepEqual([mid.nx, mid.nz, mid.bf, mid.nb], [2, 2, 2, 3]);
+  assert.deepEqual([thin.nx, thin.nz, thin.bf, thin.nb], [1, 2, 1, 2]);
+  assert.deepEqual([tower.nx, tower.nz, tower.bf, tower.nb], [2, 2, 3, 4]);
+  // Lower chunks carry more, so they take more.
+  assert.ok(tower.cellMax[0] > tower.cellMax[tower.cells.length - 1]);
+  assert.equal(mid.hp, mid.maxHp);
+  assert.equal(mid.lost, 0);
+});
+
+test('city: a hit on a corner takes that corner only', () => {
+  const { c } = lot([[0, 0, 10, 10, 6]]);
+  const b = c.buildings[0];
+  // A big blast at the foot of the south-west corner.
+  c.blast(-10, b.base + 2, -10, 14, 55);
+  assert.deepEqual(alive(b), [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 'only the ground corner went');
+  assert.ok(!c.failing(b) && b.top === b.base + 6 * CITY.floor + CITY.parapet);
+  // A shell on the roof's north-east corner takes the top of that corner.
+  c.blast(10, b.top, 10, 11, 38);
+  assert.equal(b.cells[11], 0, 'the top north-east chunk');
+  assert.equal(alive(b).reduce((s, v) => s + v, 0), 10, 'and nothing else');
+  // A hit on the middle of a side takes that side's chunks, not the far side's.
+  const { c: c2 } = lot([[0, 0, 10, 10, 6]]);
+  const s = c2.buildings[0];
+  c2.blast(0, s.base + 10, -10, 14, 55);
+  assert.deepEqual(alive(s).slice(4, 8), [0, 0, 1, 1], 'the south half of the middle band');
+  assert.ok(c2.events.some((e) => e.how === 'chunks' && e.lost.includes(4) && e.lost.includes(5)));
+});
+
+test('city: a shell flies through a gap blown in a building and stops at what stands', () => {
+  const { t, c } = lot([[0, 0, 10, 10, 6]]);
+  const b = c.buildings[0];
+  const y = b.base + 10;   // the middle band
+  c.blast(0, y, -10, 14, 55);   // a hole through the south half of the middle band
+  assert.equal(b.cells[4] + b.cells[5], 0);
+  assert.ok(!c.failing(b) && !b.collapsed);
+  // Along the south half, at the gap's height: in one side and out the other.
+  const through = simulateShot({ pos: [-80, y, -5], vel: [90, 0, 0], terrain: t, gravity: 0.001, maxTime: 1.5 });
+  assert.equal(through.point.building, undefined, `stopped at ${through.point}`);
+  // Along the north half the wall still stands.
+  const wall = simulateShot({ pos: [-80, y, 5], vel: [90, 0, 0], terrain: t, gravity: 0.001 });
+  assert.equal(wall.point.building, 0);
+  assert.ok(Math.abs(wall.point[0] + 10) < 0.01);
+  // Under the gap the ground floor still stops it.
+  const low = simulateShot({ pos: [-80, b.base + 2, -5], vel: [90, 0, 0], terrain: t, gravity: 0.001 });
+  assert.equal(low.point.building, 0);
+  assert.ok(!c.inside(0, -5, y) && c.inside(0, 5, y) && c.inside(0, -5, b.base + 2));
+});
+
+test('city: a chunk with nothing under it falls, unless its neighbours hold it', () => {
+  // A twelve-storey tower: four bands of three floors.
+  const { c } = lot([[0, 0, 15, 15, 12]]);
+  const b = c.buildings[0];
+  b.cells[0] = 1;   // the south-west foot, all but gone
+  c.blast(-15, b.base + 1, -15, 6, 16);
+  const col = (k) => [k, k + 4, k + 8, k + 12].map((j) => (b.cells[j] > 0 ? 1 : 0));
+  assert.deepEqual(col(0), [0, 0, 0, 0], 'three bands over a lost foot are too many to hang: the corner comes down');
+  assert.deepEqual([col(1), col(2), col(3)], [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]]);
+  const e = c.events.find((k) => k.how === 'chunks');
+  assert.deepEqual(e.fell, [4, 8, 12]);
+  assert.ok(!c.failing(b) && b.top > b.base + 40, 'the rest stands, at full height');
+  // A six-storey building holds two bands over a lost foot (a hole).
+  const { c: c2 } = lot([[0, 0, 10, 10, 6]]);
+  const m = c2.buildings[0];
+  m.cells[1] = 1;
+  const fallen = c2.blast(10, m.base + 1, -10, 6, 16);
+  assert.equal(fallen.heaps.length, 0);
+  assert.deepEqual(alive(m), [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 'it hangs over the gap');
+  // Take a neighbour's foot too and it no longer holds: the column falls, with
+  // a heap of debris in the street, and with half its ground floor gone the
+  // building comes down.
+  m.cells[3] = 1;
+  const f2 = c2.blast(10, m.base + 1, 10, 6, 16);
+  assert.ok(f2.heaps.length >= 1);
+  assert.equal(m.cells[5] + m.cells[9], 0, 'the south-east column fell');
+  const h = f2.heaps[0];
+  assert.ok(Math.abs(h.x) > m.hx && Math.abs(h.z) > m.hz, `the heap lands outside, at ${h.x}, ${h.z}`);
+  assert.ok(f2.includes(m.id));
+});
+
+test('city: losing half the ground floor brings a building down, in the game too', () => {
+  const g = city(17, 2);
+  const b = g.town.buildings.find((k) => k.nx === 2 && k.nz === 2 && k.floors0 >= 4 && k.floors0 <= 6);
+  assert.ok(b, 'a mid-rise to try it on');
+  // One ground corner: still standing.
+  g.applyEffect({ type: 'blast', point: [b.x - b.hx, b.base + 1, b.z - b.hz], radius: 14, damage: 55, depth: 0.6 }, null, null);
+  assert.equal(b.cells[0], 0);
+  assert.ok(!b.collapsed);
+  // The other on that side: down it comes, into a rubble mound.
+  g.applyEffect({ type: 'blast', point: [b.x + b.hx, b.base + 1, b.z - b.hz], radius: 14, damage: 55, depth: 0.6 }, null, null);
+  assert.ok(b.collapsed);
+  assert.ok(g.ground.ops.some((o) => o[0] === 'r' && o[1] === b.id));
+  assert.equal(g.town.contact([b.x - 60, b.base + 4, b.z], [b.x + 60, b.base + 4, b.z])?.building === b.id, false);
+});
+
+test('city: snapshot and restore carry every chunk; the ops replay to the same chunks', () => {
+  const a = city(19, 2);
+  const towers = [...a.town.buildings].sort((p, q) => q.floors0 - p.floors0).slice(0, 6);
+  // Corners, sides and roofs, with something falling along the way.
+  const hits = [];
+  for (const [i, b] of towers.entries()) {
+    const sx = i % 2 ? 1 : -1, sz = i % 3 ? 1 : -1;
+    hits.push([b.x + sx * b.hx, b.base + 1, b.z + sz * b.hz, 14, 55]);
+    hits.push([b.x + sx * b.hx, b.base + 8, b.z, 11, 38]);
+    hits.push([b.x, b.top, b.z + sz * b.hz, 11, 38]);
+  }
+  for (const [x, y, z, r, d] of hits) a.applyEffect({ type: 'blast', point: [x, y, z], radius: r, damage: d, depth: 0.6 }, null, null);
+  const cells = (g) => g.town.buildings.map((b) => b.cells.map((v) => Math.round(v * 100) / 100));
+  assert.ok(a.town.buildings.some((b) => !b.collapsed && b.lost > 0), 'some stand damaged');
+  assert.ok(a.ground.ops.some((o) => o[0] === 'm'), 'something fell and left debris');
+  const snap = JSON.parse(JSON.stringify(a.snapshot()));
+  // Restored from the snapshot (ground rebuilt from the ops).
+  const b = city(19, 2);
+  b.restore(snap);
+  assert.deepEqual(b.town.state(), a.town.state());
+  assert.deepEqual(cells(b), cells(a));
+  assert.deepEqual(b.town.buildings.map((k) => k.top), a.town.buildings.map((k) => k.top));
+  // A copy whose chunks drifted is put back by the state alone.
+  const c = city(19, 2);
+  c.restore(snap);
+  const d = c.town.buildings.find((k) => !k.collapsed && k.lost > 0);
+  d.cells.fill(0, 0, 2);
+  c.town.refresh(d);
+  c.restore(snap);
+  assert.deepEqual(cells(c), cells(a));
+  // The replay of the ops alone lands on exactly the same chunks and ground.
+  const r = city(19, 2);
+  r.rebuildGround(a.round, JSON.parse(JSON.stringify(a.ground)));
+  assert.deepEqual(r.town.buildings.map((k) => k.cells), a.town.buildings.map((k) => k.cells));
+  assert.deepEqual(Array.from(r.terrain.heights), Array.from(a.terrain.heights));
+});

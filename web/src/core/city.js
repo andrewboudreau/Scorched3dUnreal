@@ -11,10 +11,24 @@ import { Traffic } from './traffic.js';
 //  - A shell that meets a standing building's side or roof stops there and
 //    goes off (ballistics.groundContact asks `contact`, so the live game, the
 //    CPUs' solver, the aim arc and the Survey Satellite all see the same walls).
-//  - Blasts wear buildings down (`blast`): hit points, floors off the top (a
-//    broken top), and chunks out of the walls. A building with no hit points
-//    left comes down (`collapse`) into a rubble heap that the game raises as a
-//    mound in the ground, so it stays in the way of tanks and low shots.
+//  - Each building is split into chunks: its floors in bands (one storey each
+//    up to four, two up to eight, three above), and each band's footprint in
+//    quadrants (2x2; 2x1 or 1x1 for a thin one). Each chunk has its own hit
+//    points (`cells`), more for a bigger chunk and for one with more floors on
+//    top of it.
+//  - A blast (`blast`) hurts every chunk it reaches, by distance to that chunk,
+//    so a hit on a corner takes the corner and one on a side takes that side;
+//    a blast on a roof (from above) hurts the top chunks half again as much. A
+//    chunk with no hit points left is gone: shells fly through the gap.
+//  - Simple rules hold the rest up (`settle`): a chunk with nothing under it
+//    falls (and drops a little debris, a small mound at the foot of its side)
+//    unless the chunks either side of it still stand on something and it
+//    carries at most CITY.hang bands; so a hole can open in a facade, but a
+//    tower's corner over a lost foot comes down into the street.
+//  - A building that has lost half its ground floor, or most of itself
+//    (`failing`), comes down (`collapse`) into a rubble heap that the game
+//    raises as a mound in the ground, so it stays in the way of tanks and low
+//    shots.
 //  - Tanks cannot drive through a standing building (tank.js treats each as a
 //    box: `hx`, `hz`, `top`).
 //
@@ -22,7 +36,8 @@ import { Traffic } from './traffic.js';
 // blasts so far, in order: the game records each blast and each collapse in
 // its ground ops ('b' and 'r'), so another screen rebuilds the same city
 // (game.rebuildGround), and snapshots carry each building's state on top.
-// Traffic (core/traffic.js) is cosmetic, like the villagers.
+// Traffic (core/traffic.js) is cosmetic, like the villagers. No randomness
+// here past the layout: damage and falls follow fixed rules.
 
 export const CITY = {
   pitchX: [60, 72],    // m from one street's middle to the next, along x and along z
@@ -43,7 +58,14 @@ export const CITY = {
     { r: Infinity, floors: [1, 3] },   // shops and walk-ups, 4 to 11 m
   ],
   styles: 3,           // facade styles: 0 glass, 1 office, 2 brick (render/cityMesh.js)
+  split: 10,           // m: a side this long or longer is split in two (quadrants)
+  hang: 2,             // bands a chunk held up only by its neighbours can carry, itself included
+  roofHit: 1.5,        // a blast on a roof, from above, hurts the top chunks this much more
+  failGround: 0.5,     // share of the ground band lost that brings a building down
+  failAll: 0.3,        // ... or fewer than this share of all its chunks left
 };
+
+const BOX = [0, 0, 0, 0, 0, 0];   // scratch: a chunk's box (chunkBox)
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -165,11 +187,9 @@ export class City {
       const floors = Math.min(12, rng.int(lo, hi));
       const hx = (x1 - x0) / 2, hz = (z1 - z0) / 2;
       const id = this.buildings.length;
-      const h = floors * CITY.floor + CITY.parapet;
-      const maxHp = Math.round(50 + 6 * h + 0.04 * hx * hz * 4);
       this.buildings.push({
         id, box: true, x: (x0 + x1) / 2, z: (z0 + z1) / 2, hx, hz, base: 0, top: 0,
-        floors0: floors, floors, hp: maxHp, maxHp,
+        floors0: floors, floors, hp: 0, maxHp: 0,
         style: b.zone === 0 ? (rng.next() < 0.6 ? 0 : 1) : b.zone === 2 ? (rng.next() < 0.6 ? 2 : style) : style,
         tint: rng.int(0, 5), seed: rng.int(1, 1e9),
         broken: false, collapsed: false, hits: [],
@@ -184,11 +204,122 @@ export class City {
     let lo = t.heightAt(b.x, b.z);
     for (const [u, v] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) lo = Math.min(lo, t.heightAt(b.x + u * b.hx, b.z + v * b.hz));
     b.base = lo;
+    if (!b.cells) this.split(b);
     this.reroof(b);
   }
 
   reroof(b) {
     b.top = b.collapsed ? b.base : b.base + b.floors * CITY.floor + CITY.parapet;
+  }
+
+  // ---------- chunks ----------
+
+  // Cut a building into chunks: `nx` x `nz` quadrants in `nb` bands of `bf`
+  // floors. Chunk k is in band k / (nx nz), row (k / nx) % nz, column k % nx;
+  // `cells` holds their hit points (0: gone), `cellMax` what they started with.
+  split(b) {
+    b.nx = 2 * b.hx >= CITY.split ? 2 : 1;
+    b.nz = 2 * b.hz >= CITY.split ? 2 : 1;
+    b.bf = b.floors0 <= 4 ? 1 : b.floors0 <= 8 ? 2 : 3;
+    b.nb = Math.ceil(b.floors0 / b.bf);
+    const q = Math.sqrt(((2 * b.hx) / b.nx) * ((2 * b.hz) / b.nz));
+    b.cellMax = [];
+    for (let band = 0; band < b.nb; band++) {
+      const f0 = band * b.bf, f1 = Math.min(f0 + b.bf, b.floors0);
+      const hp = Math.round(50 + 1.5 * q + 10 * (f1 - f0) + 8 * (b.floors0 - f1));
+      for (let c = 0; c < b.nx * b.nz; c++) b.cellMax.push(hp);
+    }
+    b.cells = b.cellMax.slice();
+    b.maxHp = b.cellMax.reduce((s, v) => s + v, 0);
+    this.refresh(b);
+  }
+
+  // What follows from the cells: hit points, chunks lost, floors and roof.
+  refresh(b) {
+    const per = b.nx * b.nz;
+    let hp = 0, lost = 0, floors = 0;
+    for (let k = 0; k < b.cells.length; k++) {
+      if (b.cells[k] > 0) {
+        hp += b.cells[k];
+        const f1 = Math.min((((k / per) | 0) + 1) * b.bf, b.floors0);
+        if (f1 > floors) floors = f1;
+      } else lost++;
+    }
+    b.hp = hp;
+    b.lost = lost;
+    b.floors = b.collapsed ? 0 : floors;
+    b.broken = lost > 0;
+    this.reroof(b);
+  }
+
+  // Has it lost enough to come down?
+  failing(b) {
+    const per = b.nx * b.nz;
+    let ground = 0;
+    for (let c = 0; c < per; c++) if (b.cells[c] <= 0) ground++;
+    return ground >= per * CITY.failGround || b.cells.length - b.lost < b.cells.length * CITY.failAll;
+  }
+
+  // Chunks with nothing under them fall, unless the chunks beside them still
+  // stand on something and hold them (a hole in the facade), and then only up
+  // to CITY.hang bands. What falls drops a little debris at the foot of that
+  // side (a small mound, pushed to `heaps`). Returns the chunks that fell.
+  settle(b, heaps, bx, bz) {
+    const per = b.nx * b.nz, n = b.cells.length, cells = b.cells;
+    const fell = [];
+    for (let again = true; again;) {
+      again = false;
+      for (let k = per; k < n; k++) {
+        if (cells[k] <= 0 || cells[k - per] > 0) continue;
+        const c = k % per, ix = c % b.nx, iz = (c / b.nx) | 0;
+        let side = 0, held = 0;
+        const ox = b.nx > 1 ? (ix ? -1 : 1) : 0, oz = b.nz > 1 ? (iz ? -b.nx : b.nx) : 0;
+        for (const o of [ox, oz]) {
+          if (!o) continue;
+          side++;
+          if (cells[k + o] > 0 && cells[k + o - per] > 0) held++;
+        }
+        let stack = 0;
+        for (let j = k; j < n && cells[j] > 0; j += per) stack++;
+        if (side && held === side && stack <= CITY.hang) continue;
+        for (let j = k; j < n && cells[j] > 0; j += per) { cells[j] = 0; fell.push(j); }
+        heaps.push(this.debris(b, k, stack, bx, bz));
+        again = true;
+      }
+    }
+    return fell;
+  }
+
+  // The little heap a falling stack of chunks leaves: just outside the
+  // building, off the side (or corner) of its quadrant.
+  debris(b, k, stack, bx, bz) {
+    const per = b.nx * b.nz, c = k % per;
+    const ix = c % b.nx, iz = (c / b.nx) | 0;
+    chunkBox(b, k, BOX);
+    let ox = b.nx > 1 ? (ix ? 1 : -1) : 0, oz = b.nz > 1 ? (iz ? 1 : -1) : 0;
+    if (!ox && !oz) { ox = Math.sign(b.x - bx) || 1; oz = Math.sign(b.z - bz); }
+    const x = ox ? b.x + ox * (b.hx + 2.5) : (BOX[0] + BOX[1]) / 2;
+    const z = oz ? b.z + oz * (b.hz + 2.5) : (BOX[4] + BOX[5]) / 2;
+    const tall = stack * b.bf * CITY.floor;
+    const radius = clamp(2.5 + tall * 0.1 + Math.sqrt((BOX[1] - BOX[0]) * (BOX[5] - BOX[4])) * 0.12, 3, 6.5);
+    this.holes.push([x, z, radius]);
+    return { x, z, radius, height: clamp(0.5 + tall * 0.06, 0.8, 2.4), id: b.id, k, stack, dir: [ox, oz] };
+  }
+
+  // Is x/y/z in a standing chunk of building b (y omitted: in any band)?
+  solid(b, x, z, y) {
+    if (!b.lost) return true;
+    const ix = b.nx > 1 && x >= b.x ? 1 : 0, iz = b.nz > 1 && z >= b.z ? 1 : 0;
+    const per = b.nx * b.nz, c = iz * b.nx + ix;
+    if (y == null) {
+      for (let k = c; k < b.cells.length; k += per) if (b.cells[k] > 0) return true;
+      return false;
+    }
+    const band = clamp(Math.floor((y - b.base) / (b.bf * CITY.floor)), 0, b.nb - 1);
+    const k = band * per + c;
+    if (b.cells[k] <= 0) return false;
+    chunkBox(b, k, BOX);
+    return y <= BOX[3];
   }
 
   // Which lookup cells each building's footprint covers.
@@ -236,7 +367,8 @@ export class City {
 
   // Did the step from `a` to `b` ([x, y, z]) enter a standing building? The
   // first point where it did, tagged with the building's id (`.building`), or
-  // null. A step that starts inside one stops where it starts.
+  // null. A step that starts inside one stops where it starts. A damaged
+  // building is only its standing chunks, so a shell flies through a gap.
   contact(a, b) {
     if ((a[1] < b[1] ? a[1] : b[1]) > this.maxTop || !this.gridN) return null;
     const i0 = this.cellI(Math.min(a[0], b[0])), i1 = this.cellI(Math.max(a[0], b[0]));
@@ -248,8 +380,16 @@ export class City {
         for (const id of this.grid[j * this.gridN + i]) {
           const k = this.buildings[id];
           if (k.collapsed) continue;
+          // The whole box first; only a damaged building's chunks after that.
           const s = segBox(a, b, k.x - k.hx, k.x + k.hx, k.base - CITY.footing, k.top, k.z - k.hz, k.z + k.hz);
-          if (s < best) { best = s; who = id; }
+          if (s >= best) continue;
+          if (!k.lost) { best = s; who = id; continue; }
+          for (let c = 0; c < k.cells.length; c++) {
+            if (k.cells[c] <= 0) continue;
+            chunkBox(k, c, BOX);
+            const t = segBox(a, b, BOX[0], BOX[1], BOX[2], BOX[3], BOX[4], BOX[5]);
+            if (t < best) { best = t; who = id; }
+          }
         }
       }
     }
@@ -265,7 +405,8 @@ export class City {
     for (const id of this.grid[this.cellAt(x, z)]) {
       const k = this.buildings[id];
       if (k.collapsed || Math.abs(x - k.x) > k.hx || Math.abs(z - k.z) > k.hz) continue;
-      if (y == null || (y <= k.top && y >= k.base - CITY.footing)) return true;
+      if (y != null && (y > k.top || y < k.base - CITY.footing)) continue;
+      if (this.solid(k, x, z, y)) return true;
     }
     return false;
   }
@@ -289,37 +430,46 @@ export class City {
 
   // ---------- blasts ----------
 
-  // A blast of `radius` (and tank `damage`) at x/y/z. Every standing building
+  // A blast of `radius` (and tank `damage`) at x/y/z. Every standing chunk
   // in reach loses hit points, by the same falloff as a tank (out to 1.25
-  // radius from its nearest face); one hit near its roof loses the floors the
-  // blast reaches, and every building keeps only as many floors as its hit
-  // points hold up, so a hurt building comes down from the top. Returns the
-  // ids of the buildings it left with no hit points (the game collapses them).
+  // radius from the nearest point of the chunk); the top chunks of a column
+  // hit from above lose half as much again. Chunks with none left are gone,
+  // and what they held up may fall (`settle`). Returns the ids of the
+  // buildings it left failing (the game collapses them), with `.heaps`: the
+  // debris mounds of what fell, for the game to raise.
   blast(x, y, z, radius, damage) {
     const reach = radius * 1.25;
     const fallen = [];
+    const heaps = (fallen.heaps = []);
+    const hit = damage * CITY.hurt;
     let changed = false;
     for (const b of this.near(x, z, reach)) {
       const dy = y > b.top ? y - b.top : y < b.base ? b.base - y : 0;
       const d = Math.hypot(footDist(b, x, z), dy);
       if (d >= reach) continue;
-      const before = b.floors;
-      b.hp -= damage * CITY.hurt * (1 - d / reach);
       changed = true;
-      let floors = b.floors;
-      if (d < radius && y + radius * 0.5 > b.top) {
-        floors = Math.min(floors, Math.floor((Math.min(y, b.top) - radius * 0.45 - b.base) / CITY.floor));
+      const before = b.floors;
+      const cells = b.cells, per = b.nx * b.nz, n = cells.length;
+      const lost = [];
+      for (let k = 0; k < n; k++) {
+        if (cells[k] <= 0) continue;
+        chunkBox(b, k, BOX);
+        const dc = boxDist(BOX, x, y, z);
+        if (dc >= reach) continue;
+        let dmg = hit * (1 - dc / reach);
+        // A roof (no chunk standing on it) struck from above. The chunk over
+        // this one comes later in the list, so it still has the hit points
+        // it had before the blast.
+        if ((k + per >= n || cells[k + per] <= 0) && y >= BOX[3] - 1.5) dmg *= CITY.roofHit;
+        cells[k] -= dmg;
+        if (cells[k] <= 0) { cells[k] = 0; lost.push(k); }
       }
-      floors = Math.min(floors, Math.ceil(b.floors0 * (0.25 + 0.75 * Math.max(0, b.hp) / b.maxHp)));
-      b.floors = Math.max(1, floors);
-      if (b.floors < before) {
-        b.broken = true;
-        this.reroof(b);
-        this.events.push({ type: 'building', id: b.id, how: 'floors', lost: before - b.floors, pos: [b.x, b.top, b.z] });
-      }
+      const fell = lost.length ? this.settle(b, heaps, x, z) : [];
+      this.refresh(b);
       if (d < radius * 0.5 && y < b.top - 0.5) this.scar(b, x, y, z, radius);
-      if (b.hp <= 0) fallen.push(b.id);
-      else if (b.floors === before) this.events.push({ type: 'building', id: b.id, how: 'hit', pos: [x, y, z] });
+      if (lost.length) this.events.push({ type: 'building', id: b.id, how: 'chunks', lost, fell, floors: before - b.floors, pos: [x, y, z] });
+      if (this.failing(b)) fallen.push(b.id);
+      else if (!lost.length) this.events.push({ type: 'building', id: b.id, how: 'hit', pos: [x, y, z] });
     }
     const g = this.terrain.heightAt(x, z);
     if (y - g < radius) this.holes.push([x, z, radius * 0.8]);
@@ -346,9 +496,8 @@ export class City {
     const b = this.buildings[id];
     const tall = b.floors0 * CITY.floor;
     b.collapsed = true;
-    b.hp = 0;
-    b.floors = 0;
-    this.reroof(b);
+    b.cells.fill(0);
+    this.refresh(b);
     this.restack();
     const heap = { x: b.x, z: b.z, radius: Math.max(b.hx, b.hz) + 3, height: clamp(1.5 + tall * 0.13, 2.5, 7.5) };
     this.holes.push([b.x, b.z, heap.radius]);
@@ -360,21 +509,31 @@ export class City {
 
   // ---------- online ----------
 
-  // Each building's hit points, floors and whether it has come down: what a
-  // snapshot carries on top of the ground's ops (game.snapshot).
-  state() { return this.buildings.map((b) => [Math.round(b.hp * 100) / 100, b.floors, b.collapsed ? 1 : 0]); }
+  // Each building's hit points, floors and whether it has come down, and the
+  // hit points of its chunks once any is hurt: what a snapshot carries on top
+  // of the ground's ops (game.snapshot).
+  state() {
+    return this.buildings.map((b) => {
+      const s = [Math.round(b.hp * 100) / 100, b.floors, b.collapsed ? 1 : 0];
+      if (!b.collapsed && b.cells.some((v, k) => v < b.cellMax[k])) s.push(b.cells.map((v) => Math.round(v * 100) / 100));
+      return s;
+    });
+  }
 
   setState(s) {
     if (!Array.isArray(s) || s.length !== this.buildings.length) return;
     let changed = false;
-    s.forEach(([hp, floors, down], i) => {
+    const mask = (b) => (b.collapsed ? '-' : b.cells.map((v) => (v > 0 ? 1 : 0)).join(''));
+    s.forEach(([hp, , down, cells], i) => {
       const b = this.buildings[i];
-      if (b.collapsed !== !!down || b.floors !== (down ? 0 : floors)) changed = true;
-      b.hp = hp;
+      const was = mask(b);
       b.collapsed = !!down;
-      b.floors = down ? 0 : floors;
-      if (b.floors < b.floors0) b.broken = true;
-      this.reroof(b);
+      if (b.collapsed) b.cells.fill(0);
+      else if (Array.isArray(cells) && cells.length === b.cells.length) b.cells = cells.slice();
+      else b.cells = b.cellMax.slice();
+      this.refresh(b);
+      b.hp = hp;
+      if (was !== mask(b)) changed = true;
     });
     if (!changed) return;
     this.restack();
@@ -440,17 +599,42 @@ export function footDist(b, x, z) {
   return Math.hypot(dx > 0 ? dx : 0, dz > 0 ? dz : 0);
 }
 
+// Chunk k of building b as [x0, x1, y0, y1, z0, z1], into `out`. The ground
+// band reaches down to the footings, the top band up over the parapet.
+export function chunkBox(b, k, out) {
+  const per = b.nx * b.nz;
+  const c = k % per, band = (k / per) | 0;
+  const ix = c % b.nx, iz = (c / b.nx) | 0;
+  out[0] = b.nx > 1 && ix ? b.x : b.x - b.hx;
+  out[1] = b.nx > 1 && !ix ? b.x : b.x + b.hx;
+  out[4] = b.nz > 1 && iz ? b.z : b.z - b.hz;
+  out[5] = b.nz > 1 && !iz ? b.z : b.z + b.hz;
+  const f1 = Math.min((band + 1) * b.bf, b.floors0);
+  out[2] = band ? b.base + band * b.bf * CITY.floor : b.base - CITY.footing;
+  out[3] = b.base + f1 * CITY.floor + (f1 === b.floors0 ? CITY.parapet : 0);
+  return out;
+}
+
+// How far x/y/z is from a box [x0, x1, y0, y1, z0, z1] (0 inside it).
+function boxDist(o, x, y, z) {
+  const dx = x < o[0] ? o[0] - x : x > o[1] ? x - o[1] : 0;
+  const dy = y < o[2] ? o[2] - y : y > o[3] ? y - o[3] : 0;
+  const dz = z < o[4] ? o[4] - z : z > o[5] ? z - o[5] : 0;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 // Where along the segment a->b (0..1) it first enters the box, or Infinity.
 function segBox(a, b, x0, x1, y0, y1, z0, z1) {
   let t0 = 0, t1 = 1;
-  const lo = [x0, y0, z0], hi = [x1, y1, z1];
   for (let k = 0; k < 3; k++) {
+    const lo = k === 0 ? x0 : k === 1 ? y0 : z0;
+    const hi = k === 0 ? x1 : k === 1 ? y1 : z1;
     const d = b[k] - a[k];
     if (d > -1e-9 && d < 1e-9) {
-      if (a[k] < lo[k] || a[k] > hi[k]) return Infinity;
+      if (a[k] < lo || a[k] > hi) return Infinity;
       continue;
     }
-    let ta = (lo[k] - a[k]) / d, tb = (hi[k] - a[k]) / d;
+    let ta = (lo - a[k]) / d, tb = (hi - a[k]) / d;
     if (ta > tb) { const s = ta; ta = tb; tb = s; }
     if (ta > t0) t0 = ta;
     if (tb < t1) t1 = tb;
