@@ -62,6 +62,8 @@ function inject(material, { ground }) {
   vec3 crust = mix(rock, mix(uCrustLo, uCrustHi, smoothstep(5.0, 120.0, vRidgeP.y)), 0.62);
   vec3 c = mix(crust, rock, smoothstep(0.35, 1.4, vCut));
   c = mix(c, uLoose, smoothstep(0.3, 1.2, -vCut) * 0.8);
+  // The low floor past the band's flanks sinks into shadow, like a drop into the void.
+  c *= mix(0.3, 1.0, smoothstep(-42.0, -4.0, vRidgeP.y));
   diffuseColor.rgb *= c;
 }` : `#include <color_fragment>
 diffuseColor.rgb *= strataAt(vRidgeP);`)
@@ -107,7 +109,7 @@ export function overviewGoal(game, camera) {
   const half = game.terrain.half;
   const tanH = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
   const d = Math.min(1350, half + (half * 1.04) / Math.max(0.2, tanH));
-  return new THREE.Vector3(0, d * 0.14, d);
+  return new THREE.Vector3(0, d * 0.1, d);
 }
 
 // A ridgeline match in the sky and on the far floor (or back to the meadows'

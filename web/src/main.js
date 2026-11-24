@@ -1321,6 +1321,8 @@ function aimCameraAt(p) {
   camTarget.set(p.x, p.y + 4, p.z);
   const back = new THREE.Vector3(-Math.cos(p.yaw * DEG), 0, -Math.sin(p.yaw * DEG));
   camGoal = back.multiplyScalar(70).add(new THREE.Vector3(0, 28, 0));
+  // On a ridgeline the spot behind a tank can be up a mountain: stand above it.
+  if (game?.ridgeline) camGoal.y = Math.max(camGoal.y, game.terrain.heightAt(p.x + camGoal.x, p.z + camGoal.z) + 14 - camTarget.y);
 }
 
 const _box = new THREE.Box3();

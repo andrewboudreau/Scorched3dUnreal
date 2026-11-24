@@ -6,7 +6,7 @@ import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findS
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
-import { generateRidgeline, keepCrust, rowStarts } from './ridgeline.js';
+import { generateRidgeline, keepCrust, rowStarts, slump, RIDGE } from './ridgeline.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
 import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
@@ -15,6 +15,7 @@ import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
 const DEG = Math.PI / 180;
+const SLUMP_REACH = 1.9;   // a ridgeline's slump looks this many crater radii out
 const START_JETS = 1;   // jump jet charges each tank starts the match with (they carry over between rounds)
 
 // Money awards.
@@ -328,7 +329,7 @@ export class Game {
     const t = this.terrain;
     const seed = this.cfg.seed + round * 7919;
     if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
-    else if (this.ridgeline) generateRidgeline(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    else if (this.ridgeline) generateRidgeline(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z, lift]) => [x, z, lift]) });
     else if (this.city) t.generate({ seed, amplitude: Math.min(this.cfg.hills, 9), frequency: 0.0022 });   // a gentle grade
     else t.generate({ seed, amplitude: this.cfg.hills });
     for (const [i, x, z] of starts) {
@@ -1769,8 +1770,9 @@ export class Game {
       return;
     }
     if (fx.type === 'mound') {
-      const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
+      let region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
       this.ground?.ops.push(['m', fx.point[0], fx.point[2], fx.radius, fx.height]);
+      region = this.slumpAfter(fx.point[0], fx.point[2], fx.radius, region);
       this.emit({ type: 'terrain', region });
       this.emit({ type: 'mound', pos: fx.point, radius: fx.radius });
       this.liftBuried();
@@ -1843,12 +1845,26 @@ export class Game {
 
   // Dig a crater and let the scenery react to it.
   carve(x, y, z, radius, depth) {
+    if (this.ridgeline) radius *= RIDGE.crater;   // the Ridgeline's rock is loose: wider, deeper craters
     const top = this.topBlast(x, y, z, radius);
-    const region = this.terrain.carveCrater(x, y, z, radius, depth);
+    let region = this.terrain.carveCrater(x, y, z, radius, depth);
     this.ground?.ops.push(['c', x, y, z, radius, depth]);
+    region = this.slumpAfter(x, z, radius, region);
     this.emit({ type: 'terrain', region });
     this.sceneryBlast(top, x, z, radius);
+    if (this.ridgeline) this.scenery.settle(x, z, radius * SLUMP_REACH + 6);
     this.relayScenery();
+  }
+
+  // On a ridgeline the loosened ground slides after a crater or a mound
+  // (ridgeline.js slump). Replayed by rebuildGround from the same ops, so it is
+  // not logged. Returns the region to redraw, widened to take in the slide.
+  slumpAfter(x, z, radius, region) {
+    if (!this.ridgeline) return region;
+    const r = slump(this.terrain, x, z, radius * SLUMP_REACH + this.terrain.cell * 3);
+    if (!r) return region;
+    this.liftBuried();   // sand heaped under a tank lifts it; ground that fell away drops it (updateFalling)
+    return { i0: Math.min(region.i0, r.i0), i1: Math.max(region.i1, r.i1), j0: Math.min(region.j0, r.j0), j1: Math.max(region.j1, r.j1) };
   }
 
   // Did a blast go off on the ground's top, where the scenery stands? Always
@@ -1965,12 +1981,14 @@ export class Game {
     for (const op of ground.ops) {
       if (op[0] === 'c') {
         const top = this.topBlast(op[1], op[2], op[3], op[4]);
-        t.carveCrater(op[1], op[2], op[3], op[4], op[5]);
+        const region = t.carveCrater(op[1], op[2], op[3], op[4], op[5]);
+        this.slumpAfter(op[1], op[3], op[4], region);
         this.sceneryBlast(top, op[1], op[3], op[4]);
+        if (this.ridgeline) this.scenery.settle(op[1], op[3], op[4] * SLUMP_REACH + 6);
       }
       else if (op[0] === 'b') this.town?.blast(op[1], op[2], op[3], op[4], op[5]);
       else if (op[0] === 'r') { if (this.town) this.collapseBuilding(op[1], true); }
-      else { t.raiseMound(op[1], op[2], op[3], op[4]); this.scenery.afterMound(op[1], op[2], op[3]); }
+      else { const region = t.raiseMound(op[1], op[2], op[3], op[4]); this.slumpAfter(op[1], op[2], op[3], region); this.scenery.afterMound(op[1], op[2], op[3]); }
     }
     this.scenery.drainEvents();
     this.town?.drainEvents();

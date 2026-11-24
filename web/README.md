@@ -383,16 +383,25 @@ second column beside the first. On a phone the players box sits top right.
   pad, and are only set dressing: shells pass through them and they hurt no one.
   A blast on one destroys it, one close by knocks a tall one over, and one that
   blows the ground out from under it drops it into the void.
-- **Ridgeline** (Terrain menu, `?terrain=ridgeline`). The field seen side on, as
-  in the classic artillery games: the tanks stand in a row from west to east
-  and a jagged mountain range runs between them, with steep peaks, deep valleys
-  and a few flat-topped mesas, so nearly every shot is a lob over a peak
-  (`core/ridgeline.js`). Each peak stays under a 1 in 2 slope from the tanks on
-  either side, so a high arc always has a way over. The ground is flat-shaded
-  rock in banded strata (`render/ridgeline.js`): a crater cuts through the
-  weathered crust and shows the beds, and the field's edges are cut-away cliff
-  faces. A dusk sky with no clouds, a few boulders and nothing else: no grass,
-  trees, water or villages. The overview (View) stands back side on.
+- **Ridgeline** (Terrain menu, `?terrain=ridgeline`). A thin slice of mountains
+  seen side on: the tanks stand in a row from west to east along a narrow band
+  of land, and past the band the ground falls away in steep flanks to a dark
+  low floor, like a cross-section of the range. Between the tanks are spiky
+  peaks, deep valleys and a few flat-topped mesas, so nearly every shot is a lob
+  over a peak (`core/ridgeline.js`). Each peak stays under a 1 in 2 slope from
+  the tanks on either side, so a high arc always has a way over. The row is
+  different every round: uneven gaps, shifted toward one end of the field, off
+  the middle of the band in z, and now and then a tank up on a ledge. The rock
+  is loose: blasts dig wider and deeper craters (`RIDGE.crater`, tank damage is
+  unchanged) and then the ground slides, so craters soften and a peak a blast
+  undercuts sags to the angle of repose (`RIDGE.repose`, `slump`). The slump is
+  a fixed local pass with no randomness, replayed from the ground ops like a
+  crater, so every copy of the game gets the same ground. The ground is
+  flat-shaded rock in banded strata (`render/ridgeline.js`): a crater cuts
+  through the weathered crust and shows the beds, and the field's edges are
+  cut-away cliff faces. A dusk sky with no clouds, a few boulders and nothing
+  else: no grass, trees, water or villages. The overview (View) stands back
+  side on.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
   they come from the **skill tree** between rounds. Each mod is a branch:
   rank 1 (Orbital Mechanic, Sat Recon, Smoke and Mirrors, Close-In Gunner)
