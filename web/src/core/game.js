@@ -5,6 +5,7 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, spl
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
+import { City } from './city.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT, GALE_CAP } from './perks.js';
 import { normalizeLab } from './survey.js';
 import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
@@ -72,7 +73,7 @@ export class Game {
     terrainSize = 800,
     resolution = 256,
     hills = 45,
-    world = 'meadow',   // 'meadow', or 'isles': floating isles in open sky, with moons that pull on shells
+    world = 'meadow',   // 'meadow'; 'isles': floating isles in open sky, with moons that pull on shells; 'city': streets and buildings (core/city.js)
     maxTurnsPerRound = 40,
     // What the match uses (the Custom match checkboxes): each a list of the ids
     // that are on, or null for all of them. A weapon that is off is never in
@@ -151,6 +152,7 @@ export class Game {
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
     this.scenery = new Scenery(this.terrain);
+    this.town = null;   // the City world's buildings and traffic (core/city.js), else null
     this.events = [];
     this.projectiles = [];
     this.wind = [0, 0];
@@ -297,6 +299,7 @@ export class Game {
   }
 
   get isles() { return this.cfg.world === 'isles'; }
+  get city() { return this.cfg.world === 'city'; }
 
   // The round's ground from its seed, then a flat pad under each tank, in pad
   // order (`starts` is [player index, x, z]). The isles are laid out around
@@ -305,6 +308,7 @@ export class Game {
     const t = this.terrain;
     const seed = this.cfg.seed + round * 7919;
     if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    else if (this.city) t.generate({ seed, amplitude: Math.min(this.cfg.hills, 9), frequency: 0.0022 });   // a gentle grade
     else t.generate({ seed, amplitude: this.cfg.hills });
     for (const [i, x, z] of starts) {
       const p = this.players[i];
@@ -312,6 +316,8 @@ export class Game {
       t.flatten(x, z, TANK.padRadius);
       p.y = t.heightAt(x, z);
     }
+    // The City's streets and buildings, laid around the pads (each in a park).
+    this.town = t.city = this.city ? new City(t).generate({ seed, pads: starts.map(([, x, z]) => [x, z]) }) : null;
   }
 
   randomWind() {
@@ -842,9 +848,12 @@ export class Game {
 
   // ---------- driving ----------
 
-  // Things a tank cannot drive through: the other tanks and standing buildings.
+  // Things a tank cannot drive through: the other tanks and standing buildings
+  // (the City's are boxes: tank.js).
   obstacles() {
-    return [...this.players, ...this.scenery.props.filter(standing)];
+    const out = [...this.players, ...this.scenery.props.filter(standing)];
+    if (this.town) out.push(...this.town.standing);
+    return out;
   }
 
   driveTank(p, dir, dt) {
@@ -1270,6 +1279,7 @@ export class Game {
   update(dt) {
     this.phaseTime += dt;
     this.scenery.update(dt, this.players);
+    this.town?.traffic?.update(dt, this.players);
     if (this.phase === 'aim' && this.current && !this.current.alive) {
       if (this.volleyMode) this.nextPlanner(); else this.nextTurn();
       return;
@@ -1429,8 +1439,9 @@ export class Game {
   // `moon`: it struck a moon. `struck`: it struck a mod ({ owner, mod }), in the air.
   detonate(pr, point, directHit, moon = false, struck = null) {
     const w = WEAPON_BY_ID[pr.weapon];
+    const wall = point.building != null;   // it struck a building in the City
     // A rolling weapon that lands on open ground starts its run instead.
-    if (rollPart(w) && !directHit && !pr.roller && !moon && !struck) {
+    if (rollPart(w) && !directHit && !pr.roller && !moon && !struck && !wall) {
       pr.roller = makeRoller(point, pr.vel, this.terrain);
       pr.pos = pr.roller.pos;
       this.emit({ type: 'rollStart', id: pr.id, pos: point });
@@ -1439,7 +1450,7 @@ export class Game {
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
     for (const fx of impactEffects(w, point)) this.applyEffect(struck ? { ...fx, struck } : fx, pr.owner, directHit, pr.shot);
-    if (pr.weapon === 'shell' && !directHit && !moon && !struck) this.throwShrapnel(pr, point);
+    if (pr.weapon === 'shell' && !directHit && !moon && !struck && !wall) this.throwShrapnel(pr, point);
   }
 
   // Shrapnel perk: a plain Shell that hits the ground lobs bomblets onward.
@@ -1469,9 +1480,10 @@ export class Game {
         return;
       }
     }
-    // A roller that sinks into a lake goes off there instead of crawling along the bed.
+    // A roller that sinks into a lake goes off there instead of crawling along
+    // the bed; one that runs into a building goes off against it.
     const sunk = y < this.terrain.waterLevel - 0.5;
-    if (end || sunk) this.detonate(pr, ground, null);
+    if (end || sunk || this.town?.inside(x, z, y)) this.detonate(pr, ground, null);
   }
 
   applyEffect(fx, owner, directHit, shot = 0) {
@@ -1518,6 +1530,7 @@ export class Game {
       const g = this.groundAt(bx, bz);
       if (!(by - (g ?? -Infinity) > radius)) this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
       this.blastMods(fx.point, radius, damage, owner, fx.struck);
+      if (this.town) this.cityBlast(bx, by, bz, radius, damage);
       for (const p of this.players) {
         if (!p.alive) continue;
         // Whoever blows the ground out from under a tank on the isles gets the credit for its fall.
@@ -1593,6 +1606,30 @@ export class Game {
     for (const e of this.scenery.drainEvents()) this.emit(e);
   }
 
+  // A blast in the City wears down the buildings in reach (core/city.js);
+  // any it leaves with no hit points come down. Both go in the ground's ops,
+  // so another copy of the game brings down the same buildings.
+  cityBlast(x, y, z, radius, damage) {
+    const town = this.town;
+    if (!town.near(x, z, radius * 1.25).length) return;
+    this.ground?.ops.push(['b', x, y, z, radius, damage]);
+    for (const id of town.blast(x, y, z, radius, damage)) this.collapseBuilding(id);
+    for (const e of town.drainEvents()) this.emit(e);
+  }
+
+  // Bring a building down into a heap of rubble: a mound in the ground.
+  // `replay`: rebuilding the ground (rebuildGround), so nothing is reported.
+  collapseBuilding(id, replay = false) {
+    const heap = this.town.collapse(id);
+    const region = this.terrain.raiseMound(heap.x, heap.z, heap.radius, heap.height);
+    this.scenery.afterMound(heap.x, heap.z, heap.radius);
+    if (replay) return;
+    this.ground?.ops.push(['r', id]);
+    this.emit({ type: 'terrain', region });
+    this.liftBuried();
+    this.relayScenery();
+  }
+
   liftBuried() {
     for (const p of this.players) {
       if (!this.terrain.solidAt(p.x, p.z)) continue;
@@ -1615,6 +1652,7 @@ export class Game {
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
       reveals: copy(this.reveals), intel: copy(this.intel),
       ground: copy(this.ground),
+      city: this.town ? this.town.state() : null,
       players: this.players.map(copy),
     };
   }
@@ -1627,6 +1665,7 @@ export class Game {
       this.emit({ type: 'terrain', full: true });
     }
     this.ground = JSON.parse(JSON.stringify(s.ground));
+    if (this.town && s.city) this.town.setState(s.city);
     Object.assign(this, {
       round: s.round, turnsThisRound: s.turnsThisRound, firstShooter: s.firstShooter, gravity: s.gravity,
       maxWind: s.maxWind, lastRoundResult: s.lastRoundResult, nextProjectileId: s.nextProjectileId, clock: s.clock || 0,
@@ -1663,9 +1702,12 @@ export class Game {
         t.carveCrater(op[1], op[2], op[3], op[4], op[5]);
         this.sceneryBlast(top, op[1], op[3], op[4]);
       }
+      else if (op[0] === 'b') this.town?.blast(op[1], op[2], op[3], op[4], op[5]);
+      else if (op[0] === 'r') { if (this.town) this.collapseBuilding(op[1], true); }
       else { t.raiseMound(op[1], op[2], op[3], op[4]); this.scenery.afterMound(op[1], op[2], op[3]); }
     }
     this.scenery.drainEvents();
+    this.town?.drainEvents();
   }
 
   // Tanks drop into craters dug beneath them and take fall damage on landing.

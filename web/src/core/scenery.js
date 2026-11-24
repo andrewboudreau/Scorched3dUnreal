@@ -109,6 +109,13 @@ export class Scenery {
     const nearTank = (x, z, r) => tanks.some((k) => Math.hypot(k.x - x, k.z - z) < r);
     const spot = (reach = 0.42) => [rng.range(-1, 1) * t.size * reach, rng.range(-1, 1) * t.size * reach];
 
+    // The City (core/city.js) dresses its own parks and sidewalks: no lakes,
+    // hamlets or farms there.
+    if (t.city) {
+      t.city.dress(this, rng, tanks, 14);
+      return this;
+    }
+
     this.chooseWaterLevel(tanks);
     let lo = Infinity;
     let hi = -Infinity;

@@ -4,7 +4,8 @@
 export const CAM_CLEARANCE = 4;
 
 // Returns { min, max } for the camera's y at x/z (either may be infinite).
-//  - Ordinary field: stay `margin` above the ground.
+//  - Ordinary field: stay `margin` above the ground (and, in the City, above
+//    any roof within `margin`).
 //  - Floating isles, in open sky: nothing to hit but the far bedrock, so only
 //    that floor. Past the arena's edge the caller's `fallbackFloor` applies.
 //  - Under an isle's footprint the camera is either above it (stay over the top,
@@ -14,6 +15,8 @@ export const CAM_CLEARANCE = 4;
 export function cameraLimits(terrain, x, y, z, margin = CAM_CLEARANCE, fallbackFloor = -Infinity) {
   if (!terrain.inBounds(x, z)) return { min: fallbackFloor, max: Infinity };
   const top = terrain.heightAt(x, z);
+  // In the City, never inside a building: over a roof, stay over it.
+  if (terrain.city) return { min: Math.max(top, terrain.city.roofAt(x, z, margin)) + margin, max: Infinity };
   if (!terrain.under) return { min: top + margin, max: Infinity };
   const floor = Number.isFinite(terrain.bedrock) ? terrain.bedrock + margin : -Infinity;
   if (!terrain.solidAt(x, z)) return { min: floor, max: Infinity };
