@@ -128,7 +128,7 @@ export const BUILDER_ROWS = [
   { name: 'Tanks', text: 'Two to six: you, more humans on this screen (they pass it round), or CPUs at Easy, Normal or Hard.' },
   { name: 'Rounds', text: 'How many rounds the match lasts.' },
   { name: 'Wind', text: '**Random** (the default) picks Calm, Breezy, Gusty or Gale when the match starts, and the round banner says which. Or choose one.' },
-  { name: 'Terrain', text: '**Random** (the default) picks Rolling, Hilly, Mountains or, less often, the Floating isles. Or choose one.' },
+  { name: 'Terrain', text: '**Random** (the default) picks Rolling, Hilly, Mountains or, less often, the City (buildings that stop shells and come down) or the Floating isles. Or choose one.' },
   { name: 'Firing', text: 'Together (volley) or Take turns. Online is always together.' },
   { name: 'Fog of war', text: 'You only see what is near your tank, or what a Scout Missile lights up.' },
   { name: 'Weapons', text: 'Untick a weapon and nobody has it: not in the armory, the starting kit, a perk’s hand-out or the CPUs’ hands. The Shell is always on.' },

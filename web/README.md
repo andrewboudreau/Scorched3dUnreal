@@ -32,7 +32,7 @@ page loads and override both Random and what Custom match remembers.
 | `packs` | (none) | Loads the redistributable resource packs for review (see below). |
 | `room` | a 4-letter code | Opens that online room's invite; this is what the invite link carries. |
 | `wind` | `calm`, `breezy`, `gusty`, `gale`, or a number 0 to 5 | Forces the match wind (Play and Custom). |
-| `terrain` | `rolling`, `hilly`, `mountains`, `isles` | Forces the terrain. |
+| `terrain` | `rolling`, `hilly`, `mountains`, `city`, `isles` | Forces the terrain. |
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
@@ -155,8 +155,8 @@ second column beside the first. On a phone the players box sits top right.
     starts (in `main.js`, never in the deterministic core) and the round banner
     names it, e.g. "Round 1 of 3 · Hilly · Gusty wind". Random wind is Calm,
     Breezy, Gusty or Gale (Breezy and Gusty twice as likely); Random terrain is
-    Rolling, Hilly, Mountains or, half as often as each of those, the Floating
-    isles. Online the host rolls and sends the concrete values in the match
+    Rolling, Hilly, Mountains or, half as often as each of those, the City or
+    the Floating isles. Online the host rolls and sends the concrete values in the match
     config, so every screen builds the same world.
   - *Weapons*: an unticked weapon is gone for the match: not in the armory, the
     starting kit, a perk's hand-out (Quartermaster, the fog's free Scout) or the
@@ -343,6 +343,21 @@ second column beside the first. On a phone the players box sits top right.
 - **Marks over the tanks** say only what the view needs: names alone while
   you plan, health too in the sight, the overview (View) and a Find look,
   faint while the camera follows a shell, and names only in the kill cam.
+- **City** (Terrain menu). A town on a gentle grade, laid out new from the
+  match seed: a grid of streets round blocks of buildings, towers of up to
+  twelve floors in the middle and low shops at the edge, with a park at every
+  tank's start so it begins in the open with buildings between it and the
+  others. Buildings are real: a shell stops at a wall or roof and goes off
+  there, a blast wears them down and takes floors off the top (broken tops,
+  scorched holes in the walls), and one with no hit points left comes down into
+  a heap of rubble, a mound in the ground that shells then pass over. Tanks
+  can't drive or jump through them. The CPUs, the aim arc and the Survey
+  Satellite all see them (`core/city.js`, through `groundContact` in
+  `ballistics.js`). Cars, buses and trucks keep to their lanes and wait at
+  junctions; a blast near one wrecks and burns it and the rest flee or turn
+  round (`core/traffic.js`, cosmetic, so not part of a snapshot). The state of
+  every building is in `snapshot()` and the ground's ops, so online screens
+  agree. A quiet hum of traffic and a far-off horn play there.
 - **Floating isles** (Terrain menu). Instead of one stretch of ground, a dozen
   or so isles hang in open space, each with grass on top and rock beneath. Every
   tank starts on an isle of its own. Two or three small moons hang among them and pull
@@ -542,7 +557,8 @@ second column beside the first. On a phone the players box sits top right.
   aim solver and aim memory, driving (`driveStep` in `tank.js`), perks and round
   modifiers as plain data (`perks.js`), road and path routing (`paths.js`), the Survey
   Satellite's sites, solving and levels (`survey.js`), scenery placement and its reaction to
-  terrain changes, and the `Game` state machine. It emits events and runs headless.
+  terrain changes, the City's buildings (`city.js`) and traffic (`traffic.js`),
+  and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
@@ -552,7 +568,10 @@ second column beside the first. On a phone the players box sits top right.
   (`gravityLines.js`, driven by the pure `core/gravityPull.js`), the flocks
   (`birds.js`), the isles' passing craft (`craft.js`), the Survey Satellite's
   projected cell patch and labels (`satellite.js`) and the deployed mods:
-  orbiter orbs with their trails, satellites, break-ups (`mods.js`).
+  orbiter orbs with their trails, satellites, break-ups (`mods.js`), and the
+  City (`cityMesh.js`: merged buildings with canvas window textures, rooftops,
+  damage and rubble, instanced street lights and traffic; its streets are
+  painted by `terrainMesh.js`).
 - `src/modsui.js` is the mods' deploy buttons, status chips and armory section;
   `src/strike.js` is Double Strike's.
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
