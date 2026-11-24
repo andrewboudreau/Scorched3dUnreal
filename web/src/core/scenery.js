@@ -290,6 +290,7 @@ export class Scenery {
   chooseWaterLevel(tanks) {
     const t = this.terrain;
     if (t.under) { t.waterLevel = -Infinity; return; }   // the isles have no lakes
+    if (t.sea != null) { t.waterLevel = t.sea; return; }   // the Island's sea (core/island.js)
     const sorted = Float32Array.from(t.heights).sort();
     let level = sorted[Math.floor(sorted.length * 0.07)];
     for (const k of tanks) level = Math.min(level, t.heightAt(k.x, k.z) - 4);

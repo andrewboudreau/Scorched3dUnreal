@@ -32,8 +32,9 @@ page loads and override both Random and what Custom match remembers.
 | `packs` | (none) | Loads the redistributable resource packs for review (see below). |
 | `room` | a 4-letter code | Opens that online room's invite; this is what the invite link carries. |
 | `wind` | `calm`, `breezy`, `gusty`, `gale`, or a number 0 to 5 | Forces the match wind (Play and Custom). |
-| `terrain` | `rolling`, `hilly`, `mountains`, `city`, `isles`, `ridgeline` | Forces the terrain. |
+| `terrain` | `rolling`, `hilly`, `mountains`, `city`, `isles`, `ridgeline`, `island` | Forces the terrain. |
 | `time` | `dawn`, `day`, `dusk`, `night` | Forces the time of day (render-only; Random picks from the match seed). |
+| `edges` | `open`, `wall`, `bounce`, `wrap`, `random` | Forces the arena's edge rule (see Arena edges below). |
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
@@ -158,8 +159,8 @@ second column beside the first. On a phone the players box sits top right.
     starts (in `main.js`, never in the deterministic core) and the round banner
     names it, e.g. "Round 1 of 3 · Hilly · Gusty wind". Random wind is Calm,
     Breezy, Gusty or Gale (Breezy and Gusty twice as likely); Random terrain is
-    Rolling, Hilly, Mountains or, half as often as each of those, the City or
-    the Floating isles. Online the host rolls and sends the concrete values in the match
+    Rolling, Hilly, Mountains or, half as often as each of those, the City,
+    the Floating isles, the Ridgeline or the Island. Online the host rolls and sends the concrete values in the match
     config, so every screen builds the same world.
   - *Time of day* (`?time=`): **Random** (the default), Dawn, Day, Dusk or Night.
     A look, not a rule: the core only carries it (`cfg.time`, `core/timeofday.js`)
@@ -181,6 +182,9 @@ second column beside the first. On a phone the players box sits top right.
     Floating isles keep their own dusk-violet space sky at any time; the
     Ridgeline keeps its own dusk look on a Dusk match and takes the time's sky
     otherwise. The banner adds the time ("· Dusk") unless it is the plain Day.
+  - *Edges* defaults to **Open**; see Arena edges below. Its Random is rolled
+    each round inside the game, on the match's seeded dice, so it travels as
+    `edges: 'random'` and every screen rolls the same.
   - *Weapons*: an unticked weapon is gone for the match: not in the armory, the
     starting kit, a perk's hand-out (Quartermaster, the fog's free Scout) or the
     CPUs' hands. The Shell is always on.
@@ -450,6 +454,42 @@ second column beside the first. On a phone the players box sits top right.
   cut-away cliff faces. A dusk sky with no clouds, a few boulders and nothing
   else: no grass, trees, water or villages. The overview (View) stands back
   side on.
+- **Island** (Terrain menu, `?terrain=island`). One big island in an open sea
+  that fills the field, a new shape from the seed every round
+  (`core/island.js`): a ragged coast with two or three bays and a headland or
+  two, often a small islet offshore, sandy beaches at the waterline rising to
+  hills inland, and the meadow's trees, hamlets, farms and roads on the dry
+  land. The sea runs on past the field to the horizon (`render/arena.js`). The
+  tanks start spread round the island part way in from the coast, every pad
+  at least 4 m above the water. A shell that comes down in the sea is lost
+  there with a splash: no crater, no damage, nothing for a Teleport to land on.
+  The coast crumbles: a blast slumps the low ground round it (anything under
+  3 m above the sea, out to about one and a half blast radii), so a beach that
+  is shelled goes under and the sea comes in. A tank whose ground ends up more
+  than 0.8 m under the water sinks and is lost, the kill going to whoever blew
+  the ground away, as with the isles' void. The CPUs, the aim arc and the
+  satellite see the sea as a miss (`groundContact` in `ballistics.js`).
+- **Arena edges** (Custom match > Edges, `?edges=`; every world). What a shell
+  does at the square's sides, which reach from the void to the sky (the floor
+  is never a wall): **Open** (the default and the old game) lets it fly off;
+  **Wall** sets it off where it meets the wall, with a blast but no roll or
+  shrapnel; **Bounce** mirrors it back in, keeping 80% of its speed; **Wrap**
+  takes it out of one side and in at the opposite one at the same height with
+  the same velocity; **Random** rolls one of the four each round from the seed,
+  and the round banner names it ("Bouncing edges"). The rule is on the terrain
+  (`terrain.edge`) and applied in `stepProjectile` (`crossEdge` in
+  `ballistics.js`), so the live shell, the CPUs' `simulateShot`, the Survey
+  Satellite, the aim arc, the Tracer perk and the kill cam all fly the same
+  path. Rollers bounce or wrap too; under Open and Wall they stop at the edge
+  as before. On the Floating isles the walls are the same square's sides and a
+  shell that drops below the isles is still lost to the void; on the Ridgeline
+  a shell that wraps can come in low on the far side and strike that cliff
+  face. A faint curtain of light stands along each side for Wall (amber, a slow
+  breath), Bounce (cyan, rising bands) and Wrap (violet, bands that run along
+  it), with a flash where a shell bounces and a ripple where it goes out and
+  comes back in (`render/arena.js`); the aim arc and the shell's trail break
+  where it wraps, so no line crosses the map. The CPUs treat a shot that meets
+  the edge as too long and take power off, so they don't plan trick shots.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
   they come from the **skill tree** between rounds. Each mod is a branch:
   rank 1 (Orbital Mechanic, Sat Recon, Smoke and Mirrors, Close-In Gunner)
@@ -682,7 +722,7 @@ second column beside the first. On a phone the players box sits top right.
   modifiers as plain data (`perks.js`), road and path routing (`paths.js`), the Survey
   Satellite's sites, solving and levels (`survey.js`), scenery placement and its reaction to
   terrain changes, the City's buildings (`city.js`) and traffic (`traffic.js`),
-  and the `Game` state machine. It emits events and runs headless.
+  the Island's coast and sea (`island.js`), and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
@@ -704,6 +744,8 @@ second column beside the first. On a phone the players box sits top right.
   `cityFx.js` is the wreckage in motion, for show only: pooled debris blocks
   that fly, bounce, settle and sink (one InstancedMesh), chunks that topple
   into the street, and whole buildings that drop and crumble into their rubble.
+  `arena.js` is the arena's boundary: the Edges curtains, bounce flashes and
+  wrap ripples, the Island's open sea and splashes.
 - `src/armory.js` is the between-rounds screens (stepper, results, skill tree, kit, armory);
   `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's.

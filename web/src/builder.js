@@ -1,5 +1,5 @@
 // The Custom match builder's own parts: Wind and Terrain (each with a Random
-// pick, the default), the three checkbox groups (Weapons, Perks, Round
+// pick, the default), Edges, the three checkbox groups (Weapons, Perks, Round
 // modifiers) and the testing query string. launch.js remembers the choices
 // and main.js starts the match from them.
 //
@@ -15,13 +15,14 @@ import { WEAPONS } from './core/weapons.js';
 import { PERKS, MODIFIERS } from './core/perks.js';
 import { RIDGE } from './core/ridgeline.js';
 import { TIME_IDS, DEFAULT_TIME, timeName } from './core/timeofday.js';
+import { ISLAND } from './core/island.js';
 
 // ---------------------------------------------------------------- wind and terrain
 
 // The select values (the saved Custom state holds them) and the names shown.
 // `weight` is how often Random picks each. Calm and Gale are the extremes, so
 // they come up half as often as Breezy and Gusty. The Floating isles, the
-// City and the Ridgeline are different games (open sky, moons and the void;
+// City, the Island and the Ridgeline are different games (open sky, moons and the void;
 // streets and buildings in the way; a mountain range seen side on with the
 // tanks in a row: core/ridgeline.js), so Random picks each half as often as
 // each meadow.
@@ -38,6 +39,18 @@ export const TERRAIN = [
   { id: 'city', value: 'city', name: 'City', weight: 1 },
   { id: 'isles', value: 'isles', name: 'Floating isles', weight: 1 },
   { id: 'ridgeline', value: 'ridgeline', name: 'Ridgeline', weight: 1 },
+  { id: 'island', value: 'island', name: 'Island', weight: 1 },
+];
+// What a shell does at the arena's edge (core/ballistics.js crossEdge). Open
+// is the default and the old game; Random rolls one of the four each round,
+// on the match's seeded dice (core/game.js), so it goes into the config as
+// 'random' rather than rolled here.
+export const EDGES = [
+  { id: 'open', name: 'Open' },
+  { id: 'wall', name: 'Wall' },
+  { id: 'bounce', name: 'Bounce' },
+  { id: 'wrap', name: 'Wrap' },
+  { id: 'random', name: 'Random' },
 ];
 export const RANDOM = 'random';
 export const MAX_TEST_WIND = 5;
@@ -48,9 +61,10 @@ function weighted(list, rand) {
   return list[list.length - 1];
 }
 
-// A Terrain value ('20', '45', '80', 'city', 'isles' or 'ridgeline') as config.
+// A Terrain value ('20', '45', '80', 'city', 'isles', 'ridgeline' or 'island') as config.
 export function terrainConfig(v) {
   if (v === 'isles') return { hills: 45, world: 'isles' };
+  if (v === 'island') return { hills: ISLAND.hills, world: 'island' };
   if (v === 'ridgeline') return { hills: RIDGE.hills, world: 'ridgeline' };
   if (v === 'city') return { hills: 20, world: 'city' };
   const n = Number(v);
@@ -58,15 +72,17 @@ export function terrainConfig(v) {
 }
 
 // The match's wind and ground from the Wind and Terrain selects ('random' or a
-// value), rolled now where Random. `forced` (from the query string) beats both.
-export function matchConditions({ wind = RANDOM, terrain = RANDOM } = {}, forced = {}, rand = Math.random) {
+// value), rolled now where Random, and the Edges select's rule (`edges`, only
+// when it isn't Open). `forced` (from the query string) beats them all.
+export function matchConditions({ wind = RANDOM, terrain = RANDOM, edges = 'open' } = {}, forced = {}, rand = Math.random) {
   let maxWind = forced.maxWind;
   if (maxWind == null) {
     const n = Number(wind);
     maxWind = wind === RANDOM || wind == null || !Number.isFinite(n) ? weighted(WIND, rand).value : n;
   }
   const t = forced.terrain ?? (terrain === RANDOM || terrain == null ? weighted(TERRAIN, rand).value : terrain);
-  return { maxWind, ...terrainConfig(t) };
+  const e = forced.edges ?? edges;
+  return { maxWind, ...terrainConfig(t), ...(e && e !== 'open' && EDGES.some((x) => x.id === e) ? { edges: e } : {}) };
 }
 
 // The Time of day select ('random' or an id) as the config's `time`. It is left
@@ -77,28 +93,36 @@ export function matchTime(value = RANDOM, forced = {}) {
   return TIME_IDS.includes(v) ? v : RANDOM;
 }
 
-// What a match was dealt, in words: "Hilly · Gusty wind". A value no menu
-// offers (from the query string) shows as a number. A dawn, dusk or night is
-// added at the end ("· Dusk"); the plain Day is not worth a word.
-export function conditionsLabel(cfg) {
+// The round's edge rule in words for the round-start banner ("Bouncing
+// edges"), or '' when it is Open.
+export function edgeLabel(edge) {
+  return { wall: 'Walled arena', bounce: 'Bouncing edges', wrap: 'Wrapping edges' }[edge] || '';
+}
+
+// What a match was dealt, in words: "Hilly · Gusty wind", and the round's
+// edge rule when it isn't Open ("· Bouncing edges"). A value no menu offers
+// (from the query string) shows as a number. A dawn, dusk or night is
+// added too ("· Dusk"); the plain Day is not worth a word.
+export function conditionsLabel(cfg, edge = null) {
   if (!cfg) return '';
   const w = WIND.find((x) => x.value === cfg.maxWind);
   const wind = w ? `${w.name} wind` : `Wind ${Number(cfg.maxWind) || 0}`;
   const t = cfg.world && cfg.world !== 'meadow' ? TERRAIN.find((x) => x.id === cfg.world) : TERRAIN.find((x) => Number(x.value) === cfg.hills);
   const ground = t ? t.name : `Hills ${cfg.hills}`;
   const time = cfg.time && cfg.time !== DEFAULT_TIME ? timeName(cfg.time) : '';
-  return `${ground} · ${wind}${time ? ` · ${time}` : ''}`;
+  return [ground, wind, time, edgeLabel(edge)].filter(Boolean).join(' · ');
 }
 
 // ---------------------------------------------------------------- the testing query string
 
-// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|city|isles|ridgeline,
+// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|city|isles|ridgeline|island,
 // ?time=dawn|day|dusk|night,
+// ?edges=open|wall|bounce|wrap|random,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
 // ?sat=1|2|3, ?orbiter=1|2|3, ?decoy=1|2|3 and ?pointdef=1|2|3 (every tank
 // starts with that mod at that level), ?labels=few|some|many (the satellite's labelled cells),
 // ?modifier=rain (any round modifier id: every round is that one).
-// Returns { maxWind?, terrain?, lab?, modifier? }: only what the string asks for.
+// Returns { maxWind?, terrain?, edges?, lab?, modifier? }: only what the string asks for.
 export function parseTestParams(search) {
   const q = new URLSearchParams(search || '');
   const out = {};
@@ -116,6 +140,8 @@ export function parseTestParams(search) {
   if (t) out.terrain = t.value;
   const time = (q.get('time') || '').toLowerCase();
   if (TIME_IDS.includes(time)) out.time = time;
+  const edges = (q.get('edges') || '').toLowerCase();
+  if (EDGES.some((x) => x.id === edges)) out.edges = edges;
   const lab = {};
   const level = (k) => { const n = Number(q.get(k)); return [1, 2, 3].includes(n) ? n : 0; };
   if (level('sat')) Object.assign(lab, { satellite: 'all', level: level('sat') });

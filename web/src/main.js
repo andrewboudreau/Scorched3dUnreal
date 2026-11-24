@@ -14,6 +14,7 @@ import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { CityView } from './render/cityMesh.js';
 import { NapalmView } from './render/napalm.js';
+import { ArenaView } from './render/arena.js';
 import { BUILDINGS } from './core/scenery.js';
 import { isArtifact } from './core/artifacts.js';
 import { TankMesh } from './render/tankMesh.js';
@@ -39,7 +40,7 @@ import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { watchPortraitExit } from './portraitexit.js';
-import { MatchBuilder, matchConditions, matchTime, conditionsLabel, parseTestParams } from './builder.js';
+import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
 
 const $ = (id) => document.getElementById(id);
@@ -147,6 +148,7 @@ let bannerHold = 0;             // a round banner keeps the turn banner waiting 
 let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
+const arenaView = new ArenaView(scene, { effects, sound, camDist });   // the Edges curtains and the Island's sea
 // Scratch objects for per-frame work. Nothing may keep one past the call that filled it
 // (except camGoal, which deliberately points at _killGoal / _menuGoal and only reads them).
 const _lblV = new THREE.Vector3();       // projecting labels and popups
@@ -230,6 +232,7 @@ function disposeMatch() {
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.dispose(); }
   if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
   cityView?.dispose(); cityView = null;
+  arenaView.clear();
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
@@ -350,6 +353,8 @@ function handleEvents() {
     cityView?.event(e);
     napalmView.event(e);
     if (e.type === 'buried' && touch && game.localHumans.some((h) => h.id === e.player)) touch.note(`${game.players[e.player].name}: buried! Your next shot digs you out`, 3500);
+    arenaView.event(e);
+    if (e.type === 'edge' && e.kind === 'wrap' && shells.has(e.id)) fadingTrails.push(shells.get(e.id).cut(e.pos, e.to));   // no trail across the map
     if (e.type === 'building' && e.how !== 'hit') { sound.thud(camDist(e.pos)); if (e.how === 'collapse') addShake(e.pos, 1.6); }
     switch (e.type) {
       case 'roundStart':
@@ -367,10 +372,10 @@ function handleEvents() {
         napalmView.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
-        if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
-        else if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)}`, 1800);
+        if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
+        else if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)}`, 1800);
         else {
-          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg)} · Your kit: ${kitWords({ online: game.online })}` : game.modifier.desc, e.round === 1 ? 3600 : 3000);
+          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}` : [game.modifier.desc, edgeLabel(game.edge)].filter(Boolean).join(' · '), e.round === 1 ? 3600 : 3000);
           bannerHold = performance.now() + 2800;
         }
         break;
@@ -489,7 +494,7 @@ function handleEvents() {
         } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
         if (!v?.probe && owner != null) noteLanding(owner, v?.shot, e.type === 'impact' ? e.pos : null);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
-        if (e.type === 'lost' && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
+        if ((e.type === 'lost' || e.splash) && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(e.splash ? 'In the sea' : game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
         break;
       }
       case 'explosion':
@@ -532,7 +537,7 @@ function handleEvents() {
       }
       case 'void': {
         const q = game.players[e.player];
-        banner(`${q.id === heroId ? 'You' : q.name} fell into the void`, '', 1800);
+        banner(`${q.id === heroId ? 'You' : q.name} ${e.sea ? 'sank' : 'fell into the void'}`, '', 1800);
         fellInVoid.add(e.player);   // its 'destroyed' follows at once and must not take the banner
         break;
       }
@@ -1049,11 +1054,12 @@ const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
 
 // Where a projectile comes down within `horizon` seconds if nothing changes.
 function forecast(pr, horizon) {
-  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag };
+  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag, edge: pr.edge };
   const t = game.terrain;
   const step = 1 / 30;
   for (let s = step; s <= horizon; s += step) {
     stepProjectile(c, game.wind, step);
+    if (c.crossed?.kind === 'wall') return { t: s, pos: c.crossed.point, direct: null };
     if (!t.inBounds(c.pos[0], c.pos[2])) return null;
     for (const p of game.players) {
       if (!p.alive || (p.id === pr.owner && pr.time + s < 0.5)) continue;   // the shooter's grace, as in the game
@@ -1061,7 +1067,7 @@ function forecast(pr, horizon) {
       if ((c.pos[0] - h.x) ** 2 + (c.pos[1] - h.y) ** 2 + (c.pos[2] - h.z) ** 2 <= h.r * h.r) return { t: s, pos: [...c.pos], direct: p };
     }
     const g = groundContact(c, t);
-    if (g) return { t: s, pos: g, direct: null };
+    if (g) return g.sea ? null : { t: s, pos: g, direct: null };
   }
   return null;
 }
@@ -1598,7 +1604,7 @@ function updateTracer() {
   const reach = p && !p.ai && game.phase === 'aim' ? perkSum(p, 'tracer') : 0;
   tracer.visible = reach > 0;
   if (!reach) return;
-  const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power));
+  const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power), game.terrain);
   pr.g = game.gravity;
   pr.windK = game.windShare(p);
   pr.drag = game.shellDrag(p);
@@ -1609,6 +1615,7 @@ function updateTracer() {
   a.setXYZ(n++, ...pr.pos);
   for (let step = 1; gone < reach && n < a.count; step++) {
     stepProjectile(pr, game.wind);
+    if (pr.crossed && pr.crossed.kind !== 'bounce') { a.setXYZ(n++, ...pr.crossed.point); break; }   // a wall, or wrapped away
     if (step % 3) continue;
     gone += Math.hypot(pr.pos[0] - last[0], pr.pos[1] - last[1], pr.pos[2] - last[2]);
     last = [...pr.pos];
@@ -1969,7 +1976,7 @@ const builder = new MatchBuilder($('opt-groups'));
 function customOptions() {
   return {
     rounds: Number($('opt-rounds').value),
-    ...matchConditions({ wind: $('opt-wind').value, terrain: $('opt-hills').value }, testParams),
+    ...matchConditions({ wind: $('opt-wind').value, terrain: $('opt-hills').value, edges: $('opt-edges').value }, testParams),
     time: matchTime($('opt-time').value, testParams),
     fog: $('opt-fog').value === '1',
     ...builder.lists(),
@@ -2558,6 +2565,7 @@ function tick(dt, draw = true) {
     sceneryMesh.sync(elapsed);
     cityView?.update(sdt);
     napalmView.update(sdt, game);
+    arenaView.update(game, elapsed, dt);
     updateHud();
     strikeUi.update();
     modsUi.update(sdt, elapsed);

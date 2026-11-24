@@ -175,6 +175,11 @@ export function solveSite({ shooter, elev, target, cond, terrain, guess = null, 
     const miss = Math.hypot(ix - tx, iz - tz);
     if (miss < best.miss) best = { yaw, power, miss };
     if (miss <= tolerance) break;
+    if (shot.edges) {   // off the arena's edge (Edges): too far, so less power, the bearing as it was
+      if (power <= TANK.minPower) break;
+      power = Math.max(TANK.minPower, power * 0.85);
+      continue;
+    }
     yaw += wrap180(aimBearing - bearingTo(shooter, ix, iz));
     const ratio = dist / Math.max(1, Math.hypot(ix - shooter.x, iz - shooter.z));
     const next = power * Math.pow(ratio, shot.kind === 'lost' ? 0.3 : 0.55);
