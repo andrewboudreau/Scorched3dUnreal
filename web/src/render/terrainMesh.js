@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makePerlin } from '../core/noise.js';
+import { CITY } from '../core/city.js';
 
 // Renders a core Heightfield as a lit, vertex-coloured slab with earthen sides.
 // Only the region a crater touched is rewritten after each blast.
@@ -7,6 +8,10 @@ import { makePerlin } from '../core/noise.js';
 // Roads and footpaths (core/paths.js) are drawn once into a mask texture laid
 // flat over the field and tinted in by the ground shader, so they follow every
 // dent in the ground. A crater or a mound wipes the mask where it lands.
+//
+// In the City (core/city.js) the same mask holds the pavement instead, in
+// three levels the shader tells apart: concrete (sidewalks, lots, plazas),
+// asphalt (the roads) and paint (lane lines and crossings).
 
 const C = {
   sand: new THREE.Color('#c8ae78'),
@@ -100,6 +105,51 @@ NO_PATHS.needsUpdate = true;
 // copyTextureToTexture reads partial rectangles from. `scratch` is the canvas
 // the strokes are drawn on, only used inside setPaths.
 const pathPool = [];
+
+// The City's pavement into the mask (canvas `g`, `k` texels a metre, `px`
+// world to texel): concrete lots and plazas, sidewalks, asphalt roads with a
+// dashed middle line, and zebra crossings at every junction. See the
+// uCity branch of the ground shader for what each level becomes.
+const PAVE = { concrete: 'rgb(64,64,64)', asphalt: 'rgb(140,140,140)', paint: 'rgb(220,220,220)' };
+function paintStreets(g, town, k, px) {
+  const { xs, zs } = town;
+  const S = CITY.street, R = CITY.road;
+  const rect = (x0, z0, x1, z1, fill) => { g.fillStyle = fill; g.fillRect(px(x0), px(z0), (x1 - x0) * k, (z1 - z0) * k); };
+  const X0 = xs[0], X1 = xs[xs.length - 1], Z0 = zs[0], Z1 = zs[zs.length - 1];
+  for (const b of town.blocks) {
+    if (b.kind !== 'park') rect(b.x0, b.z0, b.x1, b.z1, PAVE.concrete);
+    else {
+      // Two footpaths across a park.
+      const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+      rect(cx - 1.2, b.z0, cx + 1.2, b.z1, PAVE.concrete);
+      rect(b.x0, cz - 1.2, b.x1, cz + 1.2, PAVE.concrete);
+    }
+  }
+  for (const x of xs) rect(x - S / 2, Z0 - S / 2, x + S / 2, Z1 + S / 2, PAVE.concrete);
+  for (const z of zs) rect(X0 - S / 2, z - S / 2, X1 + S / 2, z + S / 2, PAVE.concrete);
+  for (const x of xs) rect(x - R / 2, Z0 - R / 2, x + R / 2, Z1 + R / 2, PAVE.asphalt);
+  for (const z of zs) rect(X0 - R / 2, z - R / 2, X1 + R / 2, z + R / 2, PAVE.asphalt);
+  const line = 0.5, dash = 3, gap = 3.5, cross = R / 2 + 0.6;
+  // Middle lines between the junctions, and a crossing at each end.
+  for (const x of xs) {
+    for (let j = 0; j + 1 < zs.length; j++) {
+      const a = zs[j] + S / 2 + 3.5, b = zs[j + 1] - S / 2 - 3.5;
+      for (let z = a; z < b - 0.5; z += dash + gap) rect(x - line / 2, z, x + line / 2, Math.min(b, z + dash), PAVE.paint);
+      for (const z of [zs[j] + R / 2 + 0.6, zs[j + 1] - R / 2 - 3.1]) {
+        for (let u = -R / 2 + 0.6; u < R / 2 - 0.4; u += 1.3) rect(x + u, z, x + u + 0.65, z + 2.5, PAVE.paint);
+      }
+    }
+  }
+  for (const z of zs) {
+    for (let i = 0; i + 1 < xs.length; i++) {
+      const a = xs[i] + S / 2 + 3.5, b = xs[i + 1] - S / 2 - 3.5;
+      for (let x = a; x < b - 0.5; x += dash + gap) rect(x, z - line / 2, Math.min(b, x + dash), z + line / 2, PAVE.paint);
+      for (const x of [xs[i] + cross, xs[i + 1] - cross - 2.5]) {
+        for (let u = -R / 2 + 0.6; u < R / 2 - 0.4; u += 1.3) rect(x, z + u, x + 2.5, z + u + 0.65, PAVE.paint);
+      }
+    }
+  }
+}
 let scratch = null;
 function scratchCanvas() {
   if (!scratch) {
@@ -128,6 +178,7 @@ function addGroundDetail(material, paths) {
     shader.uniforms.uFogOn = groundShade.fogOn;
     shader.uniforms.uPath = paths.map;
     shader.uniforms.uPathScale = paths.scale;
+    shader.uniforms.uCity = paths.city;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGroundP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -139,6 +190,8 @@ uniform vec3 uFog[${MAX_FOG_SPOTS}];
 uniform float uFogOn;
 uniform sampler2D uPath;
 uniform float uPathScale;
+uniform float uCity;
+float gPave = 0.0;   // how much of this spot is paved (the City), which calms the bumps
 // A sine-free hash (no banding at large coordinates) and value noise with a
 // quintic fade, so the cell edges do not show up in the bump shading.
 float gHash(vec2 p) {
@@ -163,7 +216,7 @@ float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * 
   if (fade > 0.0) {
     vec2 q = gQW;   // warped once in color_fragment, which runs first
     float h0 = gRough(q);
-    vec3 tilt = vec3(h0 - gRough(q + vec2(0.35, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.35))) * (1.3 * fade);
+    vec3 tilt = vec3(h0 - gRough(q + vec2(0.35, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.35))) * (1.3 * fade * (1.0 - 0.8 * gPave));
     normal = normalize(normal + (viewMatrix * vec4(tilt, 0.0)).xyz);
   }
 }`)
@@ -180,7 +233,19 @@ vec2 gQW = gWarp(vGroundP.xz);
   diffuseColor.rgb *= mix(vec3(0.97, 1.0, 1.02), vec3(1.035, 1.01, 0.93), m);
   // Gravel where the path mask says so, with a ragged edge and a little grit.
   float pm = texture2D(uPath, q * uPathScale + 0.5).r;
-  if (pm > 0.02) {
+  if (uCity > 0.5) {
+    // Concrete in slabs, asphalt with a little grain, and road paint.
+    float side = smoothstep(0.08, 0.2, pm);
+    float asph = smoothstep(0.38, 0.5, pm);
+    float paint = smoothstep(0.7, 0.8, pm);
+    vec2 slab = abs(fract(q * 0.5) - 0.5);
+    vec3 conc = vec3(0.6, 0.59, 0.56) * (0.92 + 0.1 * gHash(floor(q * 0.5))) * (1.0 - 0.1 * step(0.46, max(slab.x, slab.y))) * (0.94 + 0.12 * n);
+    vec3 tar = vec3(0.21, 0.215, 0.23) * (0.86 + 0.28 * n) * (0.95 + 0.1 * gHash(floor(q * 3.1)));
+    vec3 c = mix(diffuseColor.rgb, conc, side);
+    c = mix(c, tar, asph);
+    diffuseColor.rgb = mix(c, vec3(0.85, 0.83, 0.74) * (0.9 + 0.1 * n), paint * 0.9);
+    gPave = side;
+  } else if (pm > 0.02) {
     float worn = smoothstep(0.28, 0.6, pm + (gNoise(q * 0.8) - 0.5) * 0.55);
     vec3 gravel = vec3(0.47, 0.41, 0.31) * (0.8 + 0.32 * gHash(floor(q * 2.6))) * (0.9 + 0.2 * n);
     diffuseColor.rgb = mix(diffuseColor.rgb, gravel, worn * 0.9);
@@ -273,7 +338,7 @@ export class TerrainMesh {
     }
     this.geometry = geo;
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
-    this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, slot: null, dirty: null };
+    this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, city: { value: 0 }, slot: null, dirty: null };
     addGroundDetail(this.material, this.paths);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.receiveShadow = true;
@@ -370,8 +435,9 @@ export class TerrainMesh {
     this.under.geo.computeBoundingSphere();
   }
 
-  // Paint these paths (core/paths.js) onto the ground, replacing any before.
-  setPaths(paths) {
+  // Paint these paths (core/paths.js) onto the ground, replacing any before;
+  // or, given the City (`town`), its streets.
+  setPaths(paths, town = null) {
     const P = this.paths;
     if (!P.slot) {
       P.slot = pathPool.pop() || makePathSlot();
@@ -388,7 +454,9 @@ export class TerrainMesh {
     g.fillRect(0, 0, PATH_TEXELS, PATH_TEXELS);
     g.strokeStyle = g.shadowColor = '#fff';
     g.lineCap = g.lineJoin = 'round';
-    for (const p of paths) {
+    P.city.value = town ? 1 : 0;
+    if (town) paintStreets(g, town, k, px);
+    else for (const p of paths) {
       g.lineWidth = p.width * k;
       g.shadowBlur = p.width * k * 0.6;  // a soft shoulder for the shader to fray
       g.beginPath();
