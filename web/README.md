@@ -446,9 +446,22 @@ second column beside the first. On a phone the players box sits top right.
   scatter people and sheep. Whatever survives is re-seated on the new ground,
   and props that end up buried or under water are removed. Ground dug below the
   water level floods.
-- **Armory.** Between rounds each human shops in turn (the panel names whose
-  turn it is and who is next); CPU tanks buy for themselves. Everyone gets a
-  $150 stipend per round on top of damage, kill and win pay.
+- **Between rounds: Results, Draft, Armory.** A stepper at the top of each
+  screen shows where you are. Results list each tank's pay by where it came
+  from: a $150 stipend, $80 for surviving, $300 for the win, $2 a point of
+  damage, $150 a kill, $60 a mod shot down. Then each human drafts and shops
+  in turn (the panel names whose turn it is and who is next); CPU tanks do
+  both for themselves. A "Your kit" strip shows what you hold.
+- **Armory.** Weapons come in tiers: the **Kit** (Shells, free and unlimited),
+  **Standard** (in stock from the first visit) and **Advanced** (Scatter,
+  Teleport and the Thunderhead, from the second visit; a two-round match
+  sells everything on its only one). Every tank starts with Shells,
+  1 Guided Missile (not online), 1 Breacher, 1 Roller, 1 Mound,
+  2 Rangefinders and 1 Jump Jet charge. A damage weapon costs $0.50 to $1.40 a
+  shot for each point a good shot deals (`test/economy.test.js`). Gear is
+  armor, fuel and jump jets. **Mod upgrades**: the draft gives you a new
+  mod at level 1, and the armory sells its levels 2 and 3. A tank has two mod
+  bays. `src/armory.js` builds these screens.
 - **Fuel.** Every tank has 30 m of driving per round, on its own turn (or
   its own planning, in a volley), before it fires, and every shot it fires
   puts a third of that back (never past full). Climbing burns extra (a 45 degree slope costs three times level
@@ -553,7 +566,8 @@ second column beside the first. On a phone the players box sits top right.
   (`birds.js`), the isles' passing craft (`craft.js`), the Survey Satellite's
   projected cell patch and labels (`satellite.js`) and the deployed mods:
   orbiter orbs with their trails, satellites, break-ups (`mods.js`).
-- `src/modsui.js` is the mods' deploy buttons, status chips and armory section;
+- `src/armory.js` is the between-rounds screens (stepper, results, draft cards, kit, armory);
+  `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's.
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
