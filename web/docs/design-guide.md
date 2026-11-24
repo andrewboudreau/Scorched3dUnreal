@@ -12,7 +12,7 @@ rules quickly, with a match builder so the host can tick which weapons, perks
 and round modifiers are in play, and query params to pin a test down.
 
 The long-term goal is **roguelike player-versus-player battles**: short runs
-where you draft upgrades between rounds and fight other people. Two game modes:
+where you pick upgrades between rounds and fight other people. Two game modes:
 
 - **Turn-based:** the game as it plays today (take turns, or everyone plans and
   fires together in volleys). Good for phones, and for thinking.
@@ -50,7 +50,7 @@ sign in.
   needs.
 - **Same game on every screen.** The simulation is deterministic: online play
   replays inputs, so nothing in the core may use unseeded randomness.
-- **Roguelike runs.** A match is a short run. Between rounds you draft perks,
+- **Roguelike runs.** A match is a short run. Between rounds you take skills,
   so two matches never play the same.
 
 ## What a tank carries
@@ -82,7 +82,7 @@ ready on its owner's next turn (next volley), and putting it up takes that
 turn. Losing it does not cost the rest of the round: a single Flak hit then
 trades a turn for a turn (plus the shooter's pay, and a turn in which every
 enemy shoots past no orbiter), rather than deciding the round, and the
-mod you drafted stays part of how you play. A mod lost with its tank comes
+mod you took stays part of how you play. A mod lost with its tank comes
 back next round.
 
 ## How you get things (the run, round by round)
@@ -111,6 +111,8 @@ over, so you can save for two ranks at once.
 | --- | --- |
 | Orbital Mechanic (mod) | Gravity Orbiter level 1, 2, 3 |
 | Sat Recon (mod) | Survey Satellite level 1, 2, 3 |
+| Smoke and Mirrors (mod) | Decoy Beacon level 1, 2, 3 |
+| Close-In Gunner (mod) | Point Defense level 1, 2, 3 |
 | *each new mod* | its levels 1 to 3 (made from the mod data) |
 | Firepower | Heavy Charge, Wide Blast, Shrapnel |
 | Hull | Reinforced Hull, Dug In, Field Repairs |
@@ -189,8 +191,8 @@ Each level adds something you can name, not only bigger numbers.
 | --- | --- | --- | --- | --- |
 | Gravity Orbiter | Defense | one well bends enemy shells | stronger and faster | two wells: a three-body slingshot |
 | Survey Satellite | Recon | aim labels, no wind | labels count wind, moons and orbiters | more labels |
-| **Decoy Beacon** (new) | Deception | Blink: fire it like a shot and your tank warps where it lands; a decoy of your tank stays where you were and fizzles after 20 damage | the decoy takes 35 and shows your hit points | when it fizzles it goes off: a 25-damage blast that hurts whoever is near |
-| **Point Defense** (new) | Defense | shoots down the first enemy shell coming down within 18 m, once a round | twice a round | 26 m, and it also stops a split shell's fragments |
+| **Decoy Beacon** | Deception | Blink: fire it like a shot and your tank warps where it lands; a decoy of your tank stays where you were and fizzles after 20 damage | the decoy takes 35 and shows your hit points | when it fizzles it goes off: a 25-damage blast that hurts whoever is near |
+| **Point Defense** | Defense | shoots down the first enemy shell coming down within 18 m, once a round | twice a round | 26 m, and it also stops a split shell's fragments |
 
 The Decoy is the answer to being ranged: when an enemy has your distance
 dialled in, blink and leave the decoy to eat the shot. CPUs aim at the decoy
@@ -262,8 +264,8 @@ If it beats everything, it's a perk number, not a mod.
 | --- | --- | --- | --- |
 | Survey Satellite (L1–3) | Recon | Built as a mod (#10): from perks (Sat Recon, then Sharper Optics), deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense). CPUs don't use it |
 | Gravity Orbiter (L1–3) | Defense | Built (#10): from perks (Orbital Mechanic, then Tighter Orbit), 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt. CPUs misread it, more at higher levels |
-| Point Defense (was Missile Defense) | Defense | Being built | Shoots down the first enemy shell coming down near you; charges per round (see "Mods and their levels") |
-| Decoy Beacon | Deception | Being built | Blink away and leave a decoy that soaks a ranged shot (see "Mods and their levels") |
+| Point Defense (was Missile Defense) | Defense | Built: from perks (Close-In Gunner, then Twin Feeds), 25–35 hp, lasts 5–7 turns | Shoots down the first enemy shell coming down near you; charges refill each round; Flak and Rollers pass. CPUs answer it with Scatter, Flak and Rollers (see "Mods and their levels") |
+| Decoy Beacon | Deception | Built: from perks (Smoke and Mirrors, then Hard Light), 20–35 hp, lasts the round at most | Blink away and leave a decoy that soaks a ranged shot; CPUs fall for it on the seeded rng (see "Mods and their levels"). At most two mods a tank (mod bays) |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
 | Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |
 | Comms uplink ("satcom") | Recon (support) | Idea | Buffs your other mods (Uplinked); could share recon with an ally in team play |
@@ -286,7 +288,7 @@ It fits the layer as it stands (`core/mods.js`) without new machinery:
   (anti-air) or the multi-shell weapons, as they already prefer Flak against
   an orbiter (`knownFoes` marks `shielded`).
 - Against the orbiter: two defense mods at once would make a tank nearly
-  untouchable; the draft or the armory may need to allow only one defense mod
+  untouchable; the skill tree may need to allow only one defense mod
   up at a time.
 
 ## Story hooks (open)

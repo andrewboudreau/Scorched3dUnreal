@@ -21,7 +21,7 @@
 //   shrapnel      bomblets a plain Shell throws onward from where it lands
 //   tracer        metres of predicted flight drawn while aiming
 //   doubleStrike  the owner may queue two shots in one turn (see game.js STRIKE)
-//   fromRound     only offered in the draft before this round or a later one
+//   fromRound     only taken before this round or a later one
 //   mods          { mod id: levels } added to the owner's mods (core/mods.js)
 //   unlock        (with mods) only offered to a tank that does not own that mod yet
 //   levelUp       (with mods) only offered to a tank that owns it, below its top level
@@ -30,9 +30,11 @@
 //   modHp         +share of every mod's health
 //   needsMod      only offered to a tank that owns a mod
 //
-// Mods come from the draft (unless the host's Lab says otherwise): first an
-// unlock card, then level-up cards. A draft holds at most one mod card (see
-// MOD_DRAFT), and the game leaves out any that could do nothing (game.perkFits).
+// Mods come from the skill tree (core/skills.js; unless the host's Lab says
+// otherwise): each is a branch, its unlock perk then its level-up perk. The game
+// shuts a branch that could do nothing (game.skillTree, perkFits), including
+// new mods once a tank fills its mod bays (mods.js MOD_BAYS). draftOffer and
+// MOD_DRAFT below are the old draft, kept for the strike and twists tests.
 
 export const PERKS = [
   { id: 'wideblast', tag: 'WB', name: 'Wide Blast', desc: 'Your blasts reach 15% further.', blastRadius: 0.15 },
@@ -60,6 +62,14 @@ export const PERKS = [
     desc: 'Gain a Survey Satellite (level 1): it labels a grid of cells over the enemy with the aim that lands there. Deploying it takes your turn.' },
   { id: 'satrecon2', tag: 'S+', name: 'Sharper Optics', mods: { satellite: 1 }, levelUp: true, stack: 2,
     desc: 'Your Survey Satellite goes up a level: level 2 counts the wind, moons and enemy orbiters, level 3 labels more cells.' },
+  { id: 'beacon', tag: 'DB', name: 'Smoke and Mirrors', mods: { decoy: 1 }, unlock: true,
+    desc: 'Gain a Decoy Beacon (level 1): fire it like a shot, your tank blinks where it lands and a decoy stays where you were. Deploying it takes your turn.' },
+  { id: 'beaconup', tag: 'D+', name: 'Hard Light', mods: { decoy: 1 }, levelUp: true, stack: 2,
+    desc: 'Your Decoy Beacon goes up a level: level 2 takes 35 damage and shows your hit points, level 3 goes off when it fizzles.' },
+  { id: 'pdturret', tag: 'PD', name: 'Close-In Gunner', mods: { pointdef: 1 }, unlock: true,
+    desc: 'Gain Point Defense (level 1): a turret beside your tank that shoots down the first enemy shell coming down near you each round. Deploying it takes your turn.' },
+  { id: 'pdup', tag: 'P+', name: 'Twin Feeds', mods: { pointdef: 1 }, levelUp: true, stack: 2,
+    desc: 'Your Point Defense goes up a level: level 2 stops two shells a round, level 3 reaches further and stops split-shell fragments too.' },
   { id: 'cells', tag: 'LC', name: 'Long-Life Cells', modTurns: 2, modHp: 0.25, needsMod: true,
     desc: 'Your mods last 2 turns longer and take 25% more damage before they break.' },
 ];

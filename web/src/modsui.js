@@ -4,14 +4,19 @@
 //     one ready: on a phone it sits in the Fire column, above SIGHT; on a
 //     desktop in the player card, with B on the keyboard. Deploying takes the
 //     turn, so it takes two taps: the first arms it ("ORB?"), the second puts
-//     it up. Anything else (or three seconds) lets it go again.
+//     it up. Anything else (or three seconds) lets it go again. The decoy is
+//     aimed: its button arms it (game.toggleBlink) and Fire then sends its
+//     blink with the aim as it is (the Fire button reads BLINK); a second tap
+//     lets it go.
 //   - Small chips in the player card for the planner's mods: level, health
-//     and turns left once up.
+//     and turns left once up (and Point Defense's charges for the round).
 //   - The armory's Mods section (modShopCards), apart from the weapons, when
 //     the host's Lab sells mods there (by default they come from perks).
-// It reads the game each frame and talks to it only through game.deploy.
+// It reads the game each frame and talks to it only through game.deploy and
+// game.toggleBlink.
 
-import { MODS, MOD_BY_ID, modUp } from './core/mods.js';
+import { Vector3 } from 'three';
+import { MODS, MOD_BY_ID, DECOY, modUp } from './core/mods.js';
 import { ModsView } from './render/mods.js';
 
 const KEY = 'b';
@@ -21,8 +26,11 @@ export class ModsUI {
   // game() is the live Game (or null); seen(p) whether this screen may see
   // `p`'s things (fog); blocked() is true while input is held off; banner and
   // click are main.js's.
-  constructor({ game, scene, touch = null, banner = () => {}, click = () => {}, blocked = () => false, seen = () => true }) {
+  constructor({ game, scene, camera = null, touch = null, banner = () => {}, click = () => {}, blocked = () => false, seen = () => true }) {
     this.game = game;
+    this.camera = camera;     // for the decoys' name labels
+    this.labels = new Map();  // owner id -> a decoy's label in #labels
+    this._v = new Vector3();
     this.touch = touch;
     this.banner = banner;
     this.click = click;
@@ -65,7 +73,7 @@ export class ModsUI {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || this.blocked()) return;
       const g = this.game();
       const ready = g?.canDeploy() ? MODS.filter((d) => g.current.mods?.[d.id]?.state === 'ready') : [];
-      if (ready.length) this.press(this.armed?.id || ready[0].id);
+      if (ready.length) this.press(g.blink ? 'decoy' : this.armed?.id || ready[0].id);
     });
   }
 
@@ -74,6 +82,16 @@ export class ModsUI {
     const g = this.game();
     if (!g || !g.canDeploy() || g.current.mods?.[id]?.state !== 'ready') return;
     const def = MOD_BY_ID[id];
+    if (def.aimed) {   // the decoy: armed, Fire sends the blink
+      this.armed = null;
+      const on = g.toggleBlink();
+      this.refresh();
+      this.click();
+      this.touch?.buzz(on ? 8 : [6, 20, 6]);
+      if (on) this.banner(`${def.name} armed`, `Aim, then ${this.touch ? 'BLINK' : 'Space'}: your tank blinks where it lands and a decoy stays here`, 2600);
+      return;
+    }
+    if (g.blink) g.toggleBlink();   // another mod instead: the decoy lets go
     if (this.armed?.id === id && performance.now() < this.armed.until) {
       this.armed = null;
       if (g.deploy(id)) {
@@ -99,12 +117,19 @@ export class ModsUI {
     const g = this.game();
     if (!g) return;
     if (e.type === 'turn' || e.type === 'locked' || e.type === 'volley') this.armed = null;
+    if (e.type === 'intercept') { this.view.event(e, g, this.seen); return; }
     if (e.type !== 'mod') return;
     this.view.event(e, g, this.seen);
     const p = g.players[e.player];
     const def = MOD_BY_ID[e.mod];
     if (!p || !def) return;
     const mine = !p.ai && g.isLocal(p);
+    if (e.mod === 'decoy') {   // only its owner hears of it: to the others it is just their tank
+      if (!mine) return;
+      if (e.what === 'deploy') this.banner('Decoy up', 'It stands where you were, to draw the fire', 1300);
+      else if (e.what === 'down' && !e.tank) this.banner('Your decoy fizzled', e.pos && p.mods.decoy.level >= 3 ? 'and went off' : '', 1300);
+      return;
+    }
     if (e.what === 'deploy') {
       if (g.volleyMode && mine) this.banner(`${def.name} locked in`, 'It goes up when the volley fires', 1300);
       else if (g.volleyMode) return;   // the volley shows it
@@ -121,8 +146,50 @@ export class ModsUI {
 
   // Every frame.
   update(dt, time) {
-    this.view.update({ game: this.game(), time, dt, seen: this.seen });
+    const g = this.game();
+    this.view.update({ game: g, time, dt, seen: this.seen, mine: (p) => this.mine(g, p) });
+    this.decoyLabels(g);
     this.refresh();
+  }
+
+  // Does this screen play for `p`, so its decoy shows as a hologram here?
+  // With more than one human on the screen, only while `p` plans.
+  mine(g, p) {
+    if (!g || p.ai || !g.isLocal(p)) return false;
+    return g.localHumans.length <= 1 || g.current === p;
+  }
+
+  // Each enemy decoy carries its owner's name label, like the real tank's
+  // (main.js updateLabels): its own health on the bar at level 1, its
+  // owner's from level 2. Its owner sees "decoy" under the name instead.
+  decoyLabels(g) {
+    const live = new Set();
+    for (const p of g?.players || []) {
+      if (!modUp(p, 'decoy') || !this.camera) continue;
+      const m = p.mods.decoy;
+      const mine = this.mine(g, p);
+      if (!mine && !this.seen({ ...p, x: m.x, z: m.z })) continue;
+      live.add(p.id);
+      let el = this.labels.get(p.id);
+      if (!el || el._mine !== mine) {
+        el?.remove();
+        el = document.createElement('div');
+        el.className = 'tank-label';
+        el._mine = mine;
+        el.innerHTML = `<div style="color:${p.color}"></div><div class="bar"><div class="fill hp"></div></div>${mine ? '<small class="decoy-tag">decoy</small>' : ''}`;
+        el.firstChild.textContent = p.name;
+        document.getElementById('labels')?.appendChild(el);
+        this.labels.set(p.id, el);
+      }
+      const v = this._v.set(m.x, m.y + 8, m.z).project(this.camera);
+      const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+      el.style.display = on ? 'block' : 'none';
+      if (!on) continue;
+      el.style.transform = `translate(${Math.round((v.x * 0.5 + 0.5) * window.innerWidth)}px, ${Math.round((-v.y * 0.5 + 0.5) * window.innerHeight)}px) translate(-50%, -100%)`;
+      const share = m.level >= DECOY.mirror ? p.hp / p.maxHp : m.hp / m.maxHp;
+      el.querySelector('.fill').style.width = `${Math.max(0, share) * 100}%`;
+    }
+    for (const [id, el] of this.labels) if (!live.has(id)) { el.remove(); this.labels.delete(id); }
   }
 
   // The buttons and chips, redrawn only when what they show changes.
@@ -132,31 +199,36 @@ export class ModsUI {
     const p = g && g.phase === 'aim' && !this.blocked() ? g.current : null;
     const me = p && !p.ai && g.isLocal(p) ? p : null;
     const can = !!me && g.canDeploy(me);
-    const key = !me ? '' : MODS.map((d) => { const m = me.mods?.[d.id]; return m ? `${m.state}${m.level}.${Math.round(m.hp)}.${m.turns}` : '-'; }).join('|') + `|${can}|${this.armed?.id || ''}`;
+    const blink = !!(me && g.blink && g.blink.player === me.id);
+    const key = !me ? '' : MODS.map((d) => { const m = me.mods?.[d.id]; return m ? `${m.state}${m.level}.${Math.round(m.hp)}.${m.turns}.${m.charges ?? ''}` : '-'; }).join('|') + `|${can}|${this.armed?.id || ''}|${blink}`;
     if (key === this.shown) return;
     this.shown = key;
     for (const def of MODS) {
       const b = this.buttons[def.id];
       const ready = can && me.mods?.[def.id]?.state === 'ready';
       b.classList.toggle('hidden', !ready);
-      const armed = ready && this.armed?.id === def.id;
+      const armed = ready && (def.aimed ? blink : this.armed?.id === def.id);
       b.classList.toggle('on', armed);
       const lv = me?.mods?.[def.id]?.level || 0;
       b.innerHTML = this.touch
-        ? (armed ? `${def.tag}?` : `&#9650;${def.tag}<small>${lv}</small>`)
-        : (armed ? `Deploy ${def.name}? <b>B</b>` : `&#9650; ${def.name} L${lv} <b>${this.armed ? '' : 'B'}</b>`);
+        ? (armed ? `${def.tag}${def.aimed ? '&#10003;' : '?'}` : `&#9650;${def.tag}<small>${lv}</small>`)
+        : armed ? (def.aimed ? `${def.name} armed: Space blinks <b>B</b>` : `Deploy ${def.name}? <b>B</b>`)
+          : `&#9650; ${def.name} L${lv} <b>${this.armed || blink ? '' : 'B'}</b>`;
     }
     // Chips: what the planner has up, or ready.
     const chips = !me ? [] : MODS.map((d) => [d, me.mods?.[d.id]]).filter(([, m]) => m && (m.state === 'up' || m.state === 'ready'));
     this.chips.classList.toggle('hidden', !chips.length);
+    const charges = (d, m) => (d.id === 'pointdef' ? ` <b title="Shells it can still stop this round">${'&#9679;'.repeat(m.charges || 0) || '&#9675;'}</b>` : '');
     this.chips.innerHTML = chips.map(([d, m]) => (m.state === 'up'
-      ? `<span class="mod-chip up" title="${d.name}: up">${d.tag}${m.level} <i style="--hp:${Math.round((m.hp / m.maxHp) * 100)}%"></i> ${m.turns}t</span>`
+      ? `<span class="mod-chip up" title="${d.name}: up">${d.tag}${m.level} <i style="--hp:${Math.round((m.hp / m.maxHp) * 100)}%"></i> ${m.turns}t${charges(d, m)}</span>`
       : `<span class="mod-chip" title="${d.name}: ready to deploy">${d.tag}${m.level} ready</span>`)).join('');
   }
 
   // A new match.
   reset() {
     this.view.reset();
+    for (const el of this.labels.values()) el.remove();
+    this.labels.clear();
     this.armed = null;
     this.shown = '?';
   }
@@ -164,8 +236,8 @@ export class ModsUI {
 
 // The armory's Mods section, for main.js's shop: a heading and a card per mod
 // on sale (level by level), in the same shape as the weapon cards. Only when
-// the host's Lab puts mods in the armory; by default they come from the perk
-// draft and the section is left out.
+// the host's Lab puts mods in the armory; by default they come from the skill
+// tree and the section is left out.
 export function modShopCards(game, p, justBought = null) {
   const cards = MODS.filter((d) => game.cfg.lab[d.id] === 'shop').map((d) => {
     const have = game.modLevel(p, d.id);

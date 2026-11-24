@@ -91,7 +91,8 @@ export class StrikeUI {
     const mine = p && !p.ai && g.isLocal(p) && (p.reloading || g.canDouble(p) || g.strikeStep(p) !== 'single');
     const step = mine ? g.strikeStep(p) : 'none';
     const together = !!g?.volleyMode;
-    const state = `${step}|${together}`;
+    const blink = !!(p && g.blink && g.blink.player === p.id);   // the decoy armed (modsui.js): Fire sends its blink
+    const state = `${step}|${together}|${blink}`;
     if (this.shown.state === state) return;
     this.shown.state = state;
 
@@ -109,7 +110,7 @@ export class StrikeUI {
     // What Space does, in the keyboard hint; the touch Fire button reads it.
     const help = document.getElementById('help-fire');
     if (help) {
-      help.textContent = {
+      help.textContent = blink ? (together ? 'lock in the decoy blink' : 'blink (decoy)') : {
         first: 'queue shot 1 of 2',
         second: together ? 'lock in both shots' : 'fire both shots',
         pass: 'pass (reloading)',

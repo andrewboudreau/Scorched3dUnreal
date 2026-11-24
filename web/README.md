@@ -1,7 +1,7 @@
 # Craterfall (WebGL / three.js)
 
 A browser edition of the Scorched3dUnreal artillery game: tanks on
-destructible 3D terrain, firing all together or taking turns, wind, a perk draft and a shop between rounds, a little
+destructible 3D terrain, firing all together or taking turns, wind, a skill tree and a shop between rounds, a little
 fuel for repositioning, and CPU opponents. No build step; three.js r187 is
 vendored under `vendor/three`.
 
@@ -36,6 +36,8 @@ page loads and override both Random and what Custom match remembers.
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
+| `decoy` | `1`, `2`, `3` | Every tank starts with a Decoy Beacon at that level. |
+| `pointdef` | `1`, `2`, `3` | Every tank starts with Point Defense at that level. |
 | `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
 | `modifier` | a round modifier id: `rain`, `lowgrav`, `gale`, `calm`, `soft`, `goldrush`, `fulltanks`, `clear` | Every round is that modifier. |
 
@@ -161,10 +163,9 @@ second column beside the first. On a phone the players box sits top right.
   - *Weapons*: an unticked weapon is gone for the match: not in the armory, the
     starting kit, a perk's hand-out (Quartermaster, the fog's free Scout) or the
     CPUs' hands. The Shell is always on.
-  - *Perks*: an unticked perk is never offered, to humans or CPUs. Mods come
-    only from their cards, so unticking Orbital Mechanic or Sat Recon turns that
-    mod off, and its level-up cards never come up without it. With every perk
-    off there is no draft.
+  - *Perks*: an unticked perk drops out of the skill tree, for humans and
+    CPUs. Mods come only from their branches, so unticking Orbital Mechanic or
+    Sat Recon turns that mod off. With every perk off there is no skill tree.
   - *Round modifiers*: Clear skies is one of the ticks; with all off every round
     is plain. With the wind on Calm, Gale and Dead calm sit out.
   - The core takes these as allow-lists in its config (`weapons`, `perks`,
@@ -259,7 +260,7 @@ second column beside the first. On a phone the players box sits top right.
   the rounds, wind, terrain and any CPU tanks, then starts. Up to six tanks.
   Online play is always volley: everyone plans on their own screen at the
   same time, a banner says who the game is waiting for, and all shells fly
-  together once everyone has locked in. Between rounds each player drafts
+  together once everyone has locked in. Between rounds each player spends skill points
   and shops on their own screen, and the next round starts when all are
   done. The Guided Missile is left out online, since its steering is live.
   Online there is a clock: a minute to plan each shot (it then goes as
@@ -378,15 +379,13 @@ second column beside the first. On a phone the players box sits top right.
   faces. A dusk sky with no clouds, a few boulders and nothing else: no grass,
   trees, water or villages. The overview (View) stands back side on.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
-  they come from the **perk draft** between rounds. An unlock card (Orbital
-  Mechanic, Sat Recon) gives you one at level 1; once you have it, level-up
-  cards (Tighter Orbit, Sharper Optics) raise it a level at a time to level 3.
-  A draft holds at most one mod card, more often while you own no mod, and a
-  tank takes at most four mod levels from perks in a match. Unticking a mod's
-  cards under Custom match > Perks turns it off; `?sat=` and `?orbiter=` hand
+  they come from the **skill tree** between rounds. Each mod is a branch:
+  rank 1 (Orbital Mechanic, Sat Recon, Smoke and Mirrors, Close-In Gunner)
+  gives you one at level 1, ranks 2 and 3 (Tighter Orbit, Sharper Optics, Hard
+  Light, Twin Feeds) raise it. Unticking a mod's ranks under Custom match > Perks turns it off; `?sat=` and `?orbiter=` hand
   everyone one for testing (see Testing query params). A mod you own is *ready*.
   Deploying it is your whole turn: on a phone, tap its button at the top of
-  the Fire column (ORB / SAT) and tap again to confirm; on a desktop press B
+  the Fire column (ORB / SAT / DCY / PD) and tap again to confirm; on a desktop press B
   twice, or use the button in the player card. In a volley, deploying is the
   action you lock in, and it goes up when the volley fires. Once up, a mod
   has hit points and a lifetime counted in your turns, and it stays up
@@ -397,8 +396,8 @@ second column beside the first. On a phone the players box sits top right.
   card show each mod's level, health and turns left. Shells can hit a mod
   directly, blasts hurt any mod in reach, and **Flak** is the anti-air
   answer: it also bursts by an enemy mod and its burst hurts every enemy mod
-  near it. Shooting one down pays 60. CPU tanks like the orbiter cards in the
-  draft, and draft the satellite ones as any other card (spotters favour
+  near it. Shooting one down pays 60. CPU tanks like the orbiter ranks in the
+  skill tree, and take the satellite ones as any other (spotters favour
   them). Each Normal or
   Hard CPU has its own way of timing the deploy for the match: some put it up
   at once, some fire a ranging shot first and deploy while their aim is still
@@ -433,16 +432,48 @@ second column beside the first. On a phone the players box sits top right.
   moons out, level 2 counts them and enemy orbiters, level 3 labels more cells. At most 5
   labels on a phone and 8 on a desktop, nearest the middle, never on top of
   each other, fading with distance. Only the planner on this screen sees it,
-  only on their own aim. CPU tanks draft it (spotters most). A CPU puts its
+  only on their own aim. CPU tanks take it in the skill tree (spotters most). A CPU puts its
   satellite up when it has no reading on a target over 150 m off (Easy only
   now and then), and while it is up its first shots carry less of their
   error: a third less at level 1 (less still in the wind), more at levels 2
   and 3. Easy reads it about half as well.
+- **Decoy Beacon** (mod, family *deception*; from perks; 20 hp, 35 from
+  level 2; lasts 4 or 5 turns, never past the round). Deploying it is aimed:
+  arm it (DCY on a phone, B on a desktop), aim, and Fire (it reads BLINK)
+  sends a hidden blink round. Your tank warps to where it lands, and a decoy
+  stays where you stood: a tank-sized target that takes shells and blasts
+  (your own fire passes it by) and fizzles when its hit points run out. You
+  see it as a flickering hologram tagged "decoy"; enemies see a tank with
+  your name over it, and from level 2 that label shows your real hit points.
+  At level 3 it goes off when it fizzles: a 25-damage, 10 m blast credited
+  to you. A blink that is lost (off the field, into the void) spends the
+  turn and leaves the decoy ready. In a volley the blink's aim is part of
+  the plan (`{ deploy: 'decoy', yaw, elev, power }`), so every screen plays
+  it the same. CPUs fall for it some of the time (Easy often, Hard rarely,
+  less against a level 1 decoy), on the seeded rng: they aim, range and
+  remember at the decoy as if it were you. A CPU hit from 60 m or more
+  blinks away with its decoy (Easy only half the time), a shorter hop than
+  a Teleport.
+- **Point Defense** (mod, family *defense*; from perks; 25 to 35 hp; lasts
+  5, 6 or 7 turns). A turret beside your tank shoots down the first enemy
+  shell coming down within its reach of you: an air burst, no crater, no
+  damage. Level 1 reaches 18 m with one charge a round, level 2 two charges,
+  level 3 reaches 26 m and stops fragments too (Scatter's bomblets,
+  Shrapnel, Flak's pieces); below level 3 fragments get through. Charges
+  refill every round. It never touches Rollers or Flak, your own shells, or
+  a shell still climbing. Blasts hurt it; Flak's air burst does not (it sits
+  on the ground). CPUs that see it reach for Scatter, Flak and Rollers over
+  single heavy shells, and put their own up against an enemy carrying
+  Breachers or Guided Missiles, or once they are being hit.
+- **Two mod bays.** A tank holds at most two mods (`MOD_BAYS` in
+  `core/mods.js`): once you own two, the other mod branches of the
+  skill tree are shut, and only the two you have go deeper.
 - **Mod rules in the config.** The old Lab menu is gone; the core still
-  reads `lab` in the match config (`satellite` / `orbiter`: `perk`, `shop`,
-  `all` or `off`, with a level, and the satellite's `labels`), so old configs
-  and tests keep working. The launch screen only ever sends `perk` (or `all`
-  from `?sat=` / `?orbiter=`), with labels `some` unless `?labels=` says
+  reads `lab` in the match config (`satellite` / `orbiter` / `decoy` /
+  `pointdef`: `perk`, `shop`, `all` or `off`, with a level, and the
+  satellite's `labels`), so old configs and tests keep working. The launch
+  screen only ever sends `perk` (or `all` from `?sat=` / `?orbiter=` /
+  `?decoy=` / `?pointdef=`), with labels `some` unless `?labels=` says
   otherwise. An old saved Custom with the Lab Off unticks that mod's cards.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
@@ -528,10 +559,14 @@ second column beside the first. On a phone the players box sits top right.
   | Tighter Orbit | your Gravity Orbiter goes up a level (taken up to twice) |
   | Sat Recon | gain a Survey Satellite at level 1 (only offered if you have none) |
   | Sharper Optics | your Survey Satellite goes up a level (taken up to twice) |
+  | Smoke and Mirrors | gain a Decoy Beacon at level 1 (only offered if you have none and a free mod bay) |
+  | Hard Light | your Decoy Beacon goes up a level (taken up to twice) |
+  | Close-In Gunner | gain Point Defense at level 1 (only offered if you have none and a free mod bay) |
+  | Twin Feeds | your Point Defense goes up a level (taken up to twice) |
   | Long-Life Cells | your mods last 2 turns longer and take 25% more damage (only if you own one) |
-| Double Strike | from round 3's draft on: queue two shots in one turn (see below) |
+| Double Strike | from round 3 on: queue two shots in one turn (see below) |
 
-- **Double Strike** (a perk, drafted from the round 3 pick on). On a turn, or
+- **Double Strike** (the last Gunnery rank, open from round 3). On a turn, or
   a go at planning a volley, press ×2 (X; on a phone the ×2 button just above
   Fire) to arm it. Fire then queues your aim as shot 1 ("Shot 1 of 2 queued"),
   you aim shot 2, and Fire again sends both (in a volley, locks both in): the
@@ -585,8 +620,10 @@ second column beside the first. On a phone the players box sits top right.
   (`gravityLines.js`, driven by the pure `core/gravityPull.js`), the flocks
   (`birds.js`), the isles' passing craft (`craft.js`), the Survey Satellite's
   projected cell patch and labels (`satellite.js`) and the deployed mods:
-  orbiter orbs with their trails, satellites, break-ups (`mods.js`).
-- `src/armory.js` is the between-rounds screens (stepper, results, draft cards, kit, armory);
+  orbiter orbs with their trails, satellites, break-ups (`mods.js`), and the
+  mods on the ground: the decoy (a hologram to its owner, a tank to everyone
+  else) and the Point Defense turret with its tracers (`groundmods.js`).
+- `src/armory.js` is the between-rounds screens (stepper, results, skill tree, kit, armory);
   `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's.
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
@@ -603,7 +640,7 @@ second column beside the first. On a phone the players box sits top right.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
-  draft, modifiers, driving and fuel (`twists.test.js`), the match builder's
+  skill tree, modifiers, driving and fuel (`twists.test.js`), the match builder's
   allow-lists, Random rolls and query params (`builder.test.js`), the launch
   screen's saved state and its migrations (`launch.test.js`), road routing (`paths.test.js`),
   aim history and both firing modes (`volley.test.js`), jump jets, Teleport and Flak

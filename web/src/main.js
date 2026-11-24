@@ -457,6 +457,10 @@ function handleEvents() {
         sound.click();
         retireShell(e.id);
         break;
+      case 'intercept':   // Point Defense shot it down (modsui.js draws the rest)
+        sound.ping(camDist(e.pos));
+        retireShell(e.id, e.pos);
+        break;
       case 'impact':
       case 'lost': {
         const v = shells.get(e.id);
@@ -1467,7 +1471,7 @@ if (touch) {
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
-const modsUi = new ModsUI({ game: () => game, scene, touch, banner, click: () => sound.click(), blocked: () => handoffOpen, seen: (p) => seen(p) });
+const modsUi = new ModsUI({ game: () => game, scene, camera, touch, banner, click: () => sound.click(), blocked: () => handoffOpen, seen: (p) => seen(p) });
 
 function toggleMute() {
   sound.ensure();

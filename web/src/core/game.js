@@ -9,7 +9,7 @@ import { generateRidgeline, keepCrust, rowStarts } from './ridgeline.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
 import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
-import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
+import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -66,6 +66,13 @@ export const STRIKE = { gap: 0.45 };
 // Easy CPUs deploy now and then at random. Every style deploys with nothing to shoot at.
 export const DEPLOY_STYLES = ['early', 'ranging', 'reactive'];
 export const AI_DEPLOY = { yaw: 1.0, power: 0.02, easy: 0.35 };
+
+// A CPU blinks away with its decoy once hit by an enemy at least `ranged` m
+// off (an easy one only `easy` of the time), a shorter hop than a Teleport
+// (`warp`, as ai.WARP). It puts Point Defense up against an enemy carrying
+// these heavy single shells.
+export const AI_DECOY = { ranged: 60, easy: 0.5, warp: { min: 40, max: 120, tries: 14, edge: 40, clear: 50, far: 560 } };
+const HEAVY = ['breacher', 'guided'];
 
 export class Game {
   constructor({
@@ -167,6 +174,9 @@ export class Game {
     this.lastRoundResult = null;
     this.acc = 0;
     this.strike = null;     // Double Strike being planned now: { player, first: shot 1 or null }
+    this.blink = null;      // a decoy armed by the current human: { player }; Fire sends the blink (see deploy)
+    this.fizzles = [];      // level 3 decoys that just fizzled, waiting to go off (see hurtModOf)
+    this.blasting = 0;      // blasts being worked through right now (fizzles wait for them)
     this.followUps = [];    // second shots waiting to go: { owner, plan, at (sim step), delay }
     this.simStep = 0;       // fixed simulation steps run so far (times the second shots)
     // The game clock, in simulated seconds: it runs only while something is in
@@ -270,6 +280,8 @@ export class Game {
       anchorMod(p, 'satellite', (x, z) => this.groundAt(x, z));   // over its owner's new spot
     }
     this.strike = null;
+    this.blink = null;
+    this.fizzles = [];
     this.followUps = [];
     // Everyone starts aiming at the arena centre.
     for (const p of this.players) p.hull = p.yaw = ((Math.atan2(-p.z, -p.x) * 180) / Math.PI + 360) % 360;
@@ -360,6 +372,7 @@ export class Game {
     this.aiDrive = null;
     this.driveNote = null;
     this.strike = null;
+    this.blink = null;
     this.checkAimHistory(p);
     this.refreshIntel();
     if (this.volleyMode) {
@@ -489,9 +502,10 @@ export class Game {
       p.reloading = false;   // this volley was its reload, if it had one
       const plan = this.volley.plans[p.id];
       if (!plan || !p.alive || reloaded) continue;
-      if (plan.deploy) { this.deployFor(p, plan.deploy); continue; }   // its action this volley
-      this.aimAt(p, plan);
+      if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployFor(p, plan.deploy); continue; }   // its action this volley
       const delay = k++ * VOLLEY.stagger;
+      if (plan.deploy) { this.deployFor(p, plan.deploy, plan, delay); continue; }   // the decoy's blink, as aimed
+      this.aimAt(p, plan);
       if (plan.second && hasPerk(p, 'doubleStrike')) this.launchDouble(p, plan.second, delay);
       else this.launch(p, delay);
     }
@@ -551,11 +565,15 @@ export class Game {
   planAiShot(p) {
     // Reloading after a Double Strike: nothing to aim, Fire only passes.
     if (p.reloading) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, pass: true, think: 0.6 });
-    const target = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
+    // Found by a ranged enemy: blink away and leave it a decoy.
+    const blink = this.aiDecoyAim(p);
+    if (blink) return (this.aiPlan = { yaw: blink.yaw, elev: blink.elev, power: blink.power, weapon: p.weapon, deploy: 'decoy', think: 0.6 });
+    const chosen = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
     // No good shot yet: spend the turn putting the orbiter up instead.
-    const deploy = this.aiWantsDeploy(p, target);
+    const deploy = this.aiWantsDeploy(p, chosen);
     if (deploy) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy, think: 0.6 });
-    if (!target) return null;
+    if (!chosen) return null;
+    const target = this.aiDecoyed(p, chosen);
     // Weigh the arsenal by the situation (ai.weaponWeights). A Mound goes at
     // its own feet and a Teleport at a spot it picked; everything else at the target.
     const ctx = this.aiSituation(p, target);
@@ -640,15 +658,19 @@ export class Game {
 
   // The live enemies `p` knows of, as it knows them: the real tanks without
   // fog; with it, stand-ins at its intel (`rough` when only roughly placed).
+  // Each is flagged with the mods it can see up (ai.weaponWeights):
+  // `shielded` (orbiter), `aloft` (satellite), `guarded` (Point Defense).
   knownFoes(p) {
-    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (modUp(q, 'orbiter') || modUp(q, 'satellite') ? { ...q, shielded: modUp(q, 'orbiter'), aloft: modUp(q, 'satellite') } : q));
+    const flags = (q) => ({ shielded: modUp(q, 'orbiter'), aloft: modUp(q, 'satellite'), guarded: modUp(q, 'pointdef') });
+    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (['orbiter', 'satellite', 'pointdef'].some((id) => modUp(q, id)) ? { ...q, ...flags(q) } : q));
     const out = [];
     for (const q of this.players) {
       const i = this.intel[p.id]?.[q.id];
       if (q === p || !q.alive || !i) continue;
       const t = this.terrain;
       const y = t.inBounds(i.x, i.z) ? t.heightAt(i.x, i.z) : q.y;
-      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0, shielded: i.r === 0 && modUp(q, 'orbiter'), aloft: i.r === 0 && modUp(q, 'satellite') });
+      const f = flags(q);
+      out.push({ id: q.id, x: i.x, y, z: i.z, hp: q.hp, armor: q.armor, alive: true, rough: i.r > 0, shielded: i.r === 0 && f.shielded, aloft: i.r === 0 && f.aloft, guarded: i.r === 0 && f.guarded });
     }
     return out;
   }
@@ -727,9 +749,17 @@ export class Game {
     return this.phase === 'aim' && !!p && p.alive && !p.ai && !p.reloading && readyMods(p).length > 0;
   }
 
-  // Put one of `p`'s ready mods up, now.
-  deployFor(p, id) {
-    if (!p.alive || !deployMod(p, id, (x, z) => this.groundAt(x, z))) return false;
+  // Put one of `p`'s ready mods up, now. An aimed mod (the decoy) fires its
+  // blink instead, as `aim` says (or as the tank is aimed), `delay` as for
+  // launch; it goes up when the blink lands (leaveDecoy).
+  deployFor(p, id, aim = null, delay = 0) {
+    if (!p.alive) return false;
+    if (MOD_BY_ID[id]?.aimed) {
+      if (p.mods?.[id]?.state !== 'ready') return false;
+      if (aim) { p.yaw = ((aim.yaw % 360) + 360) % 360; p.elev = aim.elev; p.power = aim.power; clampAim(p); }
+      return this.launchBlink(p, delay);
+    }
+    if (!deployMod(p, id, (x, z) => this.groundAt(x, z))) return false;
     this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: id });
     return true;
   }
@@ -737,13 +767,15 @@ export class Game {
   // The current human spends this turn deploying a mod (the first one ready,
   // without `id`) instead of firing. Taking turns, it goes up now and the turn
   // ends; in a volley it is the locked-in plan and goes up as the volley
-  // fires (launchVolley). Returns the id, or null.
+  // fires (launchVolley). The decoy goes with the tank's aim now: taking
+  // turns, its blink flies at once. Returns the id, or null.
   deploy(id = null) {
     const p = this.current;
     if (!this.canDeploy(p)) return null;
     const which = id || readyMods(p)[0];
     if (!readyMods(p).includes(which)) return null;
     this.strike = null;
+    this.blink = null;
     if (this.volleyMode) {
       this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy: which };
       this.volley.done.push(p.id);
@@ -756,13 +788,69 @@ export class Game {
     return which;
   }
 
-  // Taking turns: the mod goes up and that was the turn.
-  deployTurn(p, id) {
-    this.deployFor(p, id);
+  // Taking turns: the mod goes up and that was the turn (the decoy's blink
+  // flies first, as `aim` says or as the tank is aimed).
+  deployTurn(p, id, aim = null) {
+    const flies = MOD_BY_ID[id]?.aimed;
+    const ok = this.deployFor(p, id, aim);
     this.strike = null;
+    this.blink = null;
     this.aiPlan = null;
-    this.phase = 'settle';
+    this.phase = flies && ok ? 'flight' : 'settle';
     this.phaseTime = 0;
+  }
+
+  // Arm or disarm the current human's decoy: armed, Fire sends the blink with
+  // the aim as it is (deploy). Returns whether it is armed now.
+  toggleBlink() {
+    const p = this.current;
+    if (this.blink) {
+      this.blink = null;
+      this.emit({ type: 'blink', player: p ? p.id : null, armed: false });
+      return false;
+    }
+    if (!this.canDeploy(p) || !readyMods(p).includes('decoy')) return false;
+    this.strike = null;
+    this.blink = { player: p.id };
+    this.emit({ type: 'blink', player: p.id, armed: true });
+    return true;
+  }
+
+  // The decoy's blink leaves the barrel as the tank is aimed: a Teleport that
+  // costs no ammo and leaves a decoy where the tank stands now.
+  launchBlink(p, delay = 0) {
+    const pos = muzzleOrigin(p);
+    const pr = this.spawnProjectile(pos, launchVelocity(p.yaw, p.elev, p.power), 'blink', p.id, 0);
+    pr.decoy = { x: p.x, y: p.y, z: p.z, hull: p.hull, yaw: p.yaw, elev: p.elev };
+    this.heardFire(p);
+    this.emit({ type: 'fire', player: p.id, pos, weapon: 'blink', shot: 0, delay });
+    return true;
+  }
+
+  // The blink came down and `p` moved: its decoy stands where it was (`at`).
+  leaveDecoy(p, at) {
+    if (!deployMod(p, 'decoy', (x, z) => this.groundAt(x, z), at)) return;
+    this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: 'decoy', pos: modPos(p, 'decoy') });
+  }
+
+  // Up decoys sit on the ground: one whose ground was blown away or heaped
+  // up stands on what is there now.
+  settleDecoys() {
+    for (const p of this.players) {
+      if (!modUp(p, 'decoy')) continue;
+      const m = p.mods.decoy;
+      const g = this.groundAt(m.x, m.z);
+      if (g != null) m.y = g;
+    }
+  }
+
+  // Level 3 decoys that fizzled go off, once the blast that did it is over.
+  runFizzles() {
+    while (this.fizzles.length && !this.blasting) {
+      const f = this.fizzles.shift();
+      const F = DECOY.fizzle;
+      this.applyEffect({ type: 'blast', point: f.pos, radius: F.radius, damage: F.damage, depth: F.depth, fizzle: true }, f.owner, null, 0);
+    }
   }
 
   // This CPU's way of timing its deploys for the whole match (DEPLOY_STYLES):
@@ -781,8 +869,50 @@ export class Game {
     if (p.reloading) return null;
     const ready = readyMods(p);
     if (ready.includes('orbiter') && this.aiWantsOrbiter(p, target)) return 'orbiter';
+    if (ready.includes('pointdef') && this.aiWantsPointDef(p)) return 'pointdef';
     if (ready.includes('satellite') && wantsSatellite({ me: p, target, memory: p.aim, difficulty: p.ai, temper: this.aiTemper(p), rng: this.rng })) return 'satellite';
     return null;
+  }
+
+  // Its decoy, once an enemy from afar has found its range here: the aim of
+  // a blink to a spot away from the trouble ({ yaw, elev, power }), or null.
+  // Easy CPUs only think of it now and then.
+  aiDecoyAim(p) {
+    if (p.reloading || !readyMods(p).includes('decoy') || !(p.hitsHere >= 1) || p.hitBy == null) return null;
+    const from = this.players[p.hitBy];
+    if (!from || from === p || Math.hypot(from.x - p.x, from.z - p.z) < AI_DECOY.ranged) return null;
+    if (p.ai === 'easy' && this.rng.next() >= AI_DECOY.easy) return null;
+    const spot = findWarp({ me: p, foes: this.knownFoes(p), terrain: this.terrain, rng: this.rng, solid: (x, z) => this.groundAt(x, z) != null, range: AI_DECOY.warp });
+    if (!spot) return null;
+    return planPlace({ shooter: p, point: spot, rng: this.rng, difficulty: p.ai, wind: this.wind, terrain: this.terrain,
+      gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p) });
+  }
+
+  // Its Point Defense: when an enemy carries heavy single shells (HEAVY), or
+  // shells are landing on it. Easy CPUs just do it now and then; the others
+  // as their style says (DEPLOY_STYLES).
+  aiWantsPointDef(p) {
+    const heavy = this.players.some((q) => q !== p && q.alive && HEAVY.some((w) => q.inventory?.[w] > 0));
+    const shelled = p.hitsHere >= 1;
+    if (!heavy && !shelled) return false;
+    if (p.ai === 'easy') return this.rng.next() < AI_DEPLOY.easy;
+    const style = this.aiDeployStyle(p);
+    if (style === 'early') return true;
+    return p.hp < p.maxHp || shelled;
+  }
+
+  // Does the CPU `p` fall for `target`'s decoy this shot? Only for a decoy it
+  // can see, and as often as DECOY.fool says for its level of play. Returns the
+  // stand-in to shoot at (the target, moved to the decoy, so its ranging on
+  // that spot carries on), or the target itself.
+  aiDecoyed(p, target) {
+    const q = this.players[target.id];
+    if (!q || !modUp(q, 'decoy')) return target;
+    const m = q.mods.decoy;
+    if (this.cfg.fog && !this.inSight(p, { x: m.x, z: m.z })) return target;
+    const k = (DECOY.fool[p.ai] ?? DECOY.fool.normal) * (m.level >= DECOY.mirror ? 1 : DECOY.plain);
+    if (this.rng.next() >= k) return target;
+    return { ...target, x: m.x, y: m.y, z: m.z, rough: false, decoy: true };
   }
 
   // Its orbiter: always with nothing to shoot at; otherwise as its style says
@@ -817,37 +947,46 @@ export class Game {
       if (m?.state !== 'up') continue;
       m.state = 'down';
       m.hp = 0;
-      this.emit({ type: 'mod', what: 'down', player: p.id, mod: def.id, hp: 0, by: null, pos: def.id === 'satellite' ? [m.x, m.y, m.z] : null, tank: true });
+      this.emit({ type: 'mod', what: 'down', player: p.id, mod: def.id, hp: 0, by: null, pos: modPos(p, def.id), tank: true });
     }
   }
 
-  // `amount` of damage to `owner`'s mod, from tank `from` (or null).
+  // `amount` of damage to `owner`'s mod, from tank `from` (or null). A level 3
+  // decoy that fizzles goes off (runFizzles), for its owner.
   hurtModOf(owner, mod, amount, from) {
     const p = this.players[owner];
     const r = hurtMod(p, mod, amount);
     if (!r) return;
     const m = p.mods[mod];
-    const pos = mod === 'satellite' ? [m.x, m.y, m.z] : null;
+    const pos = modPos(p, mod);
     this.emit({ type: 'mod', what: r, player: owner, mod, hp: m.hp, by: from ?? null, pos });
     if (r === 'down' && from != null && from !== owner) this.earn(this.players[from], 'mod', Math.round(MOD_PAY * (this.modifier.pay || 1)));
+    if (r === 'down' && mod === 'decoy' && m.level >= DECOY.boom) {
+      this.fizzles.push({ owner, pos: [m.x, m.y, m.z] });
+      this.runFizzles();   // at once, unless a blast is still being worked through
+    }
   }
 
   // A blast at `point` reaches the enemy mods near it, like it reaches tanks.
-  // `struck` is the mod target the shell hit squarely, if any.
-  blastMods(point, radius, damage, owner, struck = null) {
+  // `struck` is the mod target the shell hit squarely, if any. `air`: Flak's
+  // burst, which passes the mods on the ground by.
+  blastMods(point, radius, damage, owner, struck = null, air = false) {
     if (!anyUp(this.players)) return;
     const worst = new Map();   // one hit per mod, from its nearest part
     for (const m of modTargets(this.players, this.clock)) {
-      if (m.owner === owner) continue;
+      if (m.owner === owner || (air && m.ground)) continue;
       const d = struck && struck.owner === m.owner && struck.mod === m.mod ? 0
         : Math.max(0, Math.hypot(m.x - point[0], m.y - point[1], m.z - point[2]) - m.r * 0.5);
       const k = `${m.owner}:${m.mod}`;
       if (!worst.has(k) || d < worst.get(k).d) worst.set(k, { m, d });
     }
+    this.blasting++;
     for (const { m, d } of worst.values()) {
       const dmg = blastDamage(d, radius, damage);
       if (dmg > 0) this.hurtModOf(m.owner, m.mod, dmg, owner);
     }
+    this.blasting--;
+    this.runFizzles();
   }
 
   // ---------- driving ----------
@@ -1177,6 +1316,7 @@ export class Game {
   fire(now = false) {
     const p = this.current;
     if (this.phase !== 'aim' || !p || !p.alive) return false;
+    if (this.blink && this.blink.player === p.id) return !!this.deploy('decoy');   // the decoy's blink, as aimed
     const step = this.strikeStep(p);
     if (step === 'pass') return this.passTurn(p);
     if (step === 'first') {
@@ -1217,6 +1357,7 @@ export class Game {
       return false;
     }
     if (!this.canDouble(p)) return false;
+    this.blink = null;
     this.strike = { player: p.id, first: null };
     this.emit({ type: 'strike', player: p.id, armed: true });
     return true;
@@ -1393,8 +1534,9 @@ export class Game {
     const plan = this.aiPlan;
     p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
     if (this.phaseTime < plan.think) return;
-    if (plan.deploy) { this.deployTurn(p, plan.deploy); return; }   // this turn goes on a mod
+    if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployTurn(p, plan.deploy); return; }   // this turn goes on a mod
     if (this.swingToward(p, plan, dt)) {
+      if (plan.deploy) { this.deployTurn(p, plan.deploy, plan); return; }   // the decoy's blink
       p.yaw = ((plan.yaw % 360) + 360) % 360;
       p.elev = plan.elev;
       p.power = plan.power;
@@ -1452,6 +1594,7 @@ export class Game {
           for (const v of splitVelocities(pr.vel, split.count, split.spread, split.shape)) {
             const child = this.spawnProjectile(pr.pos, v, split.child, pr.owner, pr.shot);
             child.splitDone = true;
+            child.frag = true;   // only a level 3 Point Defense stops these
           }
           this.emit({ type: 'split', id: pr.id, pos: [...pr.pos] });
           continue;
@@ -1462,20 +1605,26 @@ export class Game {
       if (burst) {
         const [bx, , bz] = pr.pos;
         const ground = t.inBounds(bx, bz) && t.solidAt(bx, bz) ? t.heightAt(bx, bz) : null;
-        const nearMod = targets.length ? airburstNearMod(pr, burst, targets) : null;
-        if (nearMod || airburstNow(pr, burst, spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id })), ground)) {
+        // Mods on the ground are no anti-air business; a decoy bursts it like a tank.
+        const nearMod = targets.length ? airburstNearMod(pr, burst, targets.filter((m) => !m.ground)) : null;
+        const below = spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id }));
+        for (const m of targets) if (m.mod === 'decoy') below.push({ x: m.x, y: m.y - TANK.hitCenterY, z: m.z, owner: m.owner });
+        if (nearMod || airburstNow(pr, burst, below, ground)) {
           pr.dead = true;
           pr.splitDone = true;
           for (const v of airburstVelocities(pr.vel, burst)) {
             const child = this.spawnProjectile(pr.pos, v, burst.child, pr.owner, pr.shot);
             child.splitDone = true;
+            child.frag = true;
           }
           this.emit({ type: 'split', id: pr.id, pos: [...pr.pos], airburst: true });
           // The burst itself shreds any enemy mod in reach (anti-air).
-          if (burst.air) this.blastMods(pr.pos, burst.air / 1.25, burst.airDamage, pr.owner);
+          if (burst.air) this.blastMods(pr.pos, burst.air / 1.25, burst.airDamage, pr.owner, null, true);
           continue;
         }
       }
+      // Point Defense shoots it down.
+      if (up && this.intercept(pr, w)) continue;
       const [x, y, z] = pr.pos;
       // Into a mod: it goes off there, in the air.
       let struck = null;
@@ -1514,6 +1663,22 @@ export class Game {
     this.emit({ type: 'lost', id: pr.id, pos: [...pr.pos] });
   }
 
+  // Does a tank's Point Defense shoot shell `pr` down this step (mods.js
+  // interceptsShell)? The first in line that can, takes it: the shell bursts
+  // where it is, harmlessly, and that costs the turret a charge. Flak gets
+  // past (it bursts over its target before it comes close).
+  intercept(pr, w) {
+    if (pr.roller || (w.flight || []).some((f) => f.type === 'airburst')) return false;
+    for (const q of this.players) {
+      if (!q.alive || !interceptsShell(q, pr, w)) continue;
+      q.mods.pointdef.charges--;
+      pr.dead = true;
+      this.emit({ type: 'intercept', id: pr.id, pos: [...pr.pos], player: q.id, from: modPos(q, 'pointdef'), by: pr.owner, charges: q.mods.pointdef.charges });
+      return true;
+    }
+    return false;
+  }
+
   // `moon`: it struck a moon. `struck`: it struck a mod ({ owner, mod }), in the air.
   detonate(pr, point, directHit, moon = false, struck = null) {
     const w = WEAPON_BY_ID[pr.weapon];
@@ -1526,7 +1691,10 @@ export class Game {
     }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point });
-    for (const fx of impactEffects(w, point)) this.applyEffect(struck ? { ...fx, struck } : fx, pr.owner, directHit, pr.shot);
+    for (const fx of impactEffects(w, point)) {
+      const more = { ...(struck ? { struck } : {}), ...(pr.decoy ? { decoy: pr.decoy } : {}) };
+      this.applyEffect(struck || pr.decoy ? { ...fx, ...more } : fx, pr.owner, directHit, pr.shot);
+    }
     if (pr.weapon === 'shell' && !directHit && !moon && !struck) this.throwShrapnel(pr, point);
   }
 
@@ -1542,6 +1710,7 @@ export class Game {
       const vel = [ux * 9 - uz * side * 5, 12, uz * 9 + ux * side * 5];
       const child = this.spawnProjectile([point[0], this.terrain.heightAt(point[0], point[2]) + 0.8, point[2]], vel, 'bomblet', pr.owner, pr.shot);
       child.splitDone = true;
+      child.frag = true;
     }
   }
 
@@ -1583,7 +1752,8 @@ export class Game {
       const from = [p.x, p.y, p.z];
       p.x = spot.x; p.y = spot.y; p.z = spot.z;
       p.hitsHere = 0;
-      this.emit({ type: 'warp', player: p.id, from, to: [p.x, p.y, p.z] });
+      this.emit({ type: 'warp', player: p.id, from, to: [p.x, p.y, p.z], blink: !!fx.decoy });
+      if (fx.decoy) this.leaveDecoy(p, fx.decoy);   // the Decoy Beacon's blink
       return;
     }
     if (fx.type === 'mound') {
@@ -1592,6 +1762,7 @@ export class Game {
       this.emit({ type: 'terrain', region });
       this.emit({ type: 'mound', pos: fx.point, radius: fx.radius });
       this.liftBuried();
+      this.settleDecoys();
       this.scenery.afterMound(fx.point[0], fx.point[2], fx.radius);
       this.relayScenery();
       return;
@@ -1601,7 +1772,8 @@ export class Game {
       const o = owner != null ? this.players[owner] : null;
       const radius = fx.radius * (1 + (o ? perkSum(o, 'blastRadius') : 0));
       const damage = fx.damage * (1 + (o ? perkSum(o, 'blastDamage') : 0));
-      this.emit({ type: 'explosion', pos: fx.point, radius });
+      this.emit({ type: 'explosion', pos: fx.point, radius, ...(fx.fizzle ? { fizzle: true } : {}) });
+      this.blasting++;
       // A blast high in the air (on a mod) leaves the ground alone.
       const g = this.groundAt(bx, bz);
       if (!(by - (g ?? -Infinity) > radius)) this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
@@ -1615,6 +1787,9 @@ export class Game {
         const dmg = blastDamage(dist, radius, damage);
         if (dmg > 0) this.damage(p, dmg, owner, shot);
       }
+      this.settleDecoys();   // on the ground as it is now
+      this.blasting--;
+      this.runFizzles();     // a level 3 decoy this blast finished goes off now
     }
   }
 
@@ -1737,6 +1912,9 @@ export class Game {
     this.projectiles = [];
     this.followUps = [];
     this.strike = null;
+    this.blink = null;
+    this.fizzles = [];
+    this.blasting = 0;
   }
 
   // Remake this round's ground from its seed, the tank pads and every crater

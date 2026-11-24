@@ -304,6 +304,10 @@ export const UTILITY = ['ranger', 'scout', 'mound', 'teleport'];
 //   big       m: no Thunderhead at a target closer than this (its blast would reach back)
 //   easyDull  how keenly an Easy CPU reads the situation (1: fully)
 //   easyWild  chance an Easy CPU just grabs any weapon it could use
+// Against a target with Point Defense up: the weapons that get past it weigh
+// `past` times as much, single shells `single` times.
+export const GUARDED = { past: 3, single: 0.5 };
+
 export const ARSENAL = { big: 60, finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, easyDull: 0.5, easyWild: 0.12 };
 
 // Does it still not have the range on a target? `m` is its aim memory for it
@@ -324,6 +328,9 @@ export const unsureOf = (m) => !m || !(m.shots > 0) || Math.abs(m.yaw) > AIM_SUR
 //   heap                 a Mound fired at its feet would land there (planHeap)
 //   warp                 there is somewhere to Teleport to (findWarp)
 //   steer                it may steer a Guided Missile (offline)
+// and the target's own flags (game.knownFoes): `shielded` (an orbiter up),
+// `aloft` (a satellite up), `guarded` (Point Defense up: it shoots down single
+// shells, so Scatter, Flak and Rollers, which get past it, weigh more).
 // Returns { weapon id: weight }; the Shell is always there.
 export function weaponWeights(me, target, ctx = {}) {
   const A = ARSENAL;
@@ -331,7 +338,9 @@ export function weaponWeights(me, target, ctx = {}) {
   const keen = ctx.difficulty === 'easy' ? A.easyDull : 1;
   const sit = (x) => 1 + (x - 1) * keen;   // a situational boost, dulled for Easy
   const inv = me.inventory || {};
-  const w = { shell: 1 };
+  const past = target.guarded ? sit(GUARDED.past) : 1;   // gets past Point Defense
+  const single = target.guarded ? GUARDED.single : 1;    // a single shell it would shoot down
+  const w = { shell: single };
   const add = (id, x) => { if (inv[id] > 0 && x > 0) w[id] = x * (lean[id] ?? 1); };
   const tough = (target.hp ?? 100) + (target.armor ?? 0);
   const finish = tough <= A.finish;
@@ -339,13 +348,13 @@ export function weaponWeights(me, target, ctx = {}) {
   const dy = (target.y ?? 0) - (me.y ?? 0);
   const hits = ctx.hits || 0;
 
-  add('breacher', 0.9 * (tough <= A.tough ? sit(1.5) : 1));
+  add('breacher', 0.9 * (tough <= A.tough ? sit(1.5) : 1) * single);
   // The Thunderhead's 30 m blast: kept for a target it has the range on, never one close enough to catch itself.
-  if ((ctx.dist || 0) > A.big) add('thunderhead', 1.1 * (unsure ? 0.5 : sit(1.8)));
-  add('scatter', 0.45 * (unsure ? sit(1.5) : 1));
-  add('flak', 0.35 * (target.shielded || target.aloft ? sit(4) : 1) * (unsure ? sit(1.3) : 1));
-  add('roller', 0.35 * (dy < -A.below ? sit(4) : dy > A.below ? 0.3 : 1));
-  if (ctx.steer) add('guided', 0.6 * (!ctx.seen ? sit(1.8) : unsure ? 1.2 : 0.4) * (target.shielded ? sit(1.5) : 1));
+  if ((ctx.dist || 0) > A.big) add('thunderhead', 1.1 * (unsure ? 0.5 : sit(1.8)) * single);
+  add('scatter', 0.45 * (unsure ? sit(1.5) : 1) * past);
+  add('flak', 0.35 * (target.shielded || target.aloft ? sit(4) : 1) * (unsure ? sit(1.3) : 1) * past);
+  add('roller', 0.35 * (dy < -A.below ? sit(4) : dy > A.below ? 0.3 : 1) * past);
+  if (ctx.steer) add('guided', 0.6 * (!ctx.seen ? sit(1.8) : unsure ? 1.2 : 0.4) * (target.shielded ? sit(1.5) : 1) * single);
   if (target.rough) add('scout', 1.6);
   if (finish) return w;   // it can finish the target: no time for anything else
   if (unsure && !target.rough && (ctx.dist || 0) > A.far && !(ctx.seen && keen < 1)) add('ranger', 0.7 * keen * (ctx.seen ? 0.6 : 1));
@@ -403,15 +412,17 @@ export function planHeap({ me, toward = [0, 0], terrain, wind = [0, 0], gravity 
 // solid, dry, level ground inside the field, at least `clear` m from every
 // enemy and within `far` m of one (it still wants a shot). The best spot is
 // away from the enemies and out of any hole. `solid(x, z)` says whether
-// there is ground there (the isles). Returns { x, y, z } or null.
+// there is ground there (the isles). `range` swaps in other distances (the
+// decoy's shorter blink, game.js). Returns { x, y, z } or null.
 export const WARP = { min: 90, max: 220, tries: 12, edge: 40, clear: 80, far: 380 };
-export function findWarp({ me, foes, terrain, rng, solid = () => true }) {
+export function findWarp({ me, foes, terrain, rng, solid = () => true, range = WARP }) {
+  const W = range;
   if (!foes.length) return null;
-  const half = terrain.half - WARP.edge;
+  const half = terrain.half - W.edge;
   let best = null;
-  for (let k = 0; k < WARP.tries; k++) {
+  for (let k = 0; k < W.tries; k++) {
     const a = rng.range(0, Math.PI * 2);
-    const d = rng.range(WARP.min, WARP.max);
+    const d = rng.range(W.min, W.max);
     const x = me.x + Math.cos(a) * d, z = me.z + Math.sin(a) * d;
     if (Math.abs(x) > half || Math.abs(z) > half || !solid(x, z)) continue;
     const y = terrain.heightAt(x, z);
@@ -419,7 +430,7 @@ export function findWarp({ me, foes, terrain, rng, solid = () => true }) {
     const hole = holeDepth(terrain, x, z, y);
     if (hole > 2) continue;
     const near = Math.min(...foes.map((f) => Math.hypot(f.x - x, f.z - z)));
-    if (near < WARP.clear || near > WARP.far) continue;
+    if (near < W.clear || near > W.far) continue;
     const score = Math.min(near, 250) * 0.02 - Math.max(0, hole) * 0.5 + rng.range(0, 1);
     if (!best || score > best.score) best = { x, y, z, score };
   }
