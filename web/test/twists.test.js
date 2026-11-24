@@ -403,7 +403,7 @@ test('an all-CPU match with twists on plays through drafts, modifiers and drives
     g.drainEvents();
     for (const p of g.players) {
       assert.ok(p.fuel >= 0 && p.hp <= p.maxHp);
-      if (p.alive && !p.falling) assert.ok(p.y >= g.terrain.heightAt(p.x, p.z) - 1e-6, 'never under the ground');
+      if (p.alive && !p.falling && !p.buried) assert.ok(p.y >= g.terrain.heightAt(p.x, p.z) - 1e-6, 'never under the ground (unless a Dirt Bomb buried it)');
     }
     if (g.phase === 'roundOver' && g.phaseTime > 1) { g.openShop(); mods.add(g.modifier.id); }
   }

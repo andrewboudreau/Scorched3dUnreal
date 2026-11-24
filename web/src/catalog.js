@@ -215,7 +215,7 @@ export function sortRows(rows, key, dir = 1) {
 
 // A copy of the CPU shopping list in game.js aiShop (a local there, so it
 // cannot be imported); test/catalog.test.js checks it still matches the source.
-export const AI_BUYS = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
+export const AI_BUYS = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'napalm', 'fuel', 'jet', 'breacher'];
 
 // The situations a CPU's weapon choice is sampled in: `target` and `ctx`
 // as chooseWeapon (ai.js weaponWeights) takes them. The CPU stands at y 20.
@@ -228,6 +228,8 @@ export const CPU_SITUATIONS = [
   { name: 'fog', target: { y: 20, rough: true }, ctx: { unsure: true } },
   { name: 'in a hole', target: { y: 20 }, ctx: { sunk: 8, heap: {}, warp: {} } },
   { name: 'under fire', target: { y: 20 }, ctx: { hits: 2, hurt: true, threat: true, heap: {}, warp: {} } },
+  { name: 'target in a hollow', target: { y: 20 }, ctx: { pit: 6 } },
+  { name: 'dangerous enemy', target: { y: 20 }, ctx: { danger: true } },
 ];
 
 // How often chooseWeapon / chooseSecondWeapon (ai.js) pick weapon `id` when a

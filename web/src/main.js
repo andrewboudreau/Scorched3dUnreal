@@ -13,6 +13,7 @@ import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { CityView } from './render/cityMesh.js';
+import { NapalmView } from './render/napalm.js';
 import { BUILDINGS } from './core/scenery.js';
 import { isArtifact } from './core/artifacts.js';
 import { TankMesh } from './render/tankMesh.js';
@@ -84,6 +85,7 @@ scene.add(floor);
 const birds = new Birds(scene);
 const craft = new AlienCraft(scene);   // over the isles, where birds would be
 const effects = new Effects(scene);
+const napalmView = new NapalmView(scene, effects);   // Napalm's burning fuel and the Dirt Bomb's "Buried" tags
 const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
 const dials = new AngleDials(scene);             // turret and elevation gauges on your tank while you aim
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
@@ -239,6 +241,7 @@ function disposeMatch() {
   clearTrails();
   closeHandoff();
   effects.clear();
+  napalmView.clear();
   hops.clear();
   tanks = []; wrecks = []; labels = [];
   pips.forEach(dropPip);      // takes a rangefinder pip's beam out of the scene too
@@ -343,6 +346,8 @@ function handleEvents() {
     strikeUi.event(e);
     modsUi.event(e);
     cityView?.event(e);
+    napalmView.event(e);
+    if (e.type === 'buried' && touch && game.localHumans.some((h) => h.id === e.player)) touch.note(`${game.players[e.player].name}: buried! Your next shot digs you out`, 3500);
     if (e.type === 'building' && e.how !== 'hit') { sound.thud(camDist(e.pos)); if (e.how === 'collapse') addShake(e.pos, 1.6); }
     switch (e.type) {
       case 'roundStart':
@@ -357,6 +362,7 @@ function handleEvents() {
         timeScale = 1;
         document.body.classList.remove('killcam');
         effects.clear();
+        napalmView.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
         if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
@@ -586,7 +592,7 @@ function flushDirty() {
 
 // ---------------------------------------------------------------- jump jets
 
-const JUMP_NOTES = { nojets: 'No jump jets left', edge: 'Edge of the arena', water: 'Water ahead', blocked: 'No room to land that way' };
+const JUMP_NOTES = { buried: 'Buried: your next shot digs you out', nojets: 'No jump jets left', edge: 'Edge of the arena', water: 'Water ahead', blocked: 'No room to land that way' };
 
 // J: use a charge. The core has already moved the tank; this draws the arc.
 function doJump() {
@@ -1579,6 +1585,7 @@ function applyHeldKeys(dt) {
 }
 
 const DRIVE_NOTES = {
+  buried: 'Buried: your next shot digs you out',
   empty: 'Out of fuel', steep: 'Too steep to climb', water: 'Water ahead', edge: 'Edge of the arena', blocked: 'Something is in the way',
 };
 
@@ -1703,7 +1710,7 @@ function updateHud() {
     setText(E['ro-jets'], `${p.jets > 0 ? 'J ' : ''}×${p.jets}`);
     if (E['ro-jets'].classList.contains('none') !== !(p.jets > 0)) E['ro-jets'].classList.toggle('none', !(p.jets > 0));
     const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
-    setText(E['pc-note'], noting ? driveNote.text : '');
+    setText(E['pc-note'], noting ? driveNote.text : p.buried && !p.ai ? 'Buried: your next shot digs you out' : '');
     setPerks(E['pc-perks'], p, true);
     setText(E['ro-yaw'], `${p.yaw.toFixed(1)}°`);
     setText(E['ro-elev'], `${p.elev.toFixed(1)}°`);
@@ -2545,6 +2552,7 @@ function tick(dt, draw = true) {
     updateTracer();
     sceneryMesh.sync(elapsed);
     cityView?.update();
+    napalmView.update(sdt, game);
     updateHud();
     strikeUi.update();
     modsUi.update(sdt, elapsed);

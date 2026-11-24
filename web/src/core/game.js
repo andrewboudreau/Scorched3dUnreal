@@ -10,6 +10,7 @@ import { generateRidgeline, keepCrust, rowStarts } from './ridgeline.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
 import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
+import { NAPALM, BURY, flowNapalm, scorchNapalm, napalmDose, napalmTick, digOut } from './napalm.js';
 import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
@@ -153,6 +154,7 @@ export class Game {
       hp: TANK.maxHp, maxHp: TANK.maxHp, armor: 0, alive: true,
       weapon: 'shell', falling: false, vy: 0, fallFrom: 0,
       reloading: false,   // fired a Double Strike: its next turn is move only (see STRIKE)
+      buried: false,      // under a Dirt Bomb's dome: no driving, and its next shot digs it out (digOut)
       hitBy: null,        // the last tank to hurt it this round (a CPU's threat, aiSituation)
       steerGoal: null,    // a CPU's Guided Missile steers for this [x, z] (ai.steerGuided)
       aim: {},   // CPU aim memory: target id -> the error it still carries (ai.planShot)
@@ -185,6 +187,8 @@ export class Game {
     // the air, one fixed step at a time, and travels in snapshots, so every
     // screen agrees on it. Orbiting mods are a pure function of it (mods.js orbitPoints).
     this.clock = 0;
+    this.fires = [];        // Napalm burning now (spillNapalm); the shot's flight lasts until they are out
+    this.fireSeq = 0;
   }
 
   emit(e) { this.events.push(e); }
@@ -278,6 +282,7 @@ export class Game {
       p.roundDamage = 0;
       p.earned = {};
       p.reloading = false;
+      p.buried = false;
       fitMods(this.cfg.lab, p);   // an up mod carries on; the rest are fitted fresh
       anchorMod(p, 'satellite', (x, z) => this.groundAt(x, z));   // over its owner's new spot
     }
@@ -285,6 +290,7 @@ export class Game {
     this.blink = null;
     this.fizzles = [];
     this.followUps = [];
+    this.fires = [];
     // Everyone starts aiming at the arena centre.
     for (const p of this.players) p.hull = p.yaw = ((Math.atan2(-p.z, -p.x) * 180) / Math.PI + 360) % 360;
     this.wind = this.randomWind();
@@ -548,6 +554,7 @@ export class Game {
   // will not do (no fuel, too steep) hop out with a jet. { heading, budget,
   // jump } or null.
   aiWantsToDrive(p) {
+    if (p.buried) return null;   // it digs out first
     return planDrive({
       me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
       tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
@@ -571,6 +578,8 @@ export class Game {
   planAiShot(p) {
     // Reloading after a Double Strike: nothing to aim, Fire only passes.
     if (p.reloading) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, pass: true, think: 0.6 });
+    // Buried by a Dirt Bomb: any shot only digs it out, so it fires one as it stands.
+    if (p.buried) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: 'shell', dig: true, think: 0.6 });
     // Found by a ranged enemy: blink away and leave it a decoy.
     const blink = this.aiDecoyAim(p);
     if (blink) return (this.aiPlan = { yaw: blink.yaw, elev: blink.elev, power: blink.power, weapon: p.weapon, deploy: 'decoy', think: 0.6 });
@@ -641,6 +650,9 @@ export class Game {
       difficulty: p.ai, temper: this.aiTemper(p), seen: m?.shots || 0, unsure: !!target.rough || unsureOf(m),
       dist: Math.hypot(target.x - p.x, target.z - p.z), sunk, hits: p.hitsHere, hurt, behind, threat: !!threat,
       steer: !this.online && p.inventory.guided > 0,
+      pit: holeDepth(this.terrain, target.x, target.z, target.y),
+      danger: !!threat && threat.id === target.id
+        || ((hurt || behind) && target.hp + target.armor >= strongest - 1e-6 && !target.rough),
     };
     if (p.inventory.mound > 0 && (sunk >= A.sunk || (threat && p.hitsHere >= 1))) {
       ctx.heap = planHeap({ me: p, toward: threat ? [threat.x, threat.z] : [0, 0], terrain: this.terrain, wind: this.wind,
@@ -1006,6 +1018,7 @@ export class Game {
   }
 
   driveTank(p, dir, dt) {
+    if (p.buried) return 'buried';
     const r = driveStep(p, this.terrain, dir, dt, this.obstacles());
     if (r === 'ok') { p.hitsHere = 0; this.checkAimHistory(p); }
     return r;
@@ -1028,6 +1041,7 @@ export class Game {
   // way a drive step moves; the screen animates the arc from the event.
   // Returns 'ok' or why not: 'nojets' | 'edge' | 'water' | 'blocked'.
   jumpTank(p) {
+    if (p.buried) return 'buried';
     if (!(p.jets > 0)) return 'nojets';
     const hop = planHop(p, this.terrain, this.obstacles(), p.hull);
     if (!hop.ok) return hop.why;
@@ -1291,7 +1305,7 @@ export class Game {
   aiShop(p) {
     if (p.ai !== 'easy' && p.money >= this.priceOf(p, 'orbiter') + 150) this.buy(p.id, 'orbiter');
     for (const d of MODS) if (p.ai !== 'easy' && this.modLevel(p, d.id) > 0 && p.money >= this.priceOf(p, d.id) + 200) this.buy(p.id, d.id);   // a level up for a mod it has
-    const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
+    const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'napalm', 'fuel', 'jet', 'breacher'];
     // Its temper's own buys (ai.TEMPERS) come right after the first Breacher; a
     // Hard CPU saves for a Thunderhead first when the armory has one.
     const big = p.ai === 'hard' ? ['thunderhead'] : [];
@@ -1449,6 +1463,7 @@ export class Game {
   // One tank shoots as it is aimed now. `delay` only staggers the sound and
   // flash of a volley; the shells all leave on the same step.
   launch(p, delay = 0) {
+    if (p.buried) return this.digOut(p, delay);
     const w = WEAPON_BY_ID[p.weapon];
     if (!(p.inventory[w.id] > 0)) return false;
     if (!w.infinite) p.inventory[w.id]--;
@@ -1523,7 +1538,7 @@ export class Game {
         steps++;
         this.stepWorld(SIM_DT);
       }
-      if (this.phase === 'flight' && this.projectiles.length === 0 && !this.followUps.length) {
+      if (this.phase === 'flight' && this.projectiles.length === 0 && !this.followUps.length && !this.fires.length) {
         this.phase = 'settle';
         this.phaseTime = 0;
       }
@@ -1664,6 +1679,7 @@ export class Game {
       if (pr.time > MAX_FLIGHT) this.lose(pr);
     }
     this.projectiles = this.projectiles.filter((p) => !p.dead);
+    if (this.fires.length) this.burnFires(dt);
     this.updateFalling(dt);
     if (flying) this.clock += dt;
   }
@@ -1764,15 +1780,18 @@ export class Game {
       const from = [p.x, p.y, p.z];
       p.x = spot.x; p.y = spot.y; p.z = spot.z;
       p.hitsHere = 0;
+      p.buried = false;
       this.emit({ type: 'warp', player: p.id, from, to: [p.x, p.y, p.z], blink: !!fx.decoy });
       if (fx.decoy) this.leaveDecoy(p, fx.decoy);   // the Decoy Beacon's blink
       return;
     }
-    if (fx.type === 'mound') {
+    if (fx.type === 'napalm') { this.spillNapalm(fx.point, owner, shot); return; }
+    if (fx.type === 'mound' || fx.type === 'bury') {
       const region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
       this.ground?.ops.push(['m', fx.point[0], fx.point[2], fx.radius, fx.height]);
       this.emit({ type: 'terrain', region });
       this.emit({ type: 'mound', pos: fx.point, radius: fx.radius });
+      if (fx.type === 'bury') this.buryUnder();
       this.liftBuried();
       this.settleDecoys();
       this.scenery.afterMound(fx.point[0], fx.point[2], fx.radius);
@@ -1893,9 +1912,73 @@ export class Game {
     this.relayScenery();
   }
 
+  // ---------- Napalm and the Dirt Bomb (core/napalm.js) ----------
+
+  // Napalm lands: the fuel runs downhill at once (flowNapalm), the ground
+  // under it is scorched, and the fire burns for a few seconds (burnFires).
+  spillNapalm(point, owner, shot = 0) {
+    const t = this.terrain;
+    const flow = flowNapalm(t, point[0], point[2]);
+    const region = scorchNapalm(t, flow.cells);
+    this.ground?.ops.push(['n', point[0], point[2]]);
+    if (region) this.emit({ type: 'terrain', region });
+    const id = ++this.fireSeq;
+    const cells = flow.cells.map(([i, j, fuel, arrive]) => [t.vx(i), t.heights[t.index(i, j)], t.vz(j), fuel, arrive]);
+    this.emit({ type: 'napalm', id, owner, pos: [...point], cells, doused: flow.doused, lost: flow.lost });
+    if (!flow.cells.length) return;
+    this.fires.push({ id, owner, shot, cells: flow.cells.map(([i, j, fuel]) => [i, j, fuel]), t: 0, tick: 0 });
+  }
+
+  // The fires burn on the fixed step: every NAPALM.every s each live tank
+  // (not a buried one: the soil covers it) takes its tick, by how deep the
+  // fuel is round it, credited to whoever fired it.
+  burnFires(dt) {
+    const N = NAPALM;
+    for (const f of this.fires) {
+      f.t += dt;
+      while (f.tick < N.ticks && f.t >= N.lag + f.tick * N.every - 1e-9) {
+        f.tick++;
+        for (const p of this.players) {
+          if (!p.alive || p.buried) continue;
+          const dose = napalmDose(this.terrain, f.cells, p.x, p.z);
+          if (dose > 0.02) this.damage(p, napalmTick() * dose, f.owner, f.shot);
+        }
+      }
+    }
+    for (const f of this.fires) if (f.tick >= N.ticks) this.emit({ type: 'napalmOut', id: f.id });
+    this.fires = this.fires.filter((f) => f.tick < N.ticks);
+  }
+
+  // A Dirt Bomb's dome has just gone up: every live tank with soil over it buries.
+  buryUnder() {
+    for (const p of this.players) {
+      if (!p.alive || p.buried || !this.terrain.solidAt(p.x, p.z)) continue;
+      const soil = this.terrain.heightAt(p.x, p.z) - p.y;
+      if (soil < BURY.depth) continue;
+      p.buried = true;
+      p.falling = false;
+      p.vy = 0;
+      this.emit({ type: 'buried', player: p.id, pos: [p.x, p.y, p.z], soil });
+    }
+  }
+
+  // A buried tank fires: the shot goes off against the soil at the muzzle and
+  // digs it out (a crater down to the tank, op 'c' like any other), and no
+  // ammo is spent. That is its shot for the turn.
+  digOut(p, delay = 0) {
+    const top = this.groundAt(p.x, p.z) ?? p.y;
+    const d = digOut(Math.max(0, top - p.y));
+    p.buried = false;
+    this.carve(p.x, top, p.z, d.radius, d.depth);
+    this.emit({ type: 'dig', player: p.id, pos: [p.x, top, p.z], radius: d.radius, delay });
+    this.emit({ type: 'explosion', pos: [p.x, top, p.z], radius: 6 });
+    this.emit({ type: 'unburied', player: p.id, pos: [p.x, p.y, p.z], dug: true });
+    return true;
+  }
+
   liftBuried() {
     for (const p of this.players) {
-      if (!this.terrain.solidAt(p.x, p.z)) continue;
+      if (p.buried || !this.terrain.solidAt(p.x, p.z)) continue;
       const g = this.terrain.heightAt(p.x, p.z);
       if (g > p.y) p.y = g;
     }
@@ -1910,6 +1993,7 @@ export class Game {
     return {
       round: this.round, turnsThisRound: this.turnsThisRound, firstShooter: this.firstShooter,
       wind: [...this.wind], gravity: this.gravity, drag: this.drag, maxWind: this.maxWind, modifier: this.modifier.id,
+      fires: copy(this.fires), fireSeq: this.fireSeq,
       rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0, clock: this.clock,
       lastRoundResult: this.lastRoundResult,
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
@@ -1954,6 +2038,8 @@ export class Game {
     this.blink = null;
     this.fizzles = [];
     this.blasting = 0;
+    this.fires = JSON.parse(JSON.stringify(s.fires || []));
+    this.fireSeq = s.fireSeq || 0;
   }
 
   // Remake this round's ground from its seed, the tank pads and every crater
@@ -1970,6 +2056,7 @@ export class Game {
       }
       else if (op[0] === 'b') this.town?.blast(op[1], op[2], op[3], op[4], op[5]);
       else if (op[0] === 'r') { if (this.town) this.collapseBuilding(op[1], true); }
+      else if (op[0] === 'n') scorchNapalm(t, flowNapalm(t, op[1], op[2]).cells);
       else { t.raiseMound(op[1], op[2], op[3], op[4]); this.scenery.afterMound(op[1], op[2], op[3]); }
     }
     this.scenery.drainEvents();
@@ -1982,6 +2069,12 @@ export class Game {
     for (const p of this.players) {
       // Over open sky (the ground blown out from under it) a tank falls for good.
       const g = t.solidAt(p.x, p.z) ? t.heightAt(p.x, p.z) : -Infinity;
+      // Buried: it stays put under the soil until a blast clears it off.
+      if (p.buried) {
+        if (g - p.y > BURY.free) continue;
+        p.buried = false;
+        this.emit({ type: 'unburied', player: p.id, pos: [p.x, p.y, p.z] });
+      }
       if (g === -Infinity && p.y < ISLES.voidY - 20) {
         if (p.alive) {
           this.emit({ type: 'void', player: p.id, pos: [p.x, p.y, p.z] });

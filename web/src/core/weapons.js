@@ -18,6 +18,10 @@
 //                                       within `radius` of where it lands, for
 //                                       their next `turns` shots
 //   warp   {}                           the shooter's tank is moved to where it lands
+//   napalm {}                           spill burning fuel that runs downhill and
+//                                       pools, burning tanks in it (core/napalm.js)
+//   bury   { radius, height }           heap a dome of earth that buries any tank
+//                                       under it (core/napalm.js BURY)
 //
 // Every weapon a player can hold also says how it is got (docs/design-guide.md,
 // "How you get things"):
@@ -26,6 +30,8 @@
 //          first visit) or 'advanced' (from the second visit on; see TIERS)
 //   start  how many every tank starts the match with (the starting kit)
 //   price, bundle   what one armory purchase costs and gives
+
+import { NAPALM } from './napalm.js';
 
 export const WEAPONS = [
   {
@@ -109,6 +115,16 @@ export const WEAPONS = [
     impact: [{ type: 'scout', radius: 120, turns: 2 }],
   },
   {
+    id: 'dirtbomb', name: 'Dirt Bomb', price: 130, bundle: 2, role: 'Terrain', tier: 'standard',
+    desc: 'Bursts into a dome of earth that buries any tank within about 18 m, unhurt. A buried tank cannot drive or jump, and its next shot only digs it out: it costs a turn.',
+    impact: [{ type: 'bury', radius: 20, height: 16 }],
+  },
+  {
+    id: 'napalm', name: 'Napalm', price: 100, bundle: 2, role: 'Area', tier: 'advanced',
+    desc: 'Spills burning fuel that runs downhill and pools. A tank in a crater or a valley burns for up to 56; one on a crest is barely singed. Water puts it out.',
+    impact: [{ type: 'napalm' }],
+  },
+  {
     id: 'thunderhead', name: 'Thunderhead', price: 200, bundle: 1, role: 'Damage', tier: 'advanced',
     desc: 'The big one: a 30 m blast that hits as hard as anything in the armory. Mind your own tank.',
     impact: [{ type: 'blast', radius: 30, damage: 95, depth: 0.75 }],
@@ -151,6 +167,9 @@ export function startKit() {
 // pays for itself.
 export const VALUE_BAND = [0.5, 1.4];
 export function shotValue(weapon) {
+  // Napalm: the full burn on one tank, which it gets in a hollow; on open
+  // ground less (core/napalm.js), so it counts at three quarters.
+  if ((weapon.impact || []).some((p) => p.type === 'napalm')) return NAPALM.damage * 0.75;
   const blastOf = (w) => (w.impact || []).flatMap((p) => (p.type === 'roll' ? p.then : [p])).find((p) => p.type === 'blast');
   const split = (weapon.flight || []).find((p) => p.type === 'split' || p.type === 'airburst');
   const child = split ? WEAPONS.find((w) => w.id === split.child) : null;
@@ -193,6 +212,8 @@ export function impactEffects(weapon, point) {
       else if (part.type === 'mound') out.push({ type: 'mound', point, radius: part.radius, height: part.height });
       else if (part.type === 'scout') out.push({ type: 'scout', point, radius: part.radius, turns: part.turns });
       else if (part.type === 'warp') out.push({ type: 'warp', point });
+      else if (part.type === 'napalm') out.push({ type: 'napalm', point });
+      else if (part.type === 'bury') out.push({ type: 'bury', point, radius: part.radius, height: part.height });
       else if (part.type === 'roll') run(part.then);
     }
   };

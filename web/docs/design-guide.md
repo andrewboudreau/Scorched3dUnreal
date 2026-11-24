@@ -160,11 +160,13 @@ Every weapon names its **role** (one word on its card) and a **tier**:
 | Rangefinder | Aim | Standard | 3 | $60 | five markers, no damage |
 | Scout Missile | Recon | Standard | 2 | $50 | fog of war only |
 | Mound | Terrain | Standard | 3 | $90 | cover, or bury a tank |
+| Dirt Bomb | Terrain | Standard | 2 | $130 | buries tanks within ~18 m: costs them a turn |
 | Guided Missile | Damage | Standard | 2 | $90 | steer for 3 s (not online) |
 | Roller | Damage | Standard | 3 | $130 | finds tanks in hollows |
 | Breacher | Damage | Standard | 3 | $180 | 70, 22 m |
 | Flak | Anti-air | Standard | 2 | $200 | the answer to mods in the sky |
 | Teleport | Move | Advanced | 2 | $120 | |
+| Napalm | Area | Advanced | 2 | $100 | runs downhill, pools in hollows: up to 56 |
 | Scatter | Damage | Advanced | 2 | $220 | five shells over a row |
 | Thunderhead | Damage | Advanced | 1 | $200 | 95, 30 m: the big one |
 
