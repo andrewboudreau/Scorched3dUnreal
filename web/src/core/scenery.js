@@ -2,6 +2,7 @@ import { makeRng } from './rng.js';
 import { makePerlin } from './noise.js';
 import { planPaths, distToPaths } from './paths.js';
 import { ridgeRocks } from './ridgeline.js';
+import { placeArtifacts, clearUnder, blastArtifacts, settleArtifacts } from './artifacts.js';
 
 // Everything that makes the field look lived in: water in the lowest basins,
 // trees, bushes, rocks, hamlets, farms and lone towers and windmills (most
@@ -61,6 +62,8 @@ export class Scenery {
     this.hamlets = [];    // { x, z }: hamlets and farms, where villagers live
     this.bridge = null;   // { a: [x, z], b: [x, z], y, alive }
     this.paths = [];      // roads and footpaths: { kind, width, points: [[x, z], ...] }
+    this.artifacts = [];  // the isles' relics (core/artifacts.js)
+    this.drifters = [];   // rocks drifting round the isles
     this.events = [];
     this.version = (this.version || 0) + 1;
     this.terrain.waterLevel = -Infinity;
@@ -268,6 +271,10 @@ export class Scenery {
       for (let k = rng.int(4, 6); k > 0; k--) addWalker('sheep', x, z, 14);
       flocks++;
     }
+    if (t.under) {
+      ({ artifacts: this.artifacts, drifters: this.drifters } = placeArtifacts(t, { seed, tanks }));
+      this.props = clearUnder(this.props, this.artifacts);
+    }
     this.version++;
     return this;
   }
@@ -337,6 +344,7 @@ export class Scenery {
 
   // A crater of `radius` was just carved at (cx, cz).
   afterBlast(cx, cz, radius) {
+    blastArtifacts(this.terrain, this.artifacts, cx, cz, radius, (a, how) => this.note(a, how));
     for (const p of this.props) {
       if (p.state === 'gone') continue;
       const d = Math.hypot(p.x - cx, p.z - cz);
@@ -376,6 +384,7 @@ export class Scenery {
   // ground rose over is buried, anything now under water is lost.
   settle(cx, cz, reach) {
     const t = this.terrain;
+    settleArtifacts(t, this.artifacts, cx, cz, reach, (a, how) => this.note(a, how));
     for (const p of this.props) {
       if (p.state === 'gone' || Math.hypot(p.x - cx, p.z - cz) > reach) continue;
       if (!t.solidAt(p.x, p.z)) { this.remove(p, 'fell'); continue; }   // the isle blown out from under it
