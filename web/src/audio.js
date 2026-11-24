@@ -260,7 +260,7 @@ export class Sound {
       src.start(0, Math.random() * Math.max(0, buffer.duration - 0.1));
       bed.loop = { src, gain, buffer };
     }
-    bed.loop.gain.gain.setTargetAtTime(level * 0.45 * this.sampleLevel, this.ctx.currentTime, 0.4);
+    bed.loop.gain.gain.setTargetAtTime(level * 0.16 * this.sampleLevel, this.ctx.currentTime, 0.4);
     return true;
   }
 
@@ -303,12 +303,14 @@ export class Sound {
       this.sample('crackle', 0, { gain: 0.18 * level });
     }
 
-    // Rain: quiet, with a slow swell so it never sits flat. A pack sample
+    // Rain: well under the other effects (it plays the whole round, so a level
+    // that sounded right for a second wore on players), with a slow swell so
+    // it never sits flat. A pack sample
     // chosen for 'rain' replaces it.
     const wetOwn = this.rainLoop(rain) && this.samplesMode === 'replace';
     const swell = 0.85 + 0.15 * Math.sin(t * 0.29) * Math.sin(t * 0.61 + 2);
-    ease(this.rainBed.hiss.gain.gain, wetOwn ? 0 : rain * 0.05 * swell, 0.5);
-    ease(this.rainBed.wash.gain.gain, wetOwn ? 0 : rain * 0.035, 0.6);
+    ease(this.rainBed.hiss.gain.gain, wetOwn ? 0 : rain * 0.022 * swell, 0.5);
+    ease(this.rainBed.wash.gain.gain, wetOwn ? 0 : rain * 0.016, 0.6);
 
     if ((this.nextChirp -= dt) <= 0) {
       this.nextChirp = 3 + Math.random() * 7;

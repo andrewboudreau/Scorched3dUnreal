@@ -109,7 +109,7 @@ export class Music {
     this.sound = sound;
     const ls = globalThis.localStorage;
     const saved = ls?.getItem(TRACK_KEY);
-    this.trackId = TRACK_BY_ID[saved] ? saved : 'outpost';
+    this.trackId = TRACK_BY_ID[saved] ? saved : 'bunker';   // Bunker Lo-fi for a first visit
     const level = Number(ls?.getItem(LEVEL_KEY));
     this.volume = ls?.getItem(LEVEL_KEY) != null && level >= 0 && level <= 1 ? level : 0.5;
     this.muted = ls?.getItem(MUTE_KEY) === '1';
