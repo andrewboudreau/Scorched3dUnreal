@@ -5,9 +5,10 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, ro
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
-import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT, GALE_CAP } from './perks.js';
+import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
+import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
-import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
+import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -120,7 +121,7 @@ export class Game {
     this.gravity = GRAVITY;
     this.drag = 0;                              // air drag on shells (the Rain modifier, ballistics.stepProjectile)
     this.maxWind = maxWind;
-    this.draft = {};                            // human id -> perk ids on offer
+    this.draft = {};                            // human id -> perk ids on offer (the next rank of each open branch of the skill tree)
     this.players = players.map((p, i) => ({
       id: i,
       name: p.name || `Player ${i + 1}`,
@@ -136,6 +137,7 @@ export class Game {
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
+      points: 0,         // skill points not spent yet (core/skills.js)
       // per-round state
       x: 0, y: 0, z: 0, yaw: 0, elev: 45, power: 60,
       hull: 0, fuel: 0, fuelMax: 0, hitsHere: 0,
@@ -968,65 +970,126 @@ export class Game {
     this.emit({ type: this.phase, winner: winner ? winner.id : null });
   }
 
-  // From roundOver: every tank is offered three perks and keeps one, then
-  // shops. Humans do both through the UI; CPUs do both here.
+  // From roundOver: every tank gets its skill points (core/skills.js) and
+  // spends them on the tree, then shops. Humans do both through the UI; CPUs
+  // do both here.
   openShop() {
     if (this.phase !== 'roundOver') return;
     this.phase = 'shop';
     this.phaseTime = 0;
     this.draft = {};
     this.shopped = [];                          // online: humans whose shopping is in
-    for (const p of this.players) { p.bought = []; p.picked = null; }
     for (const p of this.players) {
-      const ownsMod = MODS.some((d) => this.modLevel(p, d.id) > 0);
-      const offer = this.draftOn ? draftOffer(p, this.rogue, 3, this.round + 1, (k) => this.perkFits(p, k), ownsMod ? MOD_DRAFT.then : MOD_DRAFT.first) : [];
-      if (!offer.length) continue;
-      if (p.ai) p.perks.push(aiPickPerk(offer, this.rogue, TEMPERS[this.aiTemper(p)].likes));
-      else this.draft[p.id] = offer;
+      p.bought = [];
+      p.picked = [];
+      if (this.draftOn) p.points = (p.points || 0) + SKILL.perRound;
+    }
+    for (const p of this.players) {
+      if (p.ai) this.aiSkills(p);
+      else this.offerSkills(p);
     }
     for (const p of this.players) if (p.ai) this.aiShop(p);
     this.emit({ type: 'shop' });
     if (!this.humans.length) this.closeShop();
   }
 
-  // Leave perks out of the draft when the match has them off (cfg.perks), or
-  // when they could do nothing for `p`: hand-outs of weapons that are all off;
-  // and mod perks that could do nothing or are not its turn yet: a mod the
-  // host's Lab turned off or one already at its top level; an unlock for a mod
-  // it owns, a level-up for one it does not, or a level-up whose unlock card
-  // is off; any mod level once it has taken MOD_DRAFT.cap of them this match;
-  // or (needsMod) anything for a tank that owns no mod at all. A drag perk
-  // (dragScale) only comes up when the match can roll a Rain round.
-  perkFits(p, perk) {
-    if (!this.perkOn(perk.id)) return false;
-    if (perk.dragScale && !MODIFIERS.some((m) => m.drag && this.modifierFits(m))) return false;   // no rain this match
+  // The skill tree as `p` sees it before the next round: every branch this
+  // match has (a mod the host's Lab hands out some other way, or a perk that is
+  // off or could do nothing, is left out), with its ranks, how many `p` holds,
+  // the next rank, and why that rank is shut, if it is ('From round 3', 'Both
+  // mod bays in use', 'Needs a mod').
+  skillTree(p) {
+    const round = this.round + 1;
+    const bays = MODS.filter((d) => this.modLevel(p, d.id) > 0).length;
+    return BRANCHES.map((b) => {
+      let ranks, held;
+      if (b.mod) {
+        if (modLab(this.cfg.lab, b.mod).mode !== 'perk' || !this.perkOn(b.ranks[0])) return null;
+        ranks = b.ranks.filter((id, i) => i === 0 || this.perkOn(id));
+        held = Math.min(ranks.length, this.modLevel(p, b.mod));
+      } else {
+        ranks = b.ranks.filter((id) => this.perkUseful(PERK_BY_ID[id]));
+        held = ranksHeld(p, { ranks });
+      }
+      if (!ranks.length) return null;
+      const next = ranks[held] || null;
+      let lock = '';
+      if (next) {
+        const k = PERK_BY_ID[next];
+        if ((k.fromRound || 0) > round) lock = `From round ${k.fromRound}`;
+        else if (b.mod && held === 0 && bays >= MOD_BAYS) lock = 'Both mod bays in use';
+        else if (k.needsMod && !bays) lock = 'Needs a mod';
+      }
+      return { ...b, ranks, held, next, lock };
+    }).filter(Boolean);
+  }
+
+  // The ranks `p` could take now: the next one of each open branch.
+  skillOffer(p) {
+    return this.skillTree(p).filter((b) => b.next && !b.lock).map((b) => b.next);
+  }
+
+  offerSkills(p) {
+    const offer = p.points > 0 ? this.skillOffer(p) : [];
+    if (offer.length) this.draft[p.id] = offer;
+    else delete this.draft[p.id];
+  }
+
+  // A CPU spends every point: half the time it goes deeper in a branch it has
+  // started, otherwise it takes what it likes (perks.js aiPickPerk).
+  aiSkills(p) {
+    for (let offer = this.skillOffer(p); p.points > 0 && offer.length; offer = this.skillOffer(p)) {
+      const deeper = offer.filter((id) => { const b = branchOf(id); return b && this.skillTree(p).find((x) => x.id === b.id)?.held > 0; });
+      const id = deeper.length && this.rogue.next() < 0.5 ? this.rogue.pick(deeper) : aiPickPerk(offer, this.rogue, TEMPERS[this.aiTemper(p)].likes);
+      p.perks.push(id);
+      p.points--;
+    }
+  }
+
+  // A perk this match can use at all: on in the match (cfg.perks), and able to
+  // do something: hand-outs of weapons that are all off, or a drag perk
+  // (dragScale) in a match that never rolls a Rain round, cannot.
+  perkUseful(perk) {
+    if (!perk || !this.perkOn(perk.id)) return false;
+    if (perk.dragScale && !MODIFIERS.some((m) => m.drag && this.modifierFits(m))) return false;
     if (perk.roundAmmo && !Object.keys(perk.roundAmmo).some((w) => this.weaponOn(w))) return false;
-    if (perk.needsMod && !MODS.some((d) => this.modLevel(p, d.id) > 0)) return false;
-    const ids = Object.keys(perk.mods || {});
-    if (ids.length && (p.perks || []).filter((k) => PERK_BY_ID[k]?.mods).length >= MOD_DRAFT.cap) return false;
-    for (const id of ids) {
+    return true;
+  }
+
+  // Whether `p` could take `perk` now, wherever it is offered: useful this
+  // match, and for mod perks, a mod the host's Lab leaves to the tree, below
+  // its top level, an unlock only for a mod it lacks (with a free bay) and a
+  // level-up only for one it has. (needsMod) needs a mod.
+  perkFits(p, perk) {
+    if (!this.perkUseful(perk)) return false;
+    const bays = MODS.filter((d) => this.modLevel(p, d.id) > 0).length;
+    if (perk.needsMod && !bays) return false;
+    for (const id of Object.keys(perk.mods || {})) {
       const def = MOD_BY_ID[id];
       const have = def ? this.modLevel(p, id) : 0;
       if (!def || modLab(this.cfg.lab, id).mode === 'off' || have >= def.maxLevel) return false;
-      if ((perk.unlock && have > 0) || (perk.levelUp && have < 1)) return false;
-      if (perk.levelUp && !PERKS.some((k) => k.unlock && k.mods?.[id] && this.perkOn(k.id))) return false;
+      if ((perk.unlock && (have > 0 || bays >= MOD_BAYS)) || (perk.levelUp && have < 1)) return false;
+      if (perk.levelUp && !PERKS.some((k) => k.unlock && k.mods?.[id] && this.perkOn(k.id))) return false;   // its unlock is off
     }
     return true;
   }
 
+  // Spend one of `p`'s skill points on a rank it is offered.
   pickPerk(playerId, id) {
+    const p = this.players[playerId];
     const offer = this.draft[playerId];
-    if (this.phase !== 'shop' || !offer || !offer.includes(id)) return false;
-    this.players[playerId].perks.push(id);
-    this.players[playerId].picked = id;
-    delete this.draft[playerId];
+    if (this.phase !== 'shop' || !p || !(p.points > 0) || !offer || !offer.includes(id)) return false;
+    p.perks.push(id);
+    p.points--;
+    (p.picked ||= []).push(id);
+    this.offerSkills(p);
     return true;
   }
 
+  // Points nobody spent carry over to the next round.
   closeShop() {
     if (this.phase !== 'shop') return;
-    // Anyone who walked past the draft takes the first card.
-    for (const [pid, offer] of Object.entries(this.draft)) this.pickPerk(Number(pid), offer[0]);
+    this.draft = {};
     this.startRound();
   }
 

@@ -55,20 +55,24 @@ test('Advanced weapons open on the second armory visit; a short match opens them
   assert.equal(a.inventory.thunderhead, 1);
 });
 
-test('the armory sells the next level of a drafted mod, never the first', () => {
+test('mod levels are skill ranks, not armory stock, unless the Lab sells them', () => {
   const g = two();
   g.start();
   const a = g.players[0];
   a.money = 5000;
-  assert.equal(g.priceOf(a, 'orbiter'), Infinity, 'no orbiter yet');
   a.perks.push('orbital');
   assert.equal(g.modLevel(a, 'orbiter'), 1);
-  assert.equal(g.priceOf(a, 'orbiter'), MOD_BY_ID.orbiter.prices[1]);
-  assert.ok(g.buy(0, 'orbiter'));
-  assert.equal(g.modLevel(a, 'orbiter'), 2);
-  assert.ok(g.buy(0, 'orbiter'));
-  assert.equal(g.modLevel(a, 'orbiter'), 3);
-  assert.equal(g.buy(0, 'orbiter'), false, 'top level');
+  assert.equal(g.priceOf(a, 'orbiter'), Infinity, 'points buy levels, money does not');
+  const shop = two({ lab: { orbiter: 'shop' } });
+  shop.start();
+  const s = shop.players[0];
+  s.money = 5000;
+  assert.equal(shop.priceOf(s, 'orbiter'), MOD_BY_ID.orbiter.prices[0]);
+  assert.ok(shop.buy(0, 'orbiter'));
+  assert.ok(shop.buy(0, 'orbiter'));
+  assert.ok(shop.buy(0, 'orbiter'));
+  assert.equal(shop.modLevel(s, 'orbiter'), 3);
+  assert.equal(shop.buy(0, 'orbiter'), false, 'top level');
 });
 
 test("a round's pay is counted by where it came from", () => {

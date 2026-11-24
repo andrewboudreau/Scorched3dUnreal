@@ -27,7 +27,9 @@
 
 /* Your kit */
 .ar-kit { margin: 0 0 12px; }
-#draft-owned.ar-kit { margin: 14px 0 0; }
+#draft-owned.ar-kit { margin: 0 0 12px; }
+#draft-skip { margin-top: 14px; width: 100%; }
+.ar-chip.pts { border-color: rgba(170, 145, 255, .6); background: rgba(150, 120, 255, .18); color: #ddd3ff; font-weight: 700; }
 .ar-kit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 12px; }
 .ar-kit-row label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-right: 4px; }
 .ar-chip { padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, .07); border: 1px solid var(--edge); white-space: nowrap; }
@@ -41,6 +43,23 @@
 .draft-item.ar-new .ar-badge { background: #3f63c9; color: #fff; }
 .draft-item.ar-level .ar-badge { background: rgba(157, 184, 255, .25); color: #cfdcff; }
 .ar-level { font-size: 12px; color: #b9cbff; }
+
+/* The skill tree: one card a branch */
+#draft-items { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.sk-branch .desc { min-height: 0; }
+.sk-branch .desc b { color: var(--text); }
+.sk-path { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 11px; }
+.sk-rank { padding: 0 6px; border-radius: 9px; border: 1px solid var(--edge); color: var(--muted); white-space: nowrap; }
+.sk-rank.have { background: #5b46b8; border-color: #8a75e6; color: #fff; }
+.sk-rank.next { border-color: #8a75e6; color: #ddd3ff; border-style: dashed; }
+.sk-arrow { color: var(--muted); opacity: .6; }
+.sk-mod .sk-rank.have { background: #3f63c9; border-color: #7d9cf0; }
+.sk-mod { border-color: rgba(157, 184, 255, .5); background: rgba(90, 110, 190, .1); }
+.sk-mod .ar-badge { background: #3f63c9; color: #fff; }
+.sk-started { box-shadow: inset 0 0 0 1px rgba(170, 145, 255, .35); }
+.sk-full { opacity: .7; }
+.sk-done { font-size: 12px; font-weight: 700; color: #9be36b; }
+.sk-branch button.buy:disabled { background: #26303c; border-color: var(--edge); color: var(--muted); }
 
 /* Armory cards */
 .ar-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11px; }

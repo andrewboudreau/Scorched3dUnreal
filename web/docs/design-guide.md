@@ -59,17 +59,15 @@ sign in.
 | --- | --- | --- | --- |
 | **Weapons** | Ammo, fired one shot at a time | Each shot uses a round | Shell, Flak, Breacher, Guided Missile, Roller |
 | **Mods** | Equipment deployed onto the field or mounted on the tank. It has health and/or charges or a lifetime, can be shot down, and wears out. Gained and levelled through perks (the host can untick a mod's cards to turn it off; `?sat=` / `?orbiter=` hand everyone one for testing) | Deployed; then lost, destroyed or expired, and ready again on the owner's next turn | Survey Satellite, Gravity Orbiter, Missile Defense, drones |
-| **Perks** | Roguelike advancements drafted between rounds. They change your numbers, unlock mods or level them up | Kept for the match | Heavy Rounds, Double Strike, Orbital Mechanic, Tighter Orbit |
+| **Perks** | Ranks in the skill tree, bought with skill points between rounds. They change your numbers, unlock mods or level them up | Kept for the match | Heavy Rounds, Double Strike, Orbital Mechanic, Tighter Orbit |
 | **Abilities** (idea) | Active powers on a cooldown, usually granted by a perk or a mod | Cooldown in turns | Signal jam pulse, emergency hop |
 
 Mods are tracked in #10.
 
-**Mods come from the draft.** The draft offers a new-mod card for a mod you
-do not have (while you have a free mod bay), then level cards for one you do,
-up to its top level. A draft holds at most one mod card, and a tank takes at
-most four mod levels from perks in a match. The armory does not sell a new
-mod, but it sells the next level of one you own. The host can untick a mod's
-cards in the match builder to turn it off; `?sat=` and `?orbiter=` give
+**Mods come from the skill tree.** Each mod is a branch: rank 1 gives the
+mod, ranks 2 and 3 its levels. A new mod needs a free mod bay. The armory
+does not sell mods (unless the host's Lab says so). The host can untick a
+mod's ranks in the match builder to turn it off; `?sat=` and `?orbiter=` give
 everyone one at a set level for testing.
 
 **Deploying a mod uses your turn**: you don't fire that turn. In return the
@@ -95,33 +93,56 @@ One rule each, so a player can say where anything came from:
 | --- | --- | --- |
 | **Starting kit** | Every tank starts the match with it (see below) | Ammo until fired |
 | **Weapons and gear** | Bought in the **armory** with money, after every round | Ammo until fired; gear for the next round |
-| **Perks** | The **draft**: pick one of three after every round | The whole match |
-| **Mods** | A **new mod** card in the draft gives level 1. The draft (a level card) or the armory (an upgrade, for money) raises it, up to level 3 | The whole match |
+| **Perks and mods** | The **skill tree**: a skill point after every round buys the next rank of any branch | The whole match |
 
-In short: **the draft gives you new things; the armory stocks and upgrades
-them.** The draft never sells ammo; the armory never sells perks, and only
-upgrades a mod you already own.
+In short: **skill points buy skills; money buys weapons and gear.** The tree
+never sells ammo, and the armory never sells perks or mods.
 
-**Mod bays.** A tank holds at most **two** mods. With two, no more new-mod
-cards come up, only levels for the two you have. That keeps each tank to a
-clear plan (say, satellite plus decoy) and stops one tank stacking every
-defense.
+### The skill tree
+
+After every round each tank gets **one skill point** (`SKILL.perRound`,
+`src/core/skills.js`). A point buys the **next rank of any branch**: start a
+new branch, or go one deeper in one you have. Ranks go in order, so the
+choice each round is wide (a little of everything) or deep (three points into
+Sat Recon for a level 3 satellite by round 4). Points you don't spend carry
+over, so you can save for two ranks at once.
+
+| Branch | Ranks |
+| --- | --- |
+| Orbital Mechanic (mod) | Gravity Orbiter level 1, 2, 3 |
+| Sat Recon (mod) | Survey Satellite level 1, 2, 3 |
+| *each new mod* | its levels 1 to 3 (made from the mod data) |
+| Firepower | Heavy Charge, Wide Blast, Shrapnel |
+| Hull | Reinforced Hull, Dug In, Field Repairs |
+| Gunnery | Tracer Rounds, Heavy Rounds, Streamlined Shells, Double Strike (from round 3) |
+| Supply | Haggler, Quartermaster, Bounty Hunter |
+| Chassis | Long-Range Tanks, Shock Mounts |
+| Mod Tuning | Long-Life Cells (needs a mod) |
+
+A rank the match has off, or one that could do nothing (Streamlined Shells
+with no Rain round possible), drops out and the next moves up. CPUs spend
+every point at once: half the time deeper in a branch they started, otherwise
+what they like.
+
+**Mod bays.** A tank holds at most **two** mods. With two, the other mod
+branches show "Both mod bays in use". That keeps each tank to a clear plan
+(say, satellite plus decoy) and stops one tank stacking every defense.
 
 ### The between-rounds screen
 
-Three steps, one screen, a stepper across the top (**Results · Draft ·
+Three steps, one screen, a stepper across the top (**Results · Skills ·
 Armory**), so it reads as one stop rather than three pop-ups:
 
 1. **Results**: who won the round, what everyone earned and why (damage, kill,
    survived, round win, stipend).
-2. **Draft**: three cards, each badged **Perk**, **New mod** or **Mod level**
-   in its own colour. A mod card shows the level it gives and what that level
-   adds.
+2. **Skills**: one card per branch: its ranks as a path (taken ones lit), the
+   next rank and what it does, and a button (or why it is shut). Spend a
+   point, or save it and go on. Skills come before the armory so Haggler and
+   Quartermaster count in this visit's shopping.
 3. **Armory**: sections, in this order: **Weapons** (Standard, then Advanced,
-   the latter locked with "opens in round N" until it does), **Gear**
-   (Armor Plate, Fuel Can, Jump Jets) and **Mod upgrades** (one card per mod
-   you own: the next level, what it adds, its price). A **Your kit** strip at
-   the top lists what you hold: ammo counts, mods with levels, perk tags.
+   the latter locked with "opens in round N" until it does) and **Gear**
+   (Armor Plate, Fuel Can, Jump Jets). A **Your kit** strip at the top lists
+   what you hold: ammo counts, mods with levels, perk tags, unspent points.
 
 ### Weapons: roles, tiers and prices
 

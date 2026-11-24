@@ -446,10 +446,10 @@ second column beside the first. On a phone the players box sits top right.
   scatter people and sheep. Whatever survives is re-seated on the new ground,
   and props that end up buried or under water are removed. Ground dug below the
   water level floods.
-- **Between rounds: Results, Draft, Armory.** A stepper at the top of each
+- **Between rounds: Results, Skills, Armory.** A stepper at the top of each
   screen shows where you are. Results list each tank's pay by where it came
   from: a $150 stipend, $80 for surviving, $300 for the win, $2 a point of
-  damage, $150 a kill, $60 a mod shot down. Then each human drafts and shops
+  damage, $150 a kill, $60 a mod shot down. Then each human spends skill points and shops
   in turn (the panel names whose turn it is and who is next); CPU tanks do
   both for themselves. A "Your kit" strip shows what you hold.
 - **Armory.** Weapons come in tiers: the **Kit** (Shells, free and unlimited),
@@ -459,9 +459,8 @@ second column beside the first. On a phone the players box sits top right.
   1 Guided Missile (not online), 1 Breacher, 1 Roller, 1 Mound,
   2 Rangefinders and 1 Jump Jet charge. A damage weapon costs $0.50 to $1.40 a
   shot for each point a good shot deals (`test/economy.test.js`). Gear is
-  armor, fuel and jump jets. **Mod upgrades**: the draft gives you a new
-  mod at level 1, and the armory sells its levels 2 and 3. A tank has two mod
-  bays. `src/armory.js` builds these screens.
+  armor, fuel and jump jets. Mods and their levels come from the skill tree,
+  not the armory; a tank has two mod bays. `src/armory.js` builds these screens.
 - **Fuel.** Every tank has 30 m of driving per round, on its own turn (or
   its own planning, in a volley), before it fires, and every shot it fires
   puts a third of that back (never past full). Climbing burns extra (a 45 degree slope costs three times level
@@ -483,10 +482,13 @@ second column beside the first. On a phone the players box sits top right.
   same on every screen. CPU tanks (Normal and Hard) hop when stuck in a hole
   at least 4 m deep and out of fuel for a drive, in the direction that
   leaves it least in a hole.
-- **Perk draft.** After every round each tank picks one of three random perks
-  (from those ticked under Custom match > Perks; with none ticked there is no draft) before it shops. They
-  last the whole match and stack; CPU tanks pick for themselves. In hotseat
-  each human gets their own draft and armory in turn, with the hand-off named
+- **Skill tree.** After every round each tank gets a skill point and spends
+  it on the next rank of any branch (Orbital Mechanic, Sat Recon, Firepower,
+  Hull, Gunnery, Supply, Chassis, Mod Tuning; `src/core/skills.js`), from the
+  perks ticked under Custom match > Perks (none ticked: no skill tree). Ranks
+  go in order and last the whole match; unspent points carry over. CPU tanks
+  spend theirs at once. In hotseat each human gets their own skills and
+  armory in turn, with the hand-off named
   on the button. Owned perks show as tags on the player card and scoreboard.
 
   | Perk | Effect |

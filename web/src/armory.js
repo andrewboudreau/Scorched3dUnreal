@@ -1,11 +1,12 @@
-// The between-rounds stop as HTML: the stepper (Results · Draft · Armory),
-// the round's pay by where it came from, the draft's cards badged by kind, the
-// "Your kit" strip and the armory in sections (Weapons by tier, Gear, Mod
-// upgrades). main.js shows the screens and wires the buttons; everything here
+// The between-rounds stop as HTML: the stepper (Results · Skills · Armory),
+// the round's pay by where it came from, the skill tree, the "Your kit" strip
+// and the armory in sections (Weapons by tier, Gear, and Mods when the Lab
+// sells them). main.js shows the screens and wires the buttons; everything here
 // is a pure function of the game, so tests read it without a DOM.
 //
-// The rules it shows are docs/design-guide.md, "How you get things": the
-// draft gives new things, the armory stocks and upgrades them.
+// The rules it shows are docs/design-guide.md, "How you get things": skill
+// points buy ranks in the skill tree (perks and mods, core/skills.js); money
+// buys weapons and gear in the armory.
 
 import { WEAPONS, WEAPON_BY_ID, ITEMS, TIERS, startKit } from './core/weapons.js';
 import { PERK_BY_ID } from './core/perks.js';
@@ -19,11 +20,11 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 export const STEPS = [
   { id: 'results', name: 'Results' },
-  { id: 'draft', name: 'Draft' },
+  { id: 'draft', name: 'Skills' },
   { id: 'armory', name: 'Armory' },
 ];
 
-// `at` is the step showing; `draft` false leaves the Draft step out (no
+// `at` is the step showing; `draft` false leaves the Skills step out (no
 // perks in this match).
 export function stepperHtml(at, { draft = true, round = 1 } = {}) {
   const steps = STEPS.filter((s) => draft || s.id !== 'draft');
@@ -54,25 +55,44 @@ export function resultsHtml(players) {
   }).join('');
 }
 
-// ---------------------------------------------------------------- the draft
+// ---------------------------------------------------------------- the skill tree
 
-// What kind of card a perk is: a plain perk, a new mod, or a mod's next level.
-export function cardKind(game, p, perk) {
-  const id = Object.keys(perk.mods || {})[0];
-  if (id && perk.unlock) return { kind: 'new', label: 'New mod', mod: MOD_BY_ID[id], level: 1 };
-  if (id && perk.levelUp) return { kind: 'level', label: 'Mod level', mod: MOD_BY_ID[id], level: game.modLevel(p, id) + 1 };
-  return { kind: 'perk', label: 'Perk' };
+// One branch's ranks as names: a mod's are its levels, a perk branch's its perks.
+export function rankNames(b) {
+  const mod = b.mod && MOD_BY_ID[b.mod];
+  return b.ranks.map((id, i) => (mod ? `Level ${i + 1}` : PERK_BY_ID[id]?.name || id));
 }
 
-export function draftCardsHtml(game, p) {
-  return (game.draft[p.id] || []).map((id) => {
-    const k = PERK_BY_ID[id];
-    const c = cardKind(game, p, k);
-    const lvl = c.mod ? `<div class="ar-level"><b>${esc(c.mod.name)} · level ${c.level}</b>${c.mod.levels?.[c.level - 1] ? `: ${esc(c.mod.levels[c.level - 1])}` : ''}</div>` : '';
-    return `<div class="shop-item draft-item ar-${c.kind}">
-      <div class="si-head"><b>${esc(k.name)}</b><span class="ar-badge">${c.label}</span></div>
-      ${lvl}<div class="desc">${esc(k.desc)}</div>
-      <button class="buy" data-id="${id}">Take it</button>
+// What the next rank does, in a line.
+export function rankText(b, i) {
+  const mod = b.mod && MOD_BY_ID[b.mod];
+  if (mod) return i === 0 ? PERK_BY_ID[b.ranks[0]]?.desc || '' : `${mod.name} level ${i + 1}: ${mod.levels?.[i] || ''}.`;
+  return PERK_BY_ID[b.ranks[i]]?.desc || '';
+}
+
+// The tree as cards, one a branch: its ranks as a path (held ones lit), the
+// next rank and what it does, and a button (or why it is shut, or Complete).
+// Mod branches first, then the perk branches; a branch `p` has started sorts
+// ahead of the rest in each group.
+export function skillTreeHtml(game, p) {
+  const tree = game.skillTree(p);
+  const order = (b) => (b.mod ? 0 : 2) - (b.held > 0 ? 1 : 0);
+  const can = p.points > 0;
+  return [...tree].sort((x, y) => order(x) - order(y)).map((b) => {
+    const names = rankNames(b);
+    const path = names.map((n, i) => `<span class="sk-rank${i < b.held ? ' have' : i === b.held ? ' next' : ''}">${esc(n)}</span>`).join('<span class="sk-arrow">›</span>');
+    const done = !b.next;
+    const nextName = done ? '' : names[b.held];
+    const foot = done
+      ? '<span class="sk-done">Complete</span>'
+      : b.lock
+        ? `<button class="buy" disabled>${esc(b.lock)}</button>`
+        : `<button class="buy" data-id="${b.next}" ${can ? '' : 'disabled'} aria-label="Take ${esc(b.name)} rank ${b.held + 1}">${b.held ? `Rank ${b.held + 1}` : 'Start'}</button>`;
+    return `<div class="shop-item draft-item sk-branch${b.mod ? ' sk-mod' : ''}${b.held ? ' sk-started' : ''}${done ? ' sk-full' : ''}">
+      <div class="si-head"><b>${esc(b.name)}</b><span class="ar-badge">${b.mod ? 'Mod' : esc(b.theme)}</span></div>
+      <div class="sk-path">${path}</div>
+      ${done ? '' : `<div class="desc"><b>${esc(nextName)}:</b> ${esc(rankText(b, b.held))}</div>`}
+      <div class="si-foot"><span class="si-gives">${b.held} of ${b.ranks.length}</span>${foot}</div>
     </div>`;
   }).join('');
 }
@@ -97,7 +117,8 @@ export function kitHtml(game, p) {
     const n = (p.perks || []).filter((x) => x === id).length;
     return k ? `<span class="perk" title="${esc(k.name)}: ${esc(k.desc)}">${k.tag}${n > 1 ? `×${n}` : ''}</span>` : '';
   });
-  return `<div class="ar-kit-row"><label>Your kit</label>${chips.join('')}${mods.join('')}${perks.join('')}</div>`;
+  const points = p.points > 0 ? `<span class="ar-chip pts">${p.points} skill point${p.points > 1 ? 's' : ''}</span>` : '';
+  return `<div class="ar-kit-row"><label>Your kit</label>${chips.join('')}${mods.join('')}${perks.join('')}${points}</div>`;
 }
 
 // ---------------------------------------------------------------- the armory
@@ -168,7 +189,7 @@ export function armoryHtml(game, p, justBought = null) {
       gives: info?.gives || '', price: game.priceOf(p, it.id), money, justBought,
     });
   });
-  const mods = MODS.filter((d) => game.modLevel(p, d.id) > 0 || game.cfg.lab?.[d.id] === 'shop').map((d) => {
+  const mods = MODS.filter((d) => Number.isFinite(game.priceOf(p, d.id)) || (game.cfg.lab?.[d.id] === 'shop' && game.modLevel(p, d.id) > 0)).map((d) => {
     const have = game.modLevel(p, d.id);
     const top = have >= d.maxLevel;
     return card({
@@ -182,7 +203,7 @@ export function armoryHtml(game, p, justBought = null) {
     + section(advancedOpen ? 'Advanced weapons' : `Advanced weapons <span class="ar-lock">open before round ${advancedRound}</span>`,
       advancedOpen ? 'The heavy hitters and tricks.' : 'The heavy hitters and tricks, from the next armory on.', tier('advanced'))
     + section('Gear', 'Armor and fuel are for the next round; jump jet charges keep.', gear)
-    + section('Mod upgrades', `New mods come from the draft; the armory raises the ones you have (${bays} of ${MOD_BAYS} mod bays used).`, mods);
+    + section('Mods', `This match's Lab sells these here (${bays} of ${MOD_BAYS} mod bays used).`, mods);
 }
 
 // The starting kit as words, for the first round's banner and the guide:

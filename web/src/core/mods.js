@@ -63,8 +63,8 @@ export const SKY = { altitude: 70, lean: 14, radius: 5 };
 // Pay for shooting down an enemy mod.
 export const MOD_PAY = 60;
 
-// A tank holds at most this many mods: once it owns that many, the draft
-// offers only levels for them, no new ones (game.perkFits).
+// A tank holds at most this many mods: once it owns that many, the skill
+// tree only offers ranks of those, no new ones (game.skillTree, perkFits).
 export const MOD_BAYS = 2;
 
 export const MODS = [
@@ -141,21 +141,22 @@ export function modLevel(lab, p, id) {
   if (mode === 'off') return 0;
   const perks = perkLevels(p, id);
   const bought = boughtLevels(p, id);
-  // 'perk': the draft gives level 1, and then armory upgrades count too.
-  const base = mode === 'all' ? level : mode === 'shop' ? bought : perks > 0 ? bought : 0;
+  // 'perk': the skill tree gives every level (core/skills.js); 'shop': the
+  // armory sells them, and tree ranks add on top.
+  const base = mode === 'all' ? level : mode === 'shop' ? bought : 0;
   return Math.min(m.maxLevel, base + perks);
 }
 
-// The armory's price for the next level of `id`: any level when the host's
-// Lab sells mods ('shop'); by default ('perk') only an upgrade of one `p`
-// already has (the draft gives the first level); never when the Lab hands
-// everyone a level ('all') or turns it off. Infinity when it is not for sale.
+// The armory's price for the next level of `id`: only when the host's Lab
+// sells mods ('shop'). By default ('perk') levels come from the skill tree,
+// with skill points, not money; 'all' hands everyone a level; 'off' is off.
+// Infinity when it is not for sale.
 export function modPrice(lab, p, id) {
   const m = MOD_BY_ID[id];
   const mode = modLab(lab, id).mode;
-  if (!m || mode === 'off' || mode === 'all') return Infinity;
+  if (!m || mode !== 'shop') return Infinity;
   const have = modLevel(lab, p, id);
-  if (have >= m.maxLevel || (mode === 'perk' && have < 1)) return Infinity;
+  if (have >= m.maxLevel) return Infinity;
   return m.prices[have];
 }
 

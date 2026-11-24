@@ -136,7 +136,7 @@ export const BUILDER_ROWS = [
   { name: 'Firing', text: 'Together (volley) or Take turns. Online is always together.' },
   { name: 'Fog of war', text: 'You only see what is near your tank, or what a Scout Missile lights up.' },
   { name: 'Weapons', text: 'Untick a weapon and nobody has it: not in the armory, the starting kit, a perk’s hand-out or the CPUs’ hands. The Shell is always on.' },
-  { name: 'Perks', text: 'Untick a perk and the draft never offers it. Mods come only from their cards: with **Orbital Mechanic** or **Sat Recon** off, nobody gets that mod, and its level-up cards never come up. With every perk off there is no draft.' },
+  { name: 'Perks', text: 'Untick a perk and the skill tree leaves that rank out. Mods come only from their branches: with **Orbital Mechanic** or **Sat Recon** off, nobody gets that mod. With every perk off there is no skill tree.' },
   { name: 'Round modifiers', text: 'One is rolled each round, never the same twice running. Untick the ones you do not want; with all off, every round is plain. With the wind on Calm, Gale and Dead calm sit out.' },
 ];
 
@@ -199,7 +199,7 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
     { h: 'Damage' },
     { p: 'A blast hurts more the nearer it lands, and a direct hit most. Armor soaks damage before hit points. Blasts also dig the ground out from under tanks and buildings.' },
     { h: 'Rounds and money' },
-    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you draft a perk, then shop in the armory. Perks last the whole match; mods last until they are shot down.` },
+    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you get a skill point to spend in the skill tree, then shop in the armory: points buy perks and mods, money buys weapons and gear. Perks last the whole match; a deployed mod lasts until it is shot down or wears out.` },
   ] });
 
   tabs.push({ id: 'controls', title: 'Controls', blocks: [
@@ -218,7 +218,7 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
   const fams = familyRows(mods);
   tabs.push({ id: 'mods', title: 'Mods and perks', blocks: [
     { h: 'Mods' },
-    { p: 'Equipment you put up on the field, not a weapon. You gain mods through the **perk draft** between rounds: an unlock card gives you one at level 1, then level-up cards raise it. Untick a mod’s cards under **Custom match** > Perks and nobody has it.' },
+    { p: 'Equipment you put up on the field, not a weapon. You gain mods in the **skill tree** between rounds: each mod is a branch, rank 1 gives it and ranks 2 and 3 raise its level. A tank holds two mods at most. Untick a mod’s ranks under **Custom match** > Perks and nobody has it.' },
     { p: '**Deploying a mod uses your turn** (no shot). It then stays up across rounds until it is shot down or wears out; a new one is ready on your next turn, and putting it up takes that turn. Its health and turns left show on your player card.' },
     modList.length ? { rows: modList } : { p: 'No mods in this build.' },
     { h: 'Rock, paper, scissors' },
@@ -226,7 +226,7 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
     { fams },
     { p: '**Flak is anti-air.** It bursts by a mod in the sky and can bring it down.' },
     { h: 'Perks' },
-    { p: 'Drafted after each round (one of three) and kept for the match.' },
+    { p: 'Ranks in the skill tree: a skill point after each round buys the next rank of any branch, kept for the match.' },
     perkList.length ? { rows: perkList } : { p: 'No perks to list.' },
   ] });
 

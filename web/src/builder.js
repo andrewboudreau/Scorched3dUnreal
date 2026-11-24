@@ -116,7 +116,7 @@ export const GROUPS = [
   { id: 'weapons', name: 'Weapons', items: WEAPONS.filter((w) => !w.hidden).map((w) => ({ id: w.id, name: w.name, desc: w.desc || '', locked: !!w.infinite })),
     note: 'The Shell is always on. A weapon that is off is not in the armory, starting kits, perk hand-outs or the CPUs’ hands.' },
   { id: 'perks', name: 'Perks', items: PERKS.map((p) => ({ id: p.id, name: p.name, desc: p.desc || '' })),
-    note: 'Mods come only from their cards: with Orbital Mechanic or Sat Recon off, nobody gets that mod, and its level-up cards never come up. With every perk off there is no draft.' },
+    note: 'These are the ranks of the skill tree. Mods come only from their branches: with Orbital Mechanic or Sat Recon off, nobody gets that mod. With every perk off there is no skill tree.' },
   { id: 'modifiers', name: 'Round modifiers', items: MODIFIERS.map((m) => ({ id: m.id, name: m.name, desc: m.desc || '' })),
     note: 'One is rolled each round, never the same twice running. With the wind on Calm, Gale and Dead calm sit out. With all off, every round is plain.' },
 ];

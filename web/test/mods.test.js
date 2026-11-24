@@ -9,7 +9,7 @@ import {
   MODS, MOD_BY_ID, ORBIT, SKY, MOD_PAY, modLab, normalizeModLab, modLevel, modPrice, fitMods,
   deployMod, tickMods, hurtMod, orbitPoints, modWells, modTargets, readyMods,
 } from '../src/core/mods.js';
-import { PERK_BY_ID, MOD_DRAFT, isModPerk, perkCount } from '../src/core/perks.js';
+import { PERK_BY_ID, perkCount } from '../src/core/perks.js';
 
 // Mods: equipment a tank deploys (core/mods.js). The Gravity Orbiter and the
 // Survey Satellite.
@@ -56,10 +56,8 @@ test('mods: data, Lab options, prices and perks', () => {
   assert.deepEqual(PERK_BY_ID.orbital.mods, { orbiter: 1 });
   assert.equal(modLevel({}, { ...p, perks: ['orbital'] }, 'orbiter'), 1);
   assert.equal(modLevel({}, { ...p, perks: ['orbital', 'orbitalup', 'orbitalup'] }, 'orbiter'), 3);
-  assert.equal(modLevel({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 1 } } }, 'orbiter'), 2, 'armory upgrades count once the draft gave it');
-  assert.equal(modLevel({}, { ...p, mods: { orbiter: { bought: 2 } } }, 'orbiter'), 0, 'but the armory never sells the first level by default');
-  assert.equal(modPrice({}, { ...p, perks: ['orbital'] }, 'orbiter'), MOD_BY_ID.orbiter.prices[1], 'the armory sells the next level of one you own');
-  assert.equal(modPrice({}, { ...p, perks: ['orbital', 'orbitalup', 'orbitalup'] }, 'orbiter'), Infinity, 'at the top level');
+  assert.equal(modLevel({}, { ...p, mods: { orbiter: { bought: 2 } } }, 'orbiter'), 0, 'by default levels come from the skill tree, not the armory');
+  assert.equal(modPrice({}, { ...p, perks: ['orbital'] }, 'orbiter'), Infinity, 'so the armory does not sell them');
   assert.equal(modLevel(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 3);
   assert.equal(modPrice(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), Infinity, 'at the top level');
 
@@ -100,7 +98,7 @@ test('mods: the Lab gives everyone one, and mod perks that could do nothing stay
   assert.equal(off.perkFits(off.players[0], PERK_BY_ID.cells), false, 'no mod to make last longer');
 });
 
-test('mods: by default they come from the draft, an unlock card first, then level-ups', () => {
+test('mods: by default they come from the skill tree, rank 1 then level-ups, two mod bays', () => {
   const g = mk();
   const p = g.players[0];
   p.money = 5000;
@@ -118,34 +116,28 @@ test('mods: by default they come from the draft, an unlock card first, then leve
   p.perks.push('orbitalup');
   assert.equal(g.modLevel(p, 'orbiter'), 3);
   assert.equal(g.perkFits(p, PERK_BY_ID.orbitalup), false, 'top level: no more offers');
-  // A cap per match on mod levels from perks.
+  // Two mod bays: a tank with two mods is offered no third.
   const q = g.players[1];
-  q.perks.push('orbital', 'satrecon', 'satrecon2', 'satrecon2');
-  assert.equal(g.modLevel(q, 'satellite'), 3);
-  assert.equal(g.perkFits(q, PERK_BY_ID.orbitalup), false, `capped at ${MOD_DRAFT.cap}`);
+  q.perks.push('orbital', 'satrecon');
+  const third = MODS.find((d) => d.id !== 'orbiter' && d.id !== 'satellite');
+  const unlock = third && Object.values(PERK_BY_ID).find((k) => k.unlock && k.mods?.[third.id]);
+  if (unlock) assert.equal(g.perkFits(q, unlock), false, 'both bays in use');
+  assert.equal(g.perkFits(q, PERK_BY_ID.satrecon2), true, 'but its own mods still level up');
 
-  // The drafts: at most one mod card, only cards that fit, and the
-  // unlock shows up for most tanks over a three-round match.
-  let seen = 0, offers = 0;
-  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
-    const h = new Game({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }], rounds: 3, seed, resolution: 64, maxTurnsPerRound: 1 });
-    h.start();
-    for (let r = 1; r < 3; r++) {
-      h.endRound();
-      h.openShop();
-      for (const [pid, offer] of Object.entries(h.draft)) {
-        offers++;
-        const mods = offer.filter((id) => isModPerk(PERK_BY_ID[id]));
-        assert.ok(mods.length <= 1, `one mod card at most: ${offer}`);
-        assert.ok(offer.every((id) => h.perkFits(h.players[pid], PERK_BY_ID[id])));
-        if (mods.length) seen++;
-        h.pickPerk(Number(pid), mods[0] || offer[0]);
-      }
-      h.closeShop();
-    }
-    for (const p of h.players) assert.ok(perkCount(p, 'orbital') <= 1 && perkCount(p, 'orbitalup') <= 2);
+  // Over a match the tree takes a tank all the way up one branch.
+  const h = new Game({ players: [{ name: 'A' }, { name: 'B' }], rounds: 5, seed: 4, resolution: 64, maxTurnsPerRound: 1 });
+  h.start();
+  for (let r = 1; r < 5; r++) {
+    h.endRound();
+    h.openShop();
+    const offer = h.draft[0] || [];
+    const pick = offer.find((id) => PERK_BY_ID[id].mods?.satellite);
+    if (pick) assert.ok(h.pickPerk(0, pick));
+    h.closeShop();
   }
-  assert.ok(seen / offers > 0.4 && seen / offers < 0.8, `mod cards in ${seen} of ${offers} offers`);
+  assert.equal(h.modLevel(h.players[0], 'satellite'), 3, 'three points: Survey Satellite level 3');
+  assert.equal(h.players[0].points, 1, 'the fourth point is saved');
+  for (const p of h.players) assert.ok(perkCount(p, 'satrecon') <= 1 && perkCount(p, 'satrecon2') <= 2);
 });
 
 test('orbiter: its wells are a pure function of the game clock', () => {

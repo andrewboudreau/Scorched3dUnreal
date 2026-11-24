@@ -53,24 +53,36 @@ test('perk data is well formed and a draft offers three the tank does not hold',
   assert.ok(!hasPerk({ perks: [] }, 'noFall'));
 });
 
-test('draft: humans are offered perks, CPUs pick at once, a skipped draft takes the first card', () => {
-  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C', ai: 'normal' }], rounds: 3, seed: 8, resolution: 64 });
+test('skill tree: a point a round, the next rank of each branch on offer, CPUs spend at once, unspent points carry over', () => {
+  const g = new Game({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C', ai: 'normal' }], rounds: 4, seed: 8, resolution: 64 });
   g.start();
   g.endRound();
   g.openShop();
   assert.equal(g.phase, 'shop');
-  assert.equal(g.players[2].perks.length, 1, 'the CPU already chose');
-  assert.equal(g.draft[0].length, 3);
+  assert.equal(g.players[2].perks.length, 1, 'the CPU already spent its point');
+  assert.equal(g.players[2].points, 0);
+  const tree = g.skillTree(g.players[0]);
+  assert.deepEqual(g.draft[0], tree.filter((b) => b.next && !b.lock).map((b) => b.next), 'one card per open branch');
+  assert.ok(g.draft[0].includes('heavycharge') && g.draft[0].includes('orbital') && g.draft[0].includes('satrecon'));
+  assert.ok(!g.draft[0].includes('wideblast'), 'rank 2 waits for rank 1');
+  assert.ok(tree.find((b) => b.id === 'gunnery').ranks.includes('double'));
   assert.equal(g.pickPerk(0, 'not-a-perk'), false);
-  const wanted = g.draft[0][1];
-  assert.ok(g.pickPerk(0, wanted));
-  assert.deepEqual(g.players[0].perks, [wanted]);
-  assert.equal(g.pickPerk(0, wanted), false, 'one perk per draft');
-  const first = g.draft[1][0];
+  assert.ok(g.pickPerk(0, 'heavycharge'));
+  assert.deepEqual(g.players[0].perks, ['heavycharge']);
+  assert.equal(g.pickPerk(0, 'wideblast'), false, 'one point, spent');
   g.closeShop();
-  assert.deepEqual(g.players[1].perks, [first]);
+  assert.deepEqual(g.players[1].perks, [], 'B saved its point');
+  assert.equal(g.players[1].points, 1);
   assert.equal(g.phase, 'aim');
   assert.equal(g.round, 2);
+  g.endRound();
+  g.openShop();
+  assert.equal(g.players[1].points, 2);
+  assert.ok(g.draft[0].includes('wideblast'), 'rank 2 is open now');
+  assert.ok(g.pickPerk(1, 'satrecon'));
+  assert.ok(g.pickPerk(1, 'satrecon2'), 'a saved point goes deeper the same visit');
+  assert.equal(g.modLevel(g.players[1], 'satellite'), 2);
+  assert.equal(g.draft[1], undefined, 'no points left, no offer');
 });
 
 test('twists off: no drafts and no modifiers', () => {
@@ -396,6 +408,6 @@ test('an all-CPU match with twists on plays through drafts, modifiers and drives
     if (g.phase === 'roundOver' && g.phaseTime > 1) { g.openShop(); mods.add(g.modifier.id); }
   }
   assert.equal(g.phase, 'matchOver');
-  assert.ok(g.players.every((p) => p.perks.length === 3 && new Set(p.perks).size === 3), 'one perk per draft, no repeats');
+  assert.ok(g.players.every((p) => p.perks.length === 3 && p.perks.every((id) => p.perks.filter((k) => k === id).length <= (PERK_BY_ID[id].stack || 1))), 'a rank a round, none past its stack');
   assert.ok(mods.size >= 2, 'the modifier changed between rounds');
 });

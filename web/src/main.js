@@ -30,7 +30,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
-import { stepperHtml, resultsHtml, draftCardsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
+import { stepperHtml, resultsHtml, skillTreeHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
@@ -2028,7 +2028,7 @@ function showRoundResult(kind) {
     return;
   }
   $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
-  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.draftOn ? 'Continue to the draft' : 'Continue to the armory';
+  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.draftOn ? 'Continue to your skills' : 'Continue to the armory';
   $('ro-steps').innerHTML = stepperHtml('results', { draft: game.draftOn, round: game.round });
   $('ro-table').innerHTML = resultsHtml([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
@@ -2061,24 +2061,31 @@ function nextShopper() {
   if (game.draft[pid]) openDraftFor(pid); else openShopFor(pid);
 }
 
-// The perk draft: three cards, keep one for the rest of the match.
+// The skill tree (src/armory.js skillTreeHtml): spend skill points on the
+// next rank of any branch, or save them; then the armory.
 function openDraftFor(pid) {
   const p = game.players[pid];
+  const toShop = () => { $('draft').classList.add('hidden'); openShopFor(pid); };
+  const render = () => {
+    const n = p.points;
+    $('draft-step').textContent = hotseatStep(p, n > 1 ? `${n} skill points to spend` : n ? '1 skill point to spend' : 'all points spent');
+    $('draft-owned').innerHTML = kitHtml(game, p);
+    $('draft-items').innerHTML = skillTreeHtml(game, p);
+    $('draft-skip').textContent = n ? `Save ${n > 1 ? 'them' : 'it'} · go to the armory` : 'Go to the armory';
+  };
   $('draft').classList.remove('hidden');
   $('draft-card').style.borderTopColor = p.color;
   $('draft-swatch').style.background = p.color;
-  $('draft-player').textContent = whose(p, 'draft');
-  $('draft-step').textContent = hotseatStep(p, 'pick one: it lasts the whole match');
+  $('draft-player').textContent = whose(p, 'skills');
   $('draft-steps').innerHTML = stepperHtml('draft', { round: game.round });
-  $('draft-owned').innerHTML = kitHtml(game, p);
-  $('draft-items').innerHTML = draftCardsHtml(game, p);
+  render();
   $('draft-items').onclick = (e) => {
     const b = e.target.closest('button.buy');
-    if (!b || !game.pickPerk(pid, b.dataset.id)) return;
+    if (!b || b.disabled || !game.pickPerk(pid, b.dataset.id)) return;
     sound.click();
-    $('draft').classList.add('hidden');
-    openShopFor(pid);
+    if (game.draft[pid]) render(); else toShop();
   };
+  $('draft-skip').onclick = toShop;
 }
 
 // The armory, one human at a time. Each item is a card that says what it is,

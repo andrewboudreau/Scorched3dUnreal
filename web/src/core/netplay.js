@@ -115,7 +115,7 @@ export class Session {
     const p = g.players[id];
     g.shopped.push(id);
     if (this.echoed('shop', (m) => m.round === g.round && m.id === id)) return;   // done before a reload
-    this.send({ t: 'shop', round: g.round, id, perk: p.picked || null, buys: [...(p.bought || [])] });
+    this.send({ t: 'shop', round: g.round, id, perks: [...(p.picked || [])], buys: [...(p.bought || [])] });
   }
 
   // Call once a frame, after game.update.
@@ -220,7 +220,7 @@ export class Session {
         if (msg.round < g.round) return true;
         if (!(g.phase === 'shop' && g.round === msg.round)) return false;
         if (g.shopped.includes(msg.id)) return true;
-        if (msg.perk) g.pickPerk(msg.id, msg.perk);
+        for (const k of msg.perks || (msg.perk ? [msg.perk] : [])) g.pickPerk(msg.id, k);   // skill ranks, in the order taken
         for (const id of msg.buys) g.buy(msg.id, id);
         if (!g.shopped.includes(msg.id)) g.shopped.push(msg.id);
         return true;
