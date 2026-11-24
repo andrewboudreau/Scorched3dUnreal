@@ -1,6 +1,7 @@
 import { makeRng } from './rng.js';
 import { makePerlin } from './noise.js';
 import { planPaths, distToPaths } from './paths.js';
+import { ridgeRocks } from './ridgeline.js';
 
 // Everything that makes the field look lived in: water in the lowest basins,
 // trees, bushes, rocks, hamlets, farms and lone towers and windmills (most
@@ -108,6 +109,11 @@ export class Scenery {
     const area = (t.size / 800) ** 2;
     const nearTank = (x, z, r) => tanks.some((k) => Math.hypot(k.x - x, k.z - z) < r);
     const spot = (reach = 0.42) => [rng.range(-1, 1) * t.size * reach, rng.range(-1, 1) * t.size * reach];
+    if (t.ridge) {   // a ridgeline is bare rock: no water, villages, trees or flocks
+      ridgeRocks(this, rng, tanks, KEEP_TANK);
+      this.version++;
+      return this;
+    }
 
     this.chooseWaterLevel(tanks);
     let lo = Infinity;

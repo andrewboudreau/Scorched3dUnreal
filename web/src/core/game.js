@@ -5,6 +5,7 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, spl
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
+import { generateRidgeline, keepCrust, rowStarts } from './ridgeline.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, draftOffer, aiPickPerk, pickModifier, MOD_DRAFT, GALE_CAP } from './perks.js';
 import { normalizeLab } from './survey.js';
 import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods } from './mods.js';
@@ -72,7 +73,7 @@ export class Game {
     terrainSize = 800,
     resolution = 256,
     hills = 45,
-    world = 'meadow',   // 'meadow', or 'isles': floating isles in open sky, with moons that pull on shells
+    world = 'meadow',   // 'meadow'; 'isles': floating isles in open sky, with moons that pull on shells; 'ridgeline': a mountain range in cross-section (core/ridgeline.js)
     maxTurnsPerRound = 40,
     // What the match uses (the Custom match checkboxes): each a list of the ids
     // that are on, or null for all of them. A weapon that is off is never in
@@ -289,6 +290,7 @@ export class Game {
       [order[i], order[j]] = [order[j], order[i]];
     }
     this.padOrder = order;   // pads are flattened in this order; overlaps depend on it
+    if (this.ridgeline) return rowStarts(order, t, this.rng);   // a row from west to east
     return order.map((pi, k) => {
       const a = base + (k / n) * Math.PI * 2 + this.rng.range(-0.25, 0.25);
       const r = ring * this.rng.range(0.8, 1.15);
@@ -297,6 +299,7 @@ export class Game {
   }
 
   get isles() { return this.cfg.world === 'isles'; }
+  get ridgeline() { return this.cfg.world === 'ridgeline'; }
 
   // The round's ground from its seed, then a flat pad under each tank, in pad
   // order (`starts` is [player index, x, z]). The isles are laid out around
@@ -305,6 +308,7 @@ export class Game {
     const t = this.terrain;
     const seed = this.cfg.seed + round * 7919;
     if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    else if (this.ridgeline) generateRidgeline(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
     else t.generate({ seed, amplitude: this.cfg.hills });
     for (const [i, x, z] of starts) {
       const p = this.players[i];
@@ -312,6 +316,7 @@ export class Game {
       t.flatten(x, z, TANK.padRadius);
       p.y = t.heightAt(x, z);
     }
+    if (this.ridgeline) keepCrust(t);
   }
 
   randomWind() {

@@ -24,6 +24,7 @@ import { AimArc, Gunner } from './gunner.js';
 import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
+import { setRidgeWorld, overviewGoal } from './render/ridgeline.js';
 import { AngleDials } from './render/dials.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
@@ -242,6 +243,7 @@ function disposeMatch() {
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
+  setRidgeWorld(false, { sky, floor });
   rain.clear();
   lastLand.clear();
   aimArc.hide();
@@ -362,6 +364,7 @@ function handleEvents() {
           sceneryMesh.rebuild();
           terrainMesh.setPaths(game.scenery.paths);
           sky.setSpace(!!game.terrain.under);
+          setRidgeWorld(!!game.terrain.ridge, { sky, floor });
           floor.visible = !game.terrain.under;   // nothing under the isles but space
           birds.bodies.visible = birds.wings.visible = !game.terrain.under;
           craft.set(!!game.terrain.under, game.terrain.half);
@@ -1431,7 +1434,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
   else if (k === 'v') {
     overview = !overview;
-    if (overview) camGoal = new THREE.Vector3(0, 610, 520);
+    if (overview) camGoal = overviewGoal(game, camera);
     else if (game.current) aimCameraAt(game.current);
   } else if (k === 'm') toggleMute();
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);

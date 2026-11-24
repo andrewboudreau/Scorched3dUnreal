@@ -13,6 +13,7 @@
 
 import { WEAPONS } from './core/weapons.js';
 import { PERKS, MODIFIERS } from './core/perks.js';
+import { RIDGE } from './core/ridgeline.js';
 
 // ---------------------------------------------------------------- wind and terrain
 
@@ -20,7 +21,8 @@ import { PERKS, MODIFIERS } from './core/perks.js';
 // `weight` is how often Random picks each. Calm and Gale are the extremes, so
 // they come up half as often as Breezy and Gusty. The Floating isles are a
 // different game (open sky, moons, the void), so Random picks them half as
-// often as each meadow.
+// often as each meadow, and so does the Ridgeline (a mountain range seen side
+// on, the tanks in a row: core/ridgeline.js).
 export const WIND = [
   { id: 'calm', value: 0, name: 'Calm', weight: 1 },
   { id: 'breezy', value: 0.8, name: 'Breezy', weight: 2 },
@@ -32,6 +34,7 @@ export const TERRAIN = [
   { id: 'hilly', value: '45', name: 'Hilly', weight: 2 },
   { id: 'mountains', value: '80', name: 'Mountains', weight: 2 },
   { id: 'isles', value: 'isles', name: 'Floating isles', weight: 1 },
+  { id: 'ridgeline', value: 'ridgeline', name: 'Ridgeline', weight: 1 },
 ];
 export const RANDOM = 'random';
 export const MAX_TEST_WIND = 5;
@@ -42,9 +45,10 @@ function weighted(list, rand) {
   return list[list.length - 1];
 }
 
-// A Terrain value ('20', '45', '80' or 'isles') as config.
+// A Terrain value ('20', '45', '80', 'isles' or 'ridgeline') as config.
 export function terrainConfig(v) {
   if (v === 'isles') return { hills: 45, world: 'isles' };
+  if (v === 'ridgeline') return { hills: RIDGE.hills, world: 'ridgeline' };
   const n = Number(v);
   return { hills: Number.isFinite(n) && n > 0 ? n : 45, world: 'meadow' };
 }
@@ -67,14 +71,14 @@ export function conditionsLabel(cfg) {
   if (!cfg) return '';
   const w = WIND.find((x) => x.value === cfg.maxWind);
   const wind = w ? `${w.name} wind` : `Wind ${Number(cfg.maxWind) || 0}`;
-  const t = cfg.world === 'isles' ? TERRAIN.find((x) => x.id === 'isles') : TERRAIN.find((x) => Number(x.value) === cfg.hills);
+  const t = cfg.world && cfg.world !== 'meadow' ? TERRAIN.find((x) => x.id === cfg.world) : TERRAIN.find((x) => Number(x.value) === cfg.hills);
   const ground = t ? t.name : `Hills ${cfg.hills}`;
   return `${ground} · ${wind}`;
 }
 
 // ---------------------------------------------------------------- the testing query string
 
-// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|isles,
+// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|isles|ridgeline,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
 // ?sat=1|2|3 and ?orbiter=1|2|3 (every tank starts with that mod at that
 // level), ?labels=few|some|many (the satellite's labelled cells),

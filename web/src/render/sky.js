@@ -20,6 +20,14 @@ const SPACE = {
   top: new THREE.Color('#03040d'), mid: new THREE.Color('#0b0d26'), horizon: new THREE.Color('#2a1f4d'), bottom: new THREE.Color('#05061a'),
   sun: new THREE.Color('#fff4e6'),
 };
+// The Ridgeline (render/ridgeline.js): a clear dusk, deep blue overhead
+// through violet to a wide warm band at the horizon, and a low sun from the
+// south-west that rakes across the ridges. No clouds: the profile stays crisp.
+const RIDGE = {
+  sun: new THREE.Color('#ffd0a0'), skyLight: new THREE.Color('#a4a8e8'), groundLight: new THREE.Color('#6e4034'),
+  top: new THREE.Color('#141a44'), mid: new THREE.Color('#5b3f7e'), horizon: new THREE.Color('#f39a5c'), bottom: new THREE.Color('#4a2c3c'),
+  dir: new THREE.Vector3(-0.62, 0.36, 0.7).normalize(), band: 0.42, fog: new THREE.Color('#c98670'),
+};
 // A Rain round (render/rain.js): the day's colours lean toward these by the
 // rain's amount, the sun dims and the fog closes in.
 const WET = {
@@ -60,9 +68,10 @@ export class Sky {
           sun: { value: this.sunDir },
           glow: { value: new THREE.Color('#ffd99a') },
           space: { value: 0 },
+          band: { value: 0.16 },
         },
         vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-        fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; uniform float space; varying vec3 vDir;
+        fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 bottom; uniform vec3 sun; uniform vec3 glow; uniform float space; uniform float band; varying vec3 vDir;
           float sh(vec3 p) { p = fract(p * 0.3183 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
           float sn(vec3 p) {
             vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -90,7 +99,7 @@ export class Sky {
             // top made a wide lavender-grey wash, and the camera mostly looks
             // at those first few degrees of sky.
             vec3 c = h > 0.0
-              ? mix(mix(horizon, mid, smoothstep(0.0, 0.16, h)), top, smoothstep(0.08, 0.85, h))
+              ? mix(mix(horizon, mid, smoothstep(0.0, band, h)), top, smoothstep(band * 0.5, 0.85, h))
               : mix(horizon, bottom, pow(-h, 0.4));
             float s = max(dot(vDir, sun), 0.0);
             c += glow * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.25 + pow(s, 3.0) * 0.08);
@@ -116,6 +125,7 @@ export class Sky {
     this.buildClouds(scene);
     this.buildSpace(scene);
     this.space = false;
+    this.ridge = false;
     this.setDay(0);
   }
 
@@ -163,8 +173,23 @@ export class Sky {
     if (on === this.space) return;
     this.space = on;
     this.stars.visible = this.planet.visible = on;
-    this.cloudMesh.visible = !on;
+    this.cloudMesh.visible = !on && !this.ridge;
     if (on) for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
+    const d = this.day;
+    this.day = -1;
+    this.setDay(d < 0 ? 0 : d);
+  }
+
+  // Over a ridgeline (true) or not.
+  setRidge(on) {
+    if (on === this.ridge) return;
+    this.ridge = on;
+    this.cloudMesh.visible = !on && !this.space;
+    if (on) for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
+    // A dusk haze in the distance (the dry fog colour, if a Rain round has greyed it).
+    const fog = this.fogDry || this.fog.color;
+    this.fogMeadow ??= fog.clone();
+    fog.copy(on ? RIDGE.fog : this.fogMeadow);
     const d = this.day;
     this.day = -1;
     this.setDay(d < 0 ? 0 : d);
@@ -235,6 +260,20 @@ export class Sky {
     const U = this.dome.material.uniforms;
     U.space.value = this.space ? 1 : 0;
     U.bottom.value.set(this.space ? SPACE.bottom : '#a39276');
+    U.band.value = this.ridge ? RIDGE.band : 0.16;
+    if (this.ridge && !this.space) {
+      // Dusk all match long: the sun holds low in the south-west.
+      this.sunDir.copy(RIDGE.dir);
+      this.sun.color.copy(RIDGE.sun);
+      this.sun.intensity = 2.5;
+      this.hemi.color.copy(RIDGE.skyLight);
+      this.hemi.groundColor.copy(RIDGE.groundLight);
+      this.hemi.intensity = 0.95;
+      U.top.value.copy(RIDGE.top);
+      U.mid.value.copy(RIDGE.mid);
+      U.bottom.value.copy(RIDGE.bottom);
+      this.horizon.copy(RIDGE.horizon);
+    }
     if (this.space) {
       // The sun still swings round, but space keeps its own colours.
       this.sun.color.copy(SPACE.sun);
@@ -299,7 +338,7 @@ export class Sky {
 
   update(dt, wind) {
     if (this.frozen) return;      // an HDRI sky from the pack review: no clouds
-    if (this.space) {
+    if (this.space || this.ridge) {
       for (let i = 0; i < MAX_CLOUD_SHADOWS; i++) groundShade.clouds.value[i].z = 0;
       return;
     }
