@@ -2556,7 +2556,7 @@ function tick(dt, draw = true) {
     fadeTrails(dt);
     updateTracer();
     sceneryMesh.sync(elapsed);
-    cityView?.update();
+    cityView?.update(sdt);
     napalmView.update(sdt, game);
     updateHud();
     strikeUi.update();

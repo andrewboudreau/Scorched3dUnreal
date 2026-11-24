@@ -1911,12 +1911,21 @@ export class Game {
 
   // A blast in the City wears down the buildings in reach (core/city.js),
   // breaks the street under it and scatters the traffic; any building it
-  // leaves with no hit points comes down. Both go in the ground's ops, so
+  // leaves failing comes down. Chunks that fell drop small heaps of debris
+  // (mounds). All of it goes in the ground's ops, in the order it happens, so
   // another copy of the game brings down the same buildings.
   cityBlast(x, y, z, radius, damage) {
     const town = this.town;
     this.ground?.ops.push(['b', x, y, z, radius, damage]);
-    for (const id of town.blast(x, y, z, radius, damage)) this.collapseBuilding(id);
+    const fallen = town.blast(x, y, z, radius, damage);
+    for (const h of fallen.heaps) {
+      const region = this.terrain.raiseMound(h.x, h.z, h.radius, h.height);
+      this.ground?.ops.push(['m', h.x, h.z, h.radius, h.height]);
+      this.scenery.afterMound(h.x, h.z, h.radius);
+      this.emit({ type: 'terrain', region });
+    }
+    if (fallen.heaps.length) { this.liftBuried(); this.relayScenery(); }
+    for (const id of fallen) this.collapseBuilding(id);
     for (const e of town.drainEvents()) this.emit(e);
   }
 

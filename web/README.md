@@ -390,10 +390,17 @@ second column beside the first. On a phone the players box sits top right.
   twelve floors in the middle and low shops at the edge, with a park at every
   tank's start so it begins in the open with buildings between it and the
   others. Buildings are real: a shell stops at a wall or roof and goes off
-  there, a blast wears them down and takes floors off the top (broken tops,
-  scorched holes in the walls), and one with no hit points left comes down into
-  a heap of rubble, a mound in the ground that shells then pass over. Tanks
-  can't drive or jump through them. The CPUs, the aim arc and the Survey
+  there. Each building is split into chunks: quadrants (two by two, or two by
+  one for a thin one) in bands of one to three floors, each with its own hit
+  points. A blast hurts the chunks near it most, so a hit on a corner takes
+  that corner, a roof shell the top, a big hit punches a hole through the
+  facade, and shells (and the CPUs' shots) go through the gap. What's left
+  over a gap hangs on for up to two bands if its neighbours hold it;
+  otherwise it falls off into the street and leaves a little heap of rubble
+  there. Once two ground quadrants (half the base) are gone, or under a third
+  of the building is left, the whole building comes down into a heap of
+  rubble, a mound in the ground that shells then pass over. Tanks can't drive
+  or jump through buildings. The CPUs, the aim arc and the Survey
   Satellite all see them (`core/city.js`, through `groundContact` in
   `ballistics.js`). Cars, buses and trucks keep to their lanes and wait at
   junctions; a blast near one wrecks and burns it and the rest flee or turn
@@ -691,7 +698,12 @@ second column beside the first. On a phone the players box sits top right.
   else) and the Point Defense turret with its tracers (`groundmods.js`), and the
   City (`cityMesh.js`: merged buildings with canvas window textures, rooftops,
   damage and rubble, instanced street lights and traffic; its streets are
-  painted by `terrainMesh.js`).
+  painted by `terrainMesh.js`). An intact building is one box; once it loses
+  a chunk it is redrawn chunk by chunk, with the inside, broken floor slabs
+  and ragged wall ends showing, and only buildings that changed are rebuilt.
+  `cityFx.js` is the wreckage in motion, for show only: pooled debris blocks
+  that fly, bounce, settle and sink (one InstancedMesh), chunks that topple
+  into the street, and whole buildings that drop and crumble into their rubble.
 - `src/armory.js` is the between-rounds screens (stepper, results, skill tree, kit, armory);
   `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's.
