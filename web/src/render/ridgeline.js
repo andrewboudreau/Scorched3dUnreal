@@ -2,80 +2,112 @@ import * as THREE from 'three';
 import { addFogShade } from './terrainMesh.js';
 import { look } from './timeofday.js';
 
-// The Ridgeline's look (core/ridgeline.js): flat-shaded rock in banded strata.
-// The beds follow the world's height, so a crater wall cuts through them and
-// shows the layers, and the field's four sides are cut-away cliff faces, a
-// diorama of the range in cross-section. The undisturbed surface is the same
-// rock under a weathered crust: paler toward the peaks, its bands softened.
+// The Ridgeline's look (core/ridgeline.js): sandstone in a few broad, soft
+// strata. The beds follow the world's height (five of them, bottom to top: deep
+// rust, warm sandstone, a cream band, terracotta, pale cap rock) with gently
+// wavy edges, so a crater wall cuts through them and shows the layers, and the
+// field's four sides are cut-away cliff faces, a diorama of the range in
+// cross-section.
+//
+// Slope decides how much shows. Steep faces wear the strata; flat tops and
+// ledges (where the tanks stand) lie under a pale dust; ground a blast has cut
+// or heaped, and the slopes that slumped from it, read as loose light sand.
+// Colour carries no per-vertex noise: the beds are smooth and the only grain is
+// a faint lamination. Far rock and the low floor fade into the scene's haze, so
+// the look follows each time of day (render/sky.js sets the fog colour).
 //
 // TerrainMesh swaps these materials in for a ridgeline field (`useRidge`) and
 // writes a `cut` attribute per vertex: how far the ground now lies below its
 // crust (negative where dirt was heaped on it). Its vertex colours carry only
-// the scorch and the relief shading, which multiply the rock's colour.
+// the scorch and a little relief shading, which multiply the rock's colour.
 
-// The beds, bottom to top of one cycle, and the dark rock they sink into.
-const BEDS = ['#a2583a', '#e2b57e', '#7c4636', '#d0915c', '#b8744b', '#efd29e', '#8c5446', '#c98454'];
-const DEEP = '#3a2a3c';
-const CRUST_LOW = '#b06848';    // the weathered surface, low in the valleys
-const CRUST_HIGH = '#f1d3a0';   // and high on the peaks
-const LOOSE = '#9a6a4a';        // dirt heaped by a Mound
+const BED_RUST = '#8f4630';    // the base
+const BED_SAND = '#c97f4e';    // warm sandstone
+const BED_CREAM = '#e8c28a';   // the cream band
+const BED_TERRA = '#b4623e';   // terracotta
+const BED_CAP = '#dfba88';     // pale cap rock on the peaks
+const DUST = '#d3a874';        // the dust on flat tops and ledges
+const LOOSE = '#e4c08c';       // sand a blast has cut or heaped
+const DEEP = '#3a2430';        // the rock sinking into the dark
 
 const uniforms = {
-  uBeds: { value: BEDS.map((c) => new THREE.Color(c)) },
-  uDeep: { value: new THREE.Color(DEEP) },
-  uCrustLo: { value: new THREE.Color(CRUST_LOW) },
-  uCrustHi: { value: new THREE.Color(CRUST_HIGH) },
+  uRust: { value: new THREE.Color(BED_RUST) },
+  uSand: { value: new THREE.Color(BED_SAND) },
+  uCream: { value: new THREE.Color(BED_CREAM) },
+  uTerra: { value: new THREE.Color(BED_TERRA) },
+  uCap: { value: new THREE.Color(BED_CAP) },
+  uDust: { value: new THREE.Color(DUST) },
   uLoose: { value: new THREE.Color(LOOSE) },
+  uDeep: { value: new THREE.Color(DEEP) },
   uLit: look.lit,   // 0 by day, 1 at night: the rock cools and darkens (render/timeofday.js)
 };
 
-// The colour of the rock at world point p: beds about 3 m thick, of uneven
-// thickness, dipping gently across the field, with a dark seam under each.
+// The colour of the rock at world point p: broad beds with soft, slightly wavy
+// edges (a low swell across the field, no fine stripes).
 const STRATA = `
-uniform vec3 uBeds[8];
-uniform vec3 uDeep;
-uniform vec3 uCrustLo;
-uniform vec3 uCrustHi;
+uniform vec3 uRust;
+uniform vec3 uSand;
+uniform vec3 uCream;
+uniform vec3 uTerra;
+uniform vec3 uCap;
+uniform vec3 uDust;
 uniform vec3 uLoose;
+uniform vec3 uDeep;
 uniform float uLit;
 varying vec3 vRidgeP;
 vec3 strataAt(vec3 p) {
-  float y = p.y + sin(p.x * 0.019 + p.z * 0.011) * 2.2 + sin(p.x * 0.061 - p.z * 0.037) * 0.7;
-  y += 2.2 * sin(y * 0.093);
-  float b = y / 3.3;
-  float f = fract(b);
-  int i = int(mod(floor(b), 8.0));
-  vec3 c = uBeds[i];
-  c *= 0.78 + 0.22 * smoothstep(0.0, 0.1, f);
-  return mix(c, uDeep, clamp((8.0 - p.y) / 70.0, 0.0, 0.8));
+  float y = p.y + sin(p.x * 0.013 + p.z * 0.009) * 3.4 + sin(p.x * 0.031 - p.z * 0.023) * 1.1;
+  vec3 c = uRust;
+  c = mix(c, uSand, smoothstep(14.0, 17.5, y));
+  c = mix(c, uCream, smoothstep(34.0, 37.0, y));
+  c = mix(c, uTerra, smoothstep(48.0, 51.0, y));
+  c = mix(c, uCap, smoothstep(70.0, 73.0, y));
+  c *= 0.97 + 0.03 * sin(y * 1.7);   // a faint lamination, the only grain
+  return c;
 }`;
 
 function inject(material, { ground }) {
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vRidgeP;${ground ? '\nattribute float cut;\nvarying float vCut;' : ''}`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvRidgeP = (modelMatrix * vec4(transformed, 1.0)).xyz;${ground ? '\nvCut = cut;' : ''}`);
+      .replace('#include <common>', `#include <common>\nvarying vec3 vRidgeP;${ground ? '\nattribute float cut;\nvarying float vCut;\nvarying vec3 vRidgeN;' : ''}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvRidgeP = (modelMatrix * vec4(transformed, 1.0)).xyz;${ground ? '\nvCut = cut;\nvRidgeN = mat3(modelMatrix) * normal;' : ''}`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${STRATA}${ground ? '\nvarying float vCut;' : ''}`)
+      .replace('#include <common>', `#include <common>\n${STRATA}${ground ? '\nvarying float vCut;\nvarying vec3 vRidgeN;' : ''}`)
       .replace('#include <color_fragment>', ground ? `#include <color_fragment>
 {
   vec3 rock = strataAt(vRidgeP);
-  // The crust: the same beds, softened and paler toward the peaks.
-  vec3 crust = mix(rock, mix(uCrustLo, uCrustHi, smoothstep(5.0, 120.0, vRidgeP.y)), 0.62);
-  vec3 c = mix(crust, rock, smoothstep(0.35, 1.4, vCut));
-  c = mix(c, uLoose, smoothstep(0.3, 1.2, -vCut) * 0.8);
-  // The low floor past the band's flanks sinks into shadow, like a drop into the void.
-  c *= mix(0.3, 1.0, smoothstep(-42.0, -4.0, vRidgeP.y));
-  diffuseColor.rgb *= c;
+  // Steep faces show the beds; flat tops and ledges lie under pale dust that
+  // keeps a hint of the bed below.
+  float ny = clamp(normalize(vRidgeN).y, 0.0, 1.0);
+  float steep = 1.0 - smoothstep(0.55, 0.92, ny);
+  vec3 dust = mix(uDust, rock, 0.18);
+  vec3 c = mix(dust, rock, steep);
+  // Ground a blast cut or heaped, and the slopes that slumped from it: loose
+  // light sand, except on a crater wall too steep to hold any.
+  float loose = smoothstep(0.005, 0.12, abs(vCut)) * smoothstep(0.35, 0.62, ny);
+  c = mix(c, uLoose, loose * 0.7);
+  // Deep down the rock sinks into the haze's dark: a clean gradient into the floor.
+  vec3 deep = mix(uDeep, fogColor * 0.25, 0.3);
+  c = mix(deep, c, smoothstep(-44.0, -2.0, vRidgeP.y));
+  diffuseColor.rgb *= c * 0.8;
 }` : `#include <color_fragment>
-diffuseColor.rgb *= strataAt(vRidgeP);`)
-      // A share of the rock's own colour as glow, so beds in shadow (a crater's
-      // far wall, a cliff face turned from the sun) keep their bands.
+{
+  vec3 deep = mix(uDeep, fogColor * 0.25, 0.3);
+  diffuseColor.rgb *= 0.8 * mix(deep, strataAt(vRidgeP), smoothstep(-44.0, -2.0, vRidgeP.y));
+}`)
+      // A share of the rock's own colour as glow, so faces turned from the sun
+      // keep their colour, not a flat shadow.
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 float night = smoothstep(0.8, 1.0, uLit);   // only Night: a Dusk ridge keeps its own red look
-totalEmissiveRadiance += diffuseColor.rgb * 0.16 * (1.0 - 0.4 * night);
-diffuseColor.rgb *= mix(vec3(1.0), vec3(0.66, 0.74, 1.0), night);`);
+totalEmissiveRadiance += diffuseColor.rgb * 0.18 * (1.0 - 0.4 * night);
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.8, 0.88, 1.12), night);`)
+      // Far rock fades toward the sky: haze that starts well inside the scene's fog.
+      .replace('#include <fog_fragment>', `{
+  float haze = smoothstep(400.0, 1500.0, vFogDepth) * 0.3 + smoothstep(14.0, -26.0, vRidgeP.y) * 0.18;
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, haze);
+}
+#include <fog_fragment>`);
   };
   addFogShade(material, ground ? 'ridge-ground' : 'ridge-cliff');
 }
@@ -84,7 +116,7 @@ let shared = null;
 // The two materials, made once and shared by every ridgeline match.
 export function ridgeMaterials() {
   if (shared) return shared;
-  const ground = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.96, metalness: 0 });
+  const ground = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: false, roughness: 0.96, metalness: 0 });
   inject(ground, { ground: true });
   const cliff = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 1, metalness: 0, side: THREE.DoubleSide });
   inject(cliff, { ground: false });
@@ -93,13 +125,13 @@ export function ridgeMaterials() {
 }
 
 // The per-vertex values a TerrainMesh writes for a ridgeline field: a grey
-// that carries the scorch and the relief shading (`hollow`: how far the vertex
-// sits below its neighbours), and the cut below the crust. A burn shows less
-// on cut rock, so a crater's walls keep their bands.
+// that carries the scorch and a little relief shading (`hollow`: how far the
+// vertex sits below its neighbours), and the cut below the crust. A burn shows
+// less on cut rock, so a crater's walls keep their bands.
 export function ridgeShade(field, k, hollow) {
   const cut = field.crust ? field.crust[k] - field.heights[k] : 0;
   const burn = Math.min(0.7, field.scorch[k] * (cut > 0.5 ? 0.25 : 0.45));
-  return Math.min(1.08, Math.max(0.8, 1 - hollow * 0.12)) * (1 - burn);
+  return Math.min(1.04, Math.max(0.9, 1 - hollow * 0.05)) * (1 - burn);
 }
 export function ridgeCut(field, k) {
   const cut = field.crust ? field.crust[k] - field.heights[k] : 0;
@@ -117,12 +149,28 @@ export function overviewGoal(game, camera) {
   return new THREE.Vector3(0, d * 0.1, d);
 }
 
+// The far floor of a ridgeline match: unlit, dark under the range (a tint of
+// the scene's fog colour, so it follows the time of day) and clearing to the
+// haze with distance, a clean gradient into the horizon.
+let floorMat = null;
+function ridgeFloorMaterial() {
+  if (floorMat) return floorMat;
+  floorMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+  floorMat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <color_fragment>', `#include <color_fragment>
+diffuseColor.rgb = fogColor * vec3(0.2, 0.14, 0.15);`)
+      .replace('#include <fog_fragment>', 'gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, smoothstep(300.0, 3600.0, vFogDepth));');
+  };
+  floorMat.customProgramCacheKey = () => 'ridge-floor';
+  return floorMat;
+}
+
 // A ridgeline match in the sky and on the far floor (or back to the meadows'
 // with `on` false).
-const FLOOR_RIDGE = new THREE.Color('#3c2a32');
 export function setRidgeWorld(on, { sky, floor }) {
   sky.setRidge?.(on);
   if (!floor) return;
-  floor.userData.meadow ??= floor.material.color.clone();
-  floor.material.color.copy(on ? FLOOR_RIDGE : floor.userData.meadow);
+  floor.userData.meadow ??= floor.material;
+  floor.material = on ? ridgeFloorMaterial() : floor.userData.meadow;
 }
