@@ -90,6 +90,12 @@ export const WEAPONS = [
     impact: [{ type: 'warp' }],
   },
   {
+    // The Decoy Beacon's blink (core/mods.js): a Teleport that leaves a decoy
+    // where the tank stood. Fired by deploying the decoy, never from the rack.
+    id: 'blink', name: 'Blink', hidden: true,
+    impact: [{ type: 'warp' }],
+  },
+  {
     id: 'scout', name: 'Scout Missile', price: 50, bundle: 2, fog: true,
     desc: 'Fog of war only. No damage: lights up everything within 120 m of where it lands, for you, for your next two shots.',
     impact: [{ type: 'scout', radius: 120, turns: 2 }],

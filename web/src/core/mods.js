@@ -18,12 +18,20 @@
 //     hp, maxHp,   what it can take before it breaks up
 //     turns,       lifetime left once up: the owner's turns (volleys), across rounds
 //     fresh,       went up this turn, which does not count against `turns`
-//     x, y, z,     where a mod that hangs still sits (the satellite); an
-//                  orbiter has none, it moves with the game clock (orbitPoints)
+//     x, y, z,     where a mod that hangs still sits (the satellite) or stands
+//                  (the decoy); an orbiter has none, it moves with the game
+//                  clock (orbitPoints), and Point Defense rides beside its
+//                  tank (turretAt)
+//     hull, yaw, elev   the decoy: the pose of the tank it copies
+//     charges,     Point Defense: shells it can still shoot down this round
 //   }
 //
 // Deploying a mod is the owner's whole action for that turn: no shot (in a
-// volley it is the locked-in plan, `{ deploy: id }`). In return it persists:
+// volley it is the locked-in plan, `{ deploy: id }`). An `aimed` mod (the
+// decoy) is deployed by firing: the plan carries the aim too
+// (`{ deploy: 'decoy', yaw, elev, power }`), the tank fires a blink round,
+// and the mod goes up where the tank stood once the round lands it
+// (game.js leaveDecoy). In return it persists:
 // an up mod carries into the next round (moved over its owner's new spot)
 // and stays until it is shot down, its tank is destroyed, or its turns run
 // out. Anything else the tank owns is fitted fresh each round, 'ready'. A
@@ -35,12 +43,20 @@
 // it directly (weapons.js `air`). A tank's own fire never touches its own mods.
 //
 // Families (docs/design-guide.md): 'recon' beats 'defense' beats 'jamming'
-// beats 'recon'; Flak answers anything in the sky. Status effects (Jammed,
+// beats 'recon'; Flak answers anything in the sky. 'deception' (the decoy)
+// sits outside the triangle: it beats being ranged, recon included.
+// A tank holds at most MOD_BAYS mods: with that many, the draft offers no
+// more new-mod cards, only levels for the ones it has (game.perkFits).
+// Status effects (Jammed,
 // Spotted, Uplinked...) will go on `p.status` as { kind, source, strength,
 // turns } and could be listed on a mod as `applies`; nothing uses them yet.
 
 import { PERK_BY_ID, perkSum } from './perks.js';
 import { SURVEY } from './survey.js';
+import { TANK } from './tank.js';
+
+// How many mods one tank can own.
+export const MOD_BAYS = 2;
 
 // The Gravity Orbiter's levels. One or two small wells circle the owner's
 // tank `radius` m out and `height` m up, `speed` rad/s, bobbing `bob` m. Each
@@ -59,6 +75,32 @@ export const ORBIT = [
 // The satellite, deployed: it hangs `altitude` m over its owner's ground,
 // `lean` m toward the middle of the field, and a shell within `radius` hits it.
 export const SKY = { altitude: 70, lean: 14, radius: 5 };
+
+// The Decoy Beacon. The decoy is a tank-sized target (TANK.hitRadius) where
+// its owner stood. From level `mirror` its label shows its owner's hit
+// points; from level `boom` it goes off when it fizzles (its hit points run
+// out): a blast of `fizzle`, credited to its owner. It is a trick for one
+// spot, so it ends with the round (a fresh one is ready next round). CPUs
+// fall for it `fool` of the time when they can see it, and for a level 1
+// decoy (whose label gives it away) `plain` times as often.
+export const DECOY = {
+  mirror: 2, boom: 3,
+  fizzle: { radius: 10, damage: 25, depth: 0.35 },
+  fool: { easy: 0.7, normal: 0.4, hard: 0.15 }, plain: 0.6,
+};
+
+// Point Defense, by level: it shoots down the first enemy shell coming down
+// within `radius` m of its owner (the middle of the tank's hit sphere), up to
+// `charges` a round, and a split shell's fragments too with `frags`. The
+// turret sits `TURRET.side` m beside its tank and goes where the tank goes; a
+// shell within `TURRET.r` of it hits it.
+export const POINTDEF = [
+  null,
+  { radius: 18, charges: 1, frags: false },
+  { radius: 18, charges: 2, frags: false },
+  { radius: 26, charges: 2, frags: true },
+];
+export const TURRET = { side: 5.5, height: 1.1, r: 1.8 };
 
 // Pay for shooting down an enemy mod.
 export const MOD_PAY = 60;
@@ -79,6 +121,22 @@ export const MODS = [
     turns: [5, 6, 7],          // its battery
     levels: ['no wind', 'with wind', 'more labels'],
     desc: 'Deploy it into the sky over your area: it projects a grid of cells over the enemy, some labelled with the turret and power that land there. Level 2 counts the wind, moons and enemy orbiters; level 3 labels more. Deploying it takes your turn; it stays up into later rounds until it is shot down (Flak is best) or its battery runs out, and then a new one is ready on your next turn.',
+  },
+  {
+    id: 'decoy', name: 'Decoy Beacon', tag: 'DCY', family: 'deception', maxLevel: 3, aimed: true, roundOnly: true,
+    prices: [150, 190, 230],   // level 1, 2, 3, each on top of the one before
+    hp: [20, 35, 35],
+    turns: [4, 5, 5],
+    levels: ['blink away, leave a decoy (20 hp)', 'takes 35 and shows your hit points', 'goes off when it fizzles: 25 damage'],
+    desc: 'Fire it like a shot: your tank blinks to where it lands, and a decoy of your tank stays where you were to take the shots aimed at you. It fizzles after 20 damage (35 from level 2, which also shows your hit points); at level 3 it goes off when it fizzles. Deploying it takes your turn; it lasts until it fizzles, wears out or the round ends.',
+  },
+  {
+    id: 'pointdef', name: 'Point Defense', tag: 'PD', family: 'defense', maxLevel: 3,
+    prices: [170, 210, 250],
+    hp: [25, 30, 35],
+    turns: [5, 6, 7],
+    levels: ['stops 1 enemy shell a round, 18 m', 'stops 2 a round', '26 m, and split-shell fragments too'],
+    desc: 'A small turret beside your tank shoots down the first enemy shell coming down within 18 m of you, once a round (twice from level 2; at level 3 it reaches 26 m and stops fragments too). Scatter, Flak bursts and Rollers get past it. Deploying it takes your turn; it stays up into later rounds until it is shot down or wears out.',
   },
 ];
 
@@ -168,21 +226,30 @@ export function fitMods(lab, p) {
     const level = modLevel(lab, p, def.id);
     const had = p.mods[def.id];
     if (!level && !had) continue;
-    if (level && had?.state === 'up') {
+    if (level && had?.state === 'up' && !def.roundOnly) {
       const maxHp = healthAt(p, def, level);
       had.hp = Math.max(1, had.hp + maxHp - had.maxHp);
       had.maxHp = maxHp;
       had.level = level;
+      if (def.id === 'pointdef') had.charges = POINTDEF[level].charges;   // they refill every round
       continue;
     }
-    const hp = level ? healthAt(p, def, level) : 0;
-    p.mods[def.id] = {
-      bought: had?.bought || 0, level,
-      state: level ? 'ready' : 'none',
-      hp, maxHp: hp,
-      turns: level ? def.turns[level - 1] + perkSum(p, 'modTurns') : 0,
-    };
+    p.mods[def.id] = level ? freshMod(p, def, level, had?.bought)
+      : { bought: had?.bought || 0, level: 0, state: 'none', hp: 0, maxHp: 0, turns: 0 };
   }
+}
+
+// A whole new mod of `def` at `level`, ready to deploy.
+function freshMod(p, def, level, bought = 0) {
+  const hp = healthAt(p, def, level);
+  const m = { bought: bought || 0, level, state: 'ready', hp, maxHp: hp, turns: def.turns[level - 1] + perkSum(p, 'modTurns') };
+  if (def.id === 'pointdef') m.charges = POINTDEF[level].charges;
+  return m;
+}
+
+// How many mods `p` owns this match (at any level): what fills its MOD_BAYS.
+export function modsOwned(lab, p) {
+  return MODS.filter((d) => modLevel(lab, p, d.id) > 0).length;
 }
 
 // The start of `p`'s turn (or of a volley's planning): a mod that was shot
@@ -197,8 +264,7 @@ export function refitMods(lab, p) {
     if (!m || (m.state !== 'down' && m.state !== 'spent')) continue;
     const level = modLevel(lab, p, def.id);
     if (!level) continue;
-    const hp = healthAt(p, def, level);
-    p.mods[def.id] = { bought: m.bought || 0, level, state: 'ready', hp, maxHp: hp, turns: def.turns[level - 1] + perkSum(p, 'modTurns') };
+    p.mods[def.id] = freshMod(p, def, level, m.bought);
     out.push(def.id);
   }
   return out;
@@ -227,13 +293,18 @@ export function modUp(p, id) {
 }
 
 // Put a ready mod up (the game spends the owner's turn on it). `ground` as
-// for anchorMod. Returns whether it went up.
-export function deployMod(p, id, ground = () => null) {
+// for anchorMod. A decoy stands at `at` ({ x, y, z, hull, yaw, elev }: the
+// tank it copies, where it stood; `p` itself without it). Returns whether it went up.
+export function deployMod(p, id, ground = () => null, at = null) {
   const m = p.mods?.[id];
   if (!m || m.state !== 'ready' || !(m.level > 0)) return false;
   m.state = 'up';
   m.fresh = true;   // the turn it goes up on does not count against its lifetime
   anchorMod(p, id, ground);
+  if (id === 'decoy') {
+    const t = at || p;
+    Object.assign(m, { x: t.x, y: t.y, z: t.z, hull: t.hull ?? 0, yaw: t.yaw ?? 0, elev: t.elev ?? 45 });
+  }
   return true;
 }
 
@@ -295,8 +366,28 @@ export function modWells(players, t, except = null) {
   return out;
 }
 
+// Where `p`'s Point Defense turret stands: beside the tank, on a side its id
+// picks. A pure function of the tank, so it rides along when the tank moves.
+export function turretAt(p) {
+  const a = p.id * 2.399963 + 0.8;
+  return { x: p.x + Math.cos(a) * TURRET.side, y: p.y + TURRET.height, z: p.z + Math.sin(a) * TURRET.side };
+}
+
+// Where one of `p`'s mods is, for effects ([x, y, z]), or null for the
+// orbiter (it is in more than one place).
+export function modPos(p, id) {
+  const m = p.mods?.[id];
+  if (!m) return null;
+  if (id === 'satellite') return [m.x, m.y, m.z];
+  if (id === 'decoy') return [m.x, m.y + TANK.hitCenterY, m.z];
+  if (id === 'pointdef') { const q = turretAt(p); return [q.x, q.y, q.z]; }
+  return null;
+}
+
 // Everything deployed that a shell can hit, at time `t`: { owner, mod, x, y, z, r }.
-// An orbiter at level 3 is two spheres, both the same mod.
+// An orbiter at level 3 is two spheres, both the same mod. Mods on the
+// ground (the decoy, Point Defense) are marked `ground`: Flak's air burst
+// passes them by, as it passes tanks by.
 export function modTargets(players, t) {
   const out = [];
   for (const p of players) {
@@ -308,11 +399,32 @@ export function modTargets(players, t) {
       const m = p.mods.satellite;
       out.push({ owner: p.id, mod: 'satellite', x: m.x, y: m.y, z: m.z, r: SKY.radius });
     }
+    if (modUp(p, 'decoy')) {
+      const m = p.mods.decoy;
+      out.push({ owner: p.id, mod: 'decoy', x: m.x, y: m.y + TANK.hitCenterY, z: m.z, r: TANK.hitRadius, ground: true });
+    }
+    if (modUp(p, 'pointdef')) out.push({ owner: p.id, mod: 'pointdef', ...turretAt(p), r: TURRET.r, ground: true });
   }
   return out;
 }
 
 // Does `p` have any up mod at all? (Cheap check for the hot loop.)
 export function anyUp(players) {
-  return players.some((p) => p.mods && p.alive !== false && (p.mods.orbiter?.state === 'up' || p.mods.satellite?.state === 'up'));
+  return players.some((p) => p.mods && p.alive !== false && MODS.some((d) => p.mods[d.id]?.state === 'up'));
+}
+
+// ---------- Point Defense ----------
+
+// Would `p`'s Point Defense shoot down shell `pr` (of weapon `w`) now? An
+// enemy shell that would blast where it lands (not a probe, Teleport, Mound,
+// Scout or Roller), on its way down within reach of `p`, with a charge left;
+// a fragment (`pr.frag`) only at the level that stops them.
+export function interceptsShell(p, pr, w) {
+  if (!modUp(p, 'pointdef') || pr.owner === p.id || pr.probe || !(pr.vel[1] < 0)) return false;
+  const m = p.mods.pointdef;
+  const lv = POINTDEF[m.level];
+  if (!lv || !(m.charges > 0) || (pr.frag && !lv.frags)) return false;
+  if (!(w.impact || []).some((x) => x.type === 'blast')) return false;
+  const [x, y, z] = pr.pos;
+  return (x - p.x) ** 2 + (y - p.y - TANK.hitCenterY) ** 2 + (z - p.z) ** 2 <= lv.radius * lv.radius;
 }

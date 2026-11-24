@@ -289,6 +289,7 @@ body.net-guest #setup .row-buttons, body.net-guest #setup .options, body.net-gue
 .net-private input { width: auto; }
 .tank-label.ghost { opacity: .8; font-style: italic; }
 .tank-label.ghost small { display: block; font-size: 11px; color: #9aa6b2; font-style: normal; white-space: nowrap; }
+.tank-label .decoy-tag { display: block; font-size: 10px; color: #7fe6ff; font-style: italic; }
 
 /* Touch: on-screen controls (src/touch.js), only with body.touch (coarse pointer or ?mobile=1). */
 body.touch { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }

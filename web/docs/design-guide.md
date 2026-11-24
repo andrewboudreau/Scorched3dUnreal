@@ -166,8 +166,8 @@ Each level adds something you can name, not only bigger numbers.
 | --- | --- | --- | --- | --- |
 | Gravity Orbiter | Defense | one well bends enemy shells | stronger and faster | two wells: a three-body slingshot |
 | Survey Satellite | Recon | aim labels, no wind | labels count wind, moons and orbiters | more labels |
-| **Decoy Beacon** (new) | Deception | Blink: fire it like a shot and your tank warps where it lands; a decoy of your tank stays where you were and fizzles after 20 damage | the decoy takes 35 and shows your hit points | when it fizzles it goes off: a 25-damage blast that hurts whoever is near |
-| **Point Defense** (new) | Defense | shoots down the first enemy shell coming down within 18 m, once a round | twice a round | 26 m, and it also stops a split shell's fragments |
+| **Decoy Beacon** | Deception | Blink: fire it like a shot and your tank warps where it lands; a decoy of your tank stays where you were and fizzles after 20 damage | the decoy takes 35 and shows your hit points | when it fizzles it goes off: a 25-damage blast that hurts whoever is near |
+| **Point Defense** | Defense | shoots down the first enemy shell coming down within 18 m, once a round | twice a round | 26 m, and it also stops a split shell's fragments |
 
 The Decoy is the answer to being ranged: when an enemy has your distance
 dialled in, blink and leave the decoy to eat the shot. CPUs aim at the decoy
@@ -239,8 +239,8 @@ If it beats everything, it's a perk number, not a mod.
 | --- | --- | --- | --- |
 | Survey Satellite (L1–3) | Recon | Built as a mod (#10): from perks (Sat Recon, then Sharper Optics), deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense). CPUs don't use it |
 | Gravity Orbiter (L1–3) | Defense | Built (#10): from perks (Orbital Mechanic, then Tighter Orbit), 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt. CPUs misread it, more at higher levels |
-| Point Defense (was Missile Defense) | Defense | Being built | Shoots down the first enemy shell coming down near you; charges per round (see "Mods and their levels") |
-| Decoy Beacon | Deception | Being built | Blink away and leave a decoy that soaks a ranged shot (see "Mods and their levels") |
+| Point Defense (was Missile Defense) | Defense | Built: from perks (Close-In Gunner, then Twin Feeds), 25–35 hp, lasts 5–7 turns | Shoots down the first enemy shell coming down near you; charges refill each round; Flak and Rollers pass. CPUs answer it with Scatter, Flak and Rollers (see "Mods and their levels") |
+| Decoy Beacon | Deception | Built: from perks (Smoke and Mirrors, then Hard Light), 20–35 hp, lasts the round at most | Blink away and leave a decoy that soaks a ranged shot; CPUs fall for it on the seeded rng (see "Mods and their levels"). At most two mods a tank (mod bays) |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
 | Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |
 | Comms uplink ("satcom") | Recon (support) | Idea | Buffs your other mods (Uplinked); could share recon with an ally in team play |

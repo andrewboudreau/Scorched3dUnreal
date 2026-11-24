@@ -223,7 +223,7 @@ export class TouchControls {
     // (src/strike.js words it for a Double Strike: queue shot 1, both shots, or a pass while reloading.)
     const hint = document.getElementById('help-fire')?.textContent || '';
     const lock = /lock/.test(hint);
-    set('fire', this.el.fire, /pass/.test(hint) ? 'PASS' : /queue/.test(hint) ? 'SHOT 1' : /both/.test(hint) ? (lock ? 'LOCK ×2' : 'FIRE ×2') : lock ? 'LOCK IN' : 'FIRE');
+    set('fire', this.el.fire, /pass/.test(hint) ? 'PASS' : /blink/.test(hint) ? 'BLINK' : /queue/.test(hint) ? 'SHOT 1' : /both/.test(hint) ? (lock ? 'LOCK ×2' : 'FIRE ×2') : lock ? 'LOCK IN' : 'FIRE');
     this.el.fire.classList.toggle('pass', /pass/.test(hint));
     set('weapon', this.el.weapon, document.getElementById('ro-weapon')?.textContent || 'Weapon');
     const on = this.online();

@@ -36,6 +36,8 @@ page loads and override both Random and what Custom match remembers.
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
+| `decoy` | `1`, `2`, `3` | Every tank starts with a Decoy Beacon at that level. |
+| `pointdef` | `1`, `2`, `3` | Every tank starts with Point Defense at that level. |
 | `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
 | `modifier` | a round modifier id: `rain`, `lowgrav`, `gale`, `calm`, `soft`, `goldrush`, `fulltanks`, `clear` | Every round is that modifier. |
 
@@ -362,14 +364,14 @@ second column beside the first. On a phone the players box sits top right.
   deep space: stars all round, a nebula and a ringed planet.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
   they come from the **perk draft** between rounds. An unlock card (Orbital
-  Mechanic, Sat Recon) gives you one at level 1; once you have it, level-up
-  cards (Tighter Orbit, Sharper Optics) raise it a level at a time to level 3.
+  Mechanic, Sat Recon, Smoke and Mirrors, Close-In Gunner) gives you one at level 1; once you have it, level-up
+  cards (Tighter Orbit, Sharper Optics, Hard Light, Twin Feeds) raise it a level at a time to level 3.
   A draft holds at most one mod card, more often while you own no mod, and a
   tank takes at most four mod levels from perks in a match. Unticking a mod's
   cards under Custom match > Perks turns it off; `?sat=` and `?orbiter=` hand
   everyone one for testing (see Testing query params). A mod you own is *ready*.
   Deploying it is your whole turn: on a phone, tap its button at the top of
-  the Fire column (ORB / SAT) and tap again to confirm; on a desktop press B
+  the Fire column (ORB / SAT / DCY / PD) and tap again to confirm; on a desktop press B
   twice, or use the button in the player card. In a volley, deploying is the
   action you lock in, and it goes up when the volley fires. Once up, a mod
   has hit points and a lifetime counted in your turns, and it stays up
@@ -421,11 +423,43 @@ second column beside the first. On a phone the players box sits top right.
   now and then), and while it is up its first shots carry less of their
   error: a third less at level 1 (less still in the wind), more at levels 2
   and 3. Easy reads it about half as well.
+- **Decoy Beacon** (mod, family *deception*; from perks; 20 hp, 35 from
+  level 2; lasts 4 or 5 turns, never past the round). Deploying it is aimed:
+  arm it (DCY on a phone, B on a desktop), aim, and Fire (it reads BLINK)
+  sends a hidden blink round. Your tank warps to where it lands, and a decoy
+  stays where you stood: a tank-sized target that takes shells and blasts
+  (your own fire passes it by) and fizzles when its hit points run out. You
+  see it as a flickering hologram tagged "decoy"; enemies see a tank with
+  your name over it, and from level 2 that label shows your real hit points.
+  At level 3 it goes off when it fizzles: a 25-damage, 10 m blast credited
+  to you. A blink that is lost (off the field, into the void) spends the
+  turn and leaves the decoy ready. In a volley the blink's aim is part of
+  the plan (`{ deploy: 'decoy', yaw, elev, power }`), so every screen plays
+  it the same. CPUs fall for it some of the time (Easy often, Hard rarely,
+  less against a level 1 decoy), on the seeded rng: they aim, range and
+  remember at the decoy as if it were you. A CPU hit from 60 m or more
+  blinks away with its decoy (Easy only half the time), a shorter hop than
+  a Teleport.
+- **Point Defense** (mod, family *defense*; from perks; 25 to 35 hp; lasts
+  5, 6 or 7 turns). A turret beside your tank shoots down the first enemy
+  shell coming down within its reach of you: an air burst, no crater, no
+  damage. Level 1 reaches 18 m with one charge a round, level 2 two charges,
+  level 3 reaches 26 m and stops fragments too (Scatter's bomblets,
+  Shrapnel, Flak's pieces); below level 3 fragments get through. Charges
+  refill every round. It never touches Rollers or Flak, your own shells, or
+  a shell still climbing. Blasts hurt it; Flak's air burst does not (it sits
+  on the ground). CPUs that see it reach for Scatter, Flak and Rollers over
+  single heavy shells, and put their own up against an enemy carrying
+  Breachers or Guided Missiles, or once they are being hit.
+- **Two mod bays.** A tank holds at most two mods (`MOD_BAYS` in
+  `core/mods.js`): once you own two, the draft offers no more unlock cards,
+  only level-ups. (The armory's mod section is unchanged.)
 - **Mod rules in the config.** The old Lab menu is gone; the core still
-  reads `lab` in the match config (`satellite` / `orbiter`: `perk`, `shop`,
-  `all` or `off`, with a level, and the satellite's `labels`), so old configs
-  and tests keep working. The launch screen only ever sends `perk` (or `all`
-  from `?sat=` / `?orbiter=`), with labels `some` unless `?labels=` says
+  reads `lab` in the match config (`satellite` / `orbiter` / `decoy` /
+  `pointdef`: `perk`, `shop`, `all` or `off`, with a level, and the
+  satellite's `labels`), so old configs and tests keep working. The launch
+  screen only ever sends `perk` (or `all` from `?sat=` / `?orbiter=` /
+  `?decoy=` / `?pointdef=`), with labels `some` unless `?labels=` says
   otherwise. An old saved Custom with the Lab Off unticks that mod's cards.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
@@ -496,6 +530,10 @@ second column beside the first. On a phone the players box sits top right.
   | Tighter Orbit | your Gravity Orbiter goes up a level (taken up to twice) |
   | Sat Recon | gain a Survey Satellite at level 1 (only offered if you have none) |
   | Sharper Optics | your Survey Satellite goes up a level (taken up to twice) |
+  | Smoke and Mirrors | gain a Decoy Beacon at level 1 (only offered if you have none and a free mod bay) |
+  | Hard Light | your Decoy Beacon goes up a level (taken up to twice) |
+  | Close-In Gunner | gain Point Defense at level 1 (only offered if you have none and a free mod bay) |
+  | Twin Feeds | your Point Defense goes up a level (taken up to twice) |
   | Long-Life Cells | your mods last 2 turns longer and take 25% more damage (only if you own one) |
 | Double Strike | from round 3's draft on: queue two shots in one turn (see below) |
 
@@ -552,7 +590,9 @@ second column beside the first. On a phone the players box sits top right.
   (`gravityLines.js`, driven by the pure `core/gravityPull.js`), the flocks
   (`birds.js`), the isles' passing craft (`craft.js`), the Survey Satellite's
   projected cell patch and labels (`satellite.js`) and the deployed mods:
-  orbiter orbs with their trails, satellites, break-ups (`mods.js`).
+  orbiter orbs with their trails, satellites, break-ups (`mods.js`), and the
+  mods on the ground: the decoy (a hologram to its owner, a tank to everyone
+  else) and the Point Defense turret with its tracers (`groundmods.js`).
 - `src/modsui.js` is the mods' deploy buttons, status chips and armory section;
   `src/strike.js` is Double Strike's.
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
