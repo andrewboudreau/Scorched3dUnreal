@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity } from './core/ballistics.js';
+import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, EDGE_KINDS } from './core/ballistics.js';
 import { muzzleOrigin } from './core/tank.js';
 
 // Two aiming aids.
@@ -49,6 +49,15 @@ export class AimArc {
     this.line.frustumCulled = false;
     this.line.renderOrder = 5;
     this.line.visible = false;
+    // The climb after it wraps round the arena's edge (Edges: Wrap): a line of
+    // its own from the far side, so none is drawn across the map.
+    this.pos2 = new Float32Array(MAX_PTS * 3);
+    const geo2 = new THREE.BufferGeometry();
+    geo2.setAttribute('position', new THREE.BufferAttribute(this.pos2, 3));
+    this.line2 = new THREE.Line(geo2, this.line.material);
+    this.line2.frustumCulled = false;
+    this.line2.renderOrder = 5;
+    this.line2.visible = false;
     this.peak = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9, depthWrite: false }));
     this.peak.visible = false;
     // Under the top: a dashed drop line and a ring on the ground, so the top
@@ -60,18 +69,19 @@ export class AimArc {
     this.ring.renderOrder = 5;
     this.drop.visible = this.ring.visible = false;
     this.ground = null;   // the point on the ground under the top, or null over open sky
-    scene.add(this.line, this.peak, this.drop, this.ring);
+    scene.add(this.line, this.line2, this.peak, this.drop, this.ring);
     this.label = document.createElement('div');
     this.label.className = 'arc-peak hidden';
     this.labels = labels;   // cleared at each match start (main.js), so update() puts it back
     this.key = '';
     this.changed = 0;     // when the aim last changed (performance.now ms): the words show for LABEL_HOLD after
     this.top = null;      // the top of the arc, [x, y, z], or where it hits first
+    this.wrapped = false; // the arc wraps round the edge: line2 draws the part after
     this.from = null;
   }
 
   hide() {
-    this.line.visible = this.peak.visible = this.drop.visible = this.ring.visible = false;
+    this.line.visible = this.line2.visible = this.peak.visible = this.drop.visible = this.ring.visible = false;
     this.label.classList.add('hidden');
     this.key = '';
   }
@@ -84,7 +94,7 @@ export class AimArc {
   update(game, p, camera, { quiet = false } = {}) {
     if (!p) { if (this.line.visible) this.hide(); return; }
     if (!this.label.isConnected) this.labels.appendChild(this.label);
-    const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, game.terrain.wells.length].map((n) => (+n).toFixed(3)).join();
+    const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, game.terrain.wells.length, EDGE_KINDS.indexOf(game.terrain.edge)].map((n) => (+n).toFixed(3)).join();
     if (key !== this.key) {
       // The first trace for a new aim (a new turn) doesn't count as a change.
       if (this.key) this.changed = performance.now();
@@ -95,6 +105,7 @@ export class AimArc {
       this.ring.material.color.set(p.color);
     }
     this.line.visible = this.peak.visible = true;
+    this.line2.visible = this.wrapped;
     this.drop.visible = this.ring.visible = !!this.ground;
     // The label by the ring when it is in view (behind the turret, the top
     // itself is often off the top of the screen), else by the top.
@@ -107,17 +118,28 @@ export class AimArc {
 
   trace(game, p) {
     const t = game.terrain;
-    const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power));
+    const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power), t);
     pr.g = game.gravity;
     pr.windK = game.windShare(p);
     pr.drag = game.shellDrag(p);
     if (t.wells.length) pr.wells = t.wells;
     let n = 0;
-    const put = (q) => { this.pos[n * 3] = q[0]; this.pos[n * 3 + 1] = q[1]; this.pos[n * 3 + 2] = q[2]; n++; };
+    let buf = this.pos;
+    let n1 = 0;            // the first line's length, once it wraps
+    let edge = '';         // 'bounces' or 'wraps': the climb meets the arena's edge
+    const put = (q) => { buf[n * 3] = q[0]; buf[n * 3 + 1] = q[1]; buf[n * 3 + 2] = q[2]; n++; };
     put(pr.pos);
     let hit = null;
     for (let i = 0; i < 2400 && n < MAX_PTS - 1; i++) {
       stepProjectile(pr, game.wind);
+      const c = pr.crossed;
+      if (c) {
+        put(c.point);
+        if (c.kind === 'wall') { hit = 'wall'; break; }
+        if (c.kind === 'bounce') edge = 'bounces';
+        else if (!n1) { n1 = n; buf = this.pos2; n = 0; put(c.to); edge = 'wraps'; }
+        else break;        // wrapped twice before the top: show the first time round only
+      }
       if (pr.wells && wellContact(pr)) { hit = 'moon'; break; }
       if (t.inBounds(pr.pos[0], pr.pos[2])) {
         const g = groundContact(pr, t);
@@ -127,11 +149,14 @@ export class AimArc {
       if (pr.vel[1] <= 0) break;           // the top of the climb
     }
     if (!hit) put(pr.pos);
-    const top = [this.pos[(n - 1) * 3], this.pos[(n - 1) * 3 + 1], this.pos[(n - 1) * 3 + 2]];
+    const top = [buf[(n - 1) * 3], buf[(n - 1) * 3 + 1], buf[(n - 1) * 3 + 2]];
     this.top = top;
-    this.line.geometry.setDrawRange(0, n);
-    this.line.geometry.attributes.position.needsUpdate = true;
-    this.line.computeLineDistances();
+    this.wrapped = n1 > 0;
+    for (const [line, count] of this.wrapped ? [[this.line, n1], [this.line2, n]] : [[this.line, n]]) {
+      line.geometry.setDrawRange(0, count);
+      line.geometry.attributes.position.needsUpdate = true;
+      line.computeLineDistances();
+    }
     this.peak.position.set(top[0], top[1], top[2]);
     this.ground = null;
     if (!hit && t.solidAt(top[0], top[2])) {
@@ -148,7 +173,7 @@ export class AimArc {
     }
     const out = Math.round(Math.hypot(top[0] - p.x, top[2] - p.z));
     const up = Math.round(top[1] - p.y);
-    this.label.textContent = hit === 'ground' ? `hits ${out} m out` : hit === 'moon' ? 'into a moon' : `top ${up} m up, ${out} m out`;
+    this.label.textContent = (hit === 'ground' ? `hits ${out} m out` : hit === 'wall' ? `hits the wall ${up} m up` : hit === 'moon' ? 'into a moon' : `top ${up} m up, ${out} m out`) + (edge ? `, ${edge}` : '');
   }
 }
 

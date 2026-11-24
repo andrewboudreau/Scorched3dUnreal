@@ -23,8 +23,8 @@ import { makePerlin, fbm } from './noise.js';
 
 export const ISLAND = {
   sea: 0,            // the sea's level
-  size: [0.6, 0.68], // the coast's mean distance from the middle, as a share of the half-width
-  maxReach: 0.82,    // ...and never further out than this (before the ragged noise), so there is sea all round
+  size: [0.66, 0.73], // the coast's mean distance from the middle, as a share of the half-width
+  maxReach: 0.84,    // ...and never further out than this (before the ragged noise), so there is sea all round
   ring: 0.55,        // tanks start this share of the way from the middle to the coast
   beach: 14,         // metres of sand from the waterline up to the grass
   shelf: 0.28,       // the seabed's slope off the beach

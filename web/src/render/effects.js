@@ -981,6 +981,24 @@ export class ShellVisual {
     this.line.geometry.attributes.position.needsUpdate = true;
   }
 
+  // The shell wrapped round the arena's edge (out at `from`, in at `to`): end
+  // the trail at `from` and start a new one at `to`, so no line runs across
+  // the map. Returns the old part as a line of its own to fade, like finish().
+  cut(from, to) {
+    this.push(from);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.points.slice(0, this.count * 3), 3));
+    const old = new THREE.Line(g, this.line.material.clone());
+    old.material.opacity = Math.min(old.material.opacity, 0.35);
+    old.frustumCulled = false;
+    this.scene.add(old);
+    this.count = 0;
+    this.last = null;
+    this.trailAt = null;
+    this.push(to);
+    return old;
+  }
+
   // Detach the trail so it can linger and fade after the shell is gone.
   finish() {
     this.scene.remove(this.mesh);
