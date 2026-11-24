@@ -1606,12 +1606,12 @@ export class Game {
     for (const e of this.scenery.drainEvents()) this.emit(e);
   }
 
-  // A blast in the City wears down the buildings in reach (core/city.js);
-  // any it leaves with no hit points come down. Both go in the ground's ops,
-  // so another copy of the game brings down the same buildings.
+  // A blast in the City wears down the buildings in reach (core/city.js),
+  // breaks the street under it and scatters the traffic; any building it
+  // leaves with no hit points comes down. Both go in the ground's ops, so
+  // another copy of the game brings down the same buildings.
   cityBlast(x, y, z, radius, damage) {
     const town = this.town;
-    if (!town.near(x, z, radius * 1.25).length) return;
     this.ground?.ops.push(['b', x, y, z, radius, damage]);
     for (const id of town.blast(x, y, z, radius, damage)) this.collapseBuilding(id);
     for (const e of town.drainEvents()) this.emit(e);

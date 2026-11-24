@@ -55,7 +55,7 @@ export class Traffic {
   populate() {
     const rng = this.rng;
     const edges = this.nodes.reduce((s, n) => s + n.next.length, 0);
-    const count = Math.min(36, Math.max(8, Math.round(edges / 3.2)));
+    const count = Math.min(56, Math.max(8, Math.round(edges / 2.2)));
     for (let k = 0; k < count; k++) {
       const r = rng.next();
       const kind = r < 0.12 ? 'bus' : r < 0.25 ? 'truck' : 'car';
