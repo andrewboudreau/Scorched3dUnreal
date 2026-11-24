@@ -32,7 +32,7 @@ page loads and override both Random and what Custom match remembers.
 | `packs` | (none) | Loads the redistributable resource packs for review (see below). |
 | `room` | a 4-letter code | Opens that online room's invite; this is what the invite link carries. |
 | `wind` | `calm`, `breezy`, `gusty`, `gale`, or a number 0 to 5 | Forces the match wind (Play and Custom). |
-| `terrain` | `rolling`, `hilly`, `mountains`, `isles` | Forces the terrain. |
+| `terrain` | `rolling`, `hilly`, `mountains`, `isles`, `ridgeline` | Forces the terrain. |
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
@@ -359,7 +359,24 @@ second column beside the first. On a phone the players box sits top right.
   to whoever blew the ground out). Now and then a strange craft or two drifts
   high across the sky, pausing to hover, where birds would be. A shell that misses everything drops away into the void. You
   cannot drive or jump off an isle's edge. There are no lakes, and the sky is
-  deep space: stars all round, a nebula and a ringed planet.
+  deep space: stars all round, a nebula and a ringed planet. Relics stand on
+  the isles (`core/artifacts.js`, drawn by `render/artifactMesh.js`): derelict
+  dishes, monoliths and obelisks with faint glowing glyphs, crystal clusters,
+  broken arches and ring ruins, now and then a crashed hull, and loose rocks
+  drift round the bigger isles. They are placed from the seed, never on a tank's
+  pad, and are only set dressing: shells pass through them and they hurt no one.
+  A blast on one destroys it, one close by knocks a tall one over, and one that
+  blows the ground out from under it drops it into the void.
+- **Ridgeline** (Terrain menu, `?terrain=ridgeline`). The field seen side on, as
+  in the classic artillery games: the tanks stand in a row from west to east
+  and a jagged mountain range runs between them, with steep peaks, deep valleys
+  and a few flat-topped mesas, so nearly every shot is a lob over a peak
+  (`core/ridgeline.js`). Each peak stays under a 1 in 2 slope from the tanks on
+  either side, so a high arc always has a way over. The ground is flat-shaded
+  rock in banded strata (`render/ridgeline.js`): a crater cuts through the
+  weathered crust and shows the beds, and the field's edges are cut-away cliff
+  faces. A dusk sky with no clouds, a few boulders and nothing else: no grass,
+  trees, water or villages. The overview (View) stands back side on.
 - **Mods: deployable equipment** (`core/mods.js`). Mods are not weapons:
   they come from the **perk draft** between rounds. An unlock card (Orbital
   Mechanic, Sat Recon) gives you one at level 1; once you have it, level-up
@@ -560,7 +577,8 @@ second column beside the first. On a phone the players box sits top right.
   terrain changes, and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
-  effects, the instanced scenery and water (`sceneryMesh.js`), the sky, sun and
+  effects, the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
+  in `artifactMesh.js`), the Ridgeline's banded rock (`ridgeline.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round),
   the falling rain (`rain.js`), the isles' moons
   (`moons.js`), the flux lines that show a moon or an orbiter pulling a shell

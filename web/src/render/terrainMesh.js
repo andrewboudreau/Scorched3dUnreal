@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makePerlin } from '../core/noise.js';
+import { ridgeMaterials, ridgeShade, ridgeCut } from './ridgeline.js';
 
 // Renders a core Heightfield as a lit, vertex-coloured slab with earthen sides.
 // Only the region a crater touched is rewritten after each blast.
@@ -299,7 +300,8 @@ export class TerrainMesh {
     sg.setAttribute('position', new THREE.BufferAttribute(this.skirtPos, 3));
     sg.setAttribute('color', new THREE.BufferAttribute(this.skirtCol, 3));
     this.skirtGeometry = sg;
-    this.skirt = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide }));
+    this.skirtMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
+    this.skirt = new THREE.Mesh(sg, this.skirtMaterial);
     this.skirt.receiveShadow = true;
 
     this.group = new THREE.Group();
@@ -309,6 +311,27 @@ export class TerrainMesh {
     this.sharedIndex = geo.index;
     this.under = null;   // the floating isles' undersides (ensureUnder), built for the first isles field
     this.openMask = null;
+    this.cut = null;     // a ridgeline's cut below the crust per vertex (useRidge)
+  }
+
+  // A ridgeline field (core/ridgeline.js) wears banded rock (render/ridgeline.js):
+  // its own materials for the ground and the cliff faces, and a `cut` attribute.
+  useRidge(on) {
+    if (on) {
+      const R = ridgeMaterials();
+      if (!this.cut) {
+        this.cut = new Float32Array(this.field.n * this.field.n);
+        const a = new THREE.BufferAttribute(this.cut, 1);
+        a.onUpload(() => { this.fullPending.cut = false; });
+        this.fullPending.cut = true;
+        this.geometry.setAttribute('cut', a);
+      }
+      this.mesh.material = R.ground;
+      this.skirt.material = R.cliff;
+    } else {
+      this.mesh.material = this.material;
+      this.skirt.material = this.skirtMaterial;
+    }
   }
 
   // Floating isles: a second sheet of the same grid hangs under the first at
@@ -467,6 +490,7 @@ export class TerrainMesh {
     this.geometry.dispose();
     if (this.under) { this.under.geo.dispose(); this.under.mesh.material.dispose(); }
     this.skirtGeometry.dispose();
+    this.skirtMaterial.dispose();
     this.material.dispose();
     // The path mask (and its GPU copy) goes back to the pool for the next match.
     const P = this.paths;
@@ -488,6 +512,7 @@ export class TerrainMesh {
     this.hMin = lo;
     this.hMax = Math.max(lo + 1, hi);
     this.skirt.visible = !f.under;
+    this.useRidge(!!f.ridge);
     if (f.under) this.ensureUnder();
     else {
       if (this.under) this.under.mesh.visible = false;
@@ -560,6 +585,10 @@ export class TerrainMesh {
         this.colors[k * 3] = tmp.r * v;
         this.colors[k * 3 + 1] = tmp.g * v;
         this.colors[k * 3 + 2] = tmp.b * v;
+        if (this.cut) {
+          this.colors[k * 3] = this.colors[k * 3 + 1] = this.colors[k * 3 + 2] = ridgeShade(f, k, hollow);
+          this.cut[k] = ridgeCut(f, k);
+        }
         if (ud) {
           if (this.openMask[k] !== open) { this.openMask[k] = open; reindex = true; }
           this.colorUnder(k, i, j, open);
@@ -574,10 +603,12 @@ export class TerrainMesh {
     const g = this.geometry;
     const full = i0 === 0 && j0 === 0 && i1 === f.res && j1 === f.res;
     // Upload only the rows this touched: one span from the first vertex to the last.
-    const from = (j0 * n + i0) * 3;
-    const count = ((j1 * n + i1) - (j0 * n + i0) + 1) * 3;
-    for (const name of ['position', 'normal', 'color']) {
+    const first = j0 * n + i0;
+    const verts = (j1 * n + i1) - first + 1;
+    for (const name of this.cut ? ['position', 'normal', 'color', 'cut'] : ['position', 'normal', 'color']) {
       const a = g.attributes[name];
+      const from = first * a.itemSize;
+      const count = verts * a.itemSize;
       if (full) { a.clearUpdateRanges(); this.fullPending[name] = true; }
       else if (!this.fullPending[name]) a.addUpdateRange(from, count);
       a.needsUpdate = true;

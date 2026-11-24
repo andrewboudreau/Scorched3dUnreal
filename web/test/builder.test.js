@@ -23,7 +23,7 @@ test('Random wind and terrain roll every option, isles least; a chosen value is 
   for (let k = 0; k < 3000; k++) {
     const c = matchConditions({}, {}, rand);
     seen.wind.set(c.maxWind, (seen.wind.get(c.maxWind) || 0) + 1);
-    const t = c.world === 'isles' ? 'isles' : String(c.hills);
+    const t = c.world === 'meadow' ? String(c.hills) : c.world;
     seen.world.set(t, (seen.world.get(t) || 0) + 1);
   }
   assert.deepEqual([...seen.wind.keys()].sort(), WIND.map((w) => w.value).sort());
@@ -220,8 +220,8 @@ test('online: the host\'s lists and rolled world reach every screen', () => {
   const [a, b] = screens.map((s) => s.game);
   assert.ok(a && b);
   assert.deepEqual(a.cfg.weapons, b.cfg.weapons);
-  assert.equal(a.cfg.world, 'isles');
-  assert.equal(b.cfg.world, 'isles');
+  assert.notEqual(a.cfg.world, 'meadow', 'the roll picked the last world on the list');
+  assert.equal(b.cfg.world, a.cfg.world);
   assert.equal(a.cfg.maxWind, b.cfg.maxWind);
   assert.equal(b.weaponOn('flak'), false);
   assert.ok(!b.cfg.perks.includes('double'));

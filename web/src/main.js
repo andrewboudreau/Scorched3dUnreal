@@ -13,6 +13,7 @@ import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { BUILDINGS } from './core/scenery.js';
+import { isArtifact } from './core/artifacts.js';
 import { TankMesh } from './render/tankMesh.js';
 import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual, QUALITY_KEY } from './render/effects.js';
@@ -24,6 +25,7 @@ import { AimArc, Gunner } from './gunner.js';
 import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
+import { setRidgeWorld, overviewGoal } from './render/ridgeline.js';
 import { AngleDials } from './render/dials.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
@@ -243,6 +245,7 @@ function disposeMatch() {
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
+  setRidgeWorld(false, { sky, floor });
   rain.clear();
   lastLand.clear();
   aimArc.hide();
@@ -364,6 +367,7 @@ function handleEvents() {
           sceneryMesh.rebuild();
           terrainMesh.setPaths(game.scenery.paths);
           sky.setSpace(!!game.terrain.under);
+          setRidgeWorld(!!game.terrain.ridge, { sky, floor });
           floor.visible = !game.terrain.under;   // nothing under the isles but space
           birds.bodies.visible = birds.wings.visible = !game.terrain.under;
           craft.set(!!game.terrain.under, game.terrain.half);
@@ -496,6 +500,7 @@ function handleEvents() {
           effects.rubble(e.pos, Math.round(18 * big), 6 * big);
           sound.thud(camDist(e.pos));
         }
+        else if (isArtifact(e.kind)) { effects.dust(e.pos, 4); if (e.how === 'gone') effects.rubble(e.pos, 10, 4); }
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage': {
@@ -1433,7 +1438,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
   else if (k === 'v') {
     overview = !overview;
-    if (overview) camGoal = new THREE.Vector3(0, 610, 520);
+    if (overview) camGoal = overviewGoal(game, camera);
     else if (game.current) aimCameraAt(game.current);
   } else if (k === 'm') toggleMute();
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);

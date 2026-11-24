@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BRIDGE, BUILDINGS, isBuilding } from '../core/scenery.js';
 import { addFogShade } from './terrainMesh.js';
+import { ArtifactMesh } from './artifactMesh.js';
 
 // Draws core/scenery.js: one InstancedMesh per kind of prop, a merged bridge
 // and a water plane. Static props are rewritten only when the scenery's
@@ -392,6 +393,8 @@ export class SceneryMesh {
     this.meshes = {};
     this.seen = -1;
     this.built = null;
+    this.relics = new ArtifactMesh(scenery);   // the floating isles' relics
+    this.group.add(this.relics.group);
   }
 
   // Size the instance buffers for the scenery as generated. Called on a full
@@ -427,6 +430,7 @@ export class SceneryMesh {
       this.group.add(this.water);
     }
     if (sc.bridge) this.buildBridge(sc.bridge);
+    this.relics.rebuild();
     this.seen = -1;
     this.sync(0);
   }
@@ -517,6 +521,7 @@ export class SceneryMesh {
     const a = assets();
     const sc = this.scenery;
     a.time.value = time;
+    this.relics.sync(time);
     if (this.seen !== sc.version) {
       this.seen = sc.version;
       this.writeStatic();
@@ -585,6 +590,7 @@ export class SceneryMesh {
     this.meshes = {};
     if (this.water) { this.group.remove(this.water); this.water.geometry.dispose(); this.water = null; }
     if (this.bridge) { this.group.remove(this.bridge); this.bridge.geometry.dispose(); this.bridge = null; }
+    this.relics.clear();
   }
 
   dispose() { this.clear(); }
