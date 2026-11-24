@@ -53,6 +53,24 @@ export function onIsle(terrain, x, z) {
 
 // Can a tank stand at x/z? Inside the arena, out of the water, and clear of
 // every other tank and standing house (`others`, like driveStep's).
+// How much room a tank at x/z has from obstacle `o` (below 0: too close).
+// Tanks and props are round; the City's buildings are boxes (`box`, half
+// sizes `hx` and `hz`), which a tank's hull may come right up to.
+function room(o, x, z) {
+  if (o.box) {
+    const dx = Math.abs(x - o.x) - o.hx;
+    const dz = Math.abs(z - o.z) - o.hz;
+    return Math.hypot(dx > 0 ? dx : 0, dz > 0 ? dz : 0) - TANK.bodyRadius;
+  }
+  return Math.hypot(o.x - x, o.z - z) - TANK.bodyRadius * 2;
+}
+
+// Does the point x/y/z sit inside a box obstacle (a building)?
+function inBox(others, x, y, z) {
+  for (const o of others) if (o.box && y < o.top && Math.abs(x - o.x) < o.hx + 1 && Math.abs(z - o.z) < o.hz + 1) return true;
+  return false;
+}
+
 function standable(tank, terrain, others, x, z) {
   const edge = terrain.half - 6;
   if (Math.abs(x) > edge || Math.abs(z) > edge) return 'edge';
@@ -60,7 +78,7 @@ function standable(tank, terrain, others, x, z) {
   if (terrain.heightAt(x, z) < terrain.waterLevel + 0.3) return 'water';
   for (const o of others) {
     if (o === tank || o.alive === false) continue;
-    if (Math.hypot(o.x - x, o.z - z) < TANK.bodyRadius * 2) return 'blocked';
+    if (room(o, x, z) < 0) return 'blocked';
   }
   return null;
 }
@@ -86,7 +104,8 @@ export function planHop(tank, terrain, others = [], heading = tank.hull) {
       for (let k = 1; k < 16 && !fail; k++) {
         const s = k / 16;
         const arc = y0 + (y1 - y0) * s + 4 * JET.apex * s * (1 - s);
-        if (arc < terrain.heightAt(tank.x + ux * dist * s, tank.z + uz * dist * s) + JET.clearance) fail = 'blocked';
+        const ax = tank.x + ux * dist * s, az = tank.z + uz * dist * s;
+        if (arc < terrain.heightAt(ax, az) + JET.clearance || inBox(others, ax, arc, az)) fail = 'blocked';
       }
     }
     if (!fail) return { ok: true, x, y: y1, z, dist };
@@ -140,9 +159,8 @@ export function driveStep(tank, terrain, dir, dt, others = []) {
   if (h < terrain.waterLevel + 0.3 && h <= here) return 'water';
   for (const o of others) {
     if (o === tank || o.alive === false) continue;
-    const now = Math.hypot(o.x - tank.x, o.z - tank.z);
-    const then = Math.hypot(o.x - x, o.z - z);
-    if (then < TANK.bodyRadius * 2 && then < now) return 'blocked';
+    const then = room(o, x, z);
+    if (then < 0 && then < room(o, tank.x, tank.z)) return 'blocked';
   }
   tank.x = x;
   tank.z = z;

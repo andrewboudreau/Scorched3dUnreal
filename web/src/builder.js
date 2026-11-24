@@ -19,10 +19,11 @@ import { RIDGE } from './core/ridgeline.js';
 
 // The select values (the saved Custom state holds them) and the names shown.
 // `weight` is how often Random picks each. Calm and Gale are the extremes, so
-// they come up half as often as Breezy and Gusty. The Floating isles are a
-// different game (open sky, moons, the void), so Random picks them half as
-// often as each meadow, and so does the Ridgeline (a mountain range seen side
-// on, the tanks in a row: core/ridgeline.js).
+// they come up half as often as Breezy and Gusty. The Floating isles, the
+// City and the Ridgeline are different games (open sky, moons and the void;
+// streets and buildings in the way; a mountain range seen side on with the
+// tanks in a row: core/ridgeline.js), so Random picks each half as often as
+// each meadow.
 export const WIND = [
   { id: 'calm', value: 0, name: 'Calm', weight: 1 },
   { id: 'breezy', value: 0.8, name: 'Breezy', weight: 2 },
@@ -33,6 +34,7 @@ export const TERRAIN = [
   { id: 'rolling', value: '20', name: 'Rolling', weight: 2 },
   { id: 'hilly', value: '45', name: 'Hilly', weight: 2 },
   { id: 'mountains', value: '80', name: 'Mountains', weight: 2 },
+  { id: 'city', value: 'city', name: 'City', weight: 1 },
   { id: 'isles', value: 'isles', name: 'Floating isles', weight: 1 },
   { id: 'ridgeline', value: 'ridgeline', name: 'Ridgeline', weight: 1 },
 ];
@@ -45,10 +47,11 @@ function weighted(list, rand) {
   return list[list.length - 1];
 }
 
-// A Terrain value ('20', '45', '80', 'isles' or 'ridgeline') as config.
+// A Terrain value ('20', '45', '80', 'city', 'isles' or 'ridgeline') as config.
 export function terrainConfig(v) {
   if (v === 'isles') return { hills: 45, world: 'isles' };
   if (v === 'ridgeline') return { hills: RIDGE.hills, world: 'ridgeline' };
+  if (v === 'city') return { hills: 20, world: 'city' };
   const n = Number(v);
   return { hills: Number.isFinite(n) && n > 0 ? n : 45, world: 'meadow' };
 }
@@ -78,7 +81,7 @@ export function conditionsLabel(cfg) {
 
 // ---------------------------------------------------------------- the testing query string
 
-// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|isles|ridgeline,
+// ?wind=calm|breezy|gusty|gale (or a number), ?terrain=rolling|hilly|mountains|city|isles|ridgeline,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
 // ?sat=1|2|3, ?orbiter=1|2|3, ?decoy=1|2|3 and ?pointdef=1|2|3 (every tank
 // starts with that mod at that level), ?labels=few|some|many (the satellite's labelled cells),

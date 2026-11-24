@@ -118,6 +118,13 @@ export class Scenery {
       return this;
     }
 
+    // The City (core/city.js) dresses its own parks and sidewalks: no lakes,
+    // hamlets or farms there.
+    if (t.city) {
+      t.city.dress(this, rng, tanks, 14);
+      return this;
+    }
+
     this.chooseWaterLevel(tanks);
     let lo = Infinity;
     let hi = -Infinity;

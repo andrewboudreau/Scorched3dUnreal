@@ -12,6 +12,7 @@ import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
+import { CityView } from './render/cityMesh.js';
 import { BUILDINGS } from './core/scenery.js';
 import { isArtifact } from './core/artifacts.js';
 import { TankMesh } from './render/tankMesh.js';
@@ -103,6 +104,7 @@ let game = null;
 let terrainMesh = null;
 let review = null;           // the resource-pack review (src/review.js), dev server only
 let sceneryMesh = null;
+let cityView = null;            // the City world's buildings and traffic (render/cityMesh.js)
 let tanks = [];
 let smoke = [];                 // per tank: seconds until its next puff
 let labels = [];
@@ -225,6 +227,7 @@ function clearTrails() {
 function disposeMatch() {
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.dispose(); }
   if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
+  cityView?.dispose(); cityView = null;
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
@@ -263,6 +266,7 @@ function startMatch(config) {
   terrainMesh = new TerrainMesh(game.terrain);
   sceneryMesh = new SceneryMesh(game.scenery);
   scene.add(terrainMesh.group, sceneryMesh.group);
+  if (game.city) scene.add((cityView = new CityView(game, effects)).group);
   review?.onMatch();
   effects.groundAt = (x, z) => game.terrain.heightAt(x, z);
   tanks = game.players.map((p) => {
@@ -338,6 +342,8 @@ function handleEvents() {
   for (const e of game.drainEvents()) {
     strikeUi.event(e);
     modsUi.event(e);
+    cityView?.event(e);
+    if (e.type === 'building' && e.how !== 'hit') { sound.thud(camDist(e.pos)); if (e.how === 'collapse') addShake(e.pos, 1.6); }
     switch (e.type) {
       case 'roundStart':
         wrecks.forEach(dropWreck);
@@ -365,7 +371,7 @@ function handleEvents() {
           dirty.length = 0;
           terrainMesh.rebuild();
           sceneryMesh.rebuild();
-          terrainMesh.setPaths(game.scenery.paths);
+          terrainMesh.setPaths(game.scenery.paths, game.town);
           sky.setSpace(!!game.terrain.under);
           setRidgeWorld(!!game.terrain.ridge, { sky, floor });
           floor.visible = !game.terrain.under;   // nothing under the isles but space
@@ -1643,7 +1649,7 @@ function soundScape(dt) {
     }
   }
   sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep,
-    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount });
+    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount, city: game?.town ? 1 : 0 });
 }
 
 // ---------------------------------------------------------------- HUD
@@ -2538,6 +2544,7 @@ function tick(dt, draw = true) {
     fadeTrails(dt);
     updateTracer();
     sceneryMesh.sync(elapsed);
+    cityView?.update();
     updateHud();
     strikeUi.update();
     modsUi.update(sdt, elapsed);

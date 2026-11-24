@@ -70,7 +70,13 @@ export function makeProjectile(pos, vel) {
 }
 
 // Did this step cross the ground? Returns the refined impact point or null.
+// In the City a standing building counts as ground: the point where the step
+// entered it, tagged `.building` with its id (core/city.js).
 export function groundContact(p, terrain) {
+  if (terrain.city) {
+    const hit = terrain.city.contact(p.prev, p.pos);
+    if (hit) return hit;
+  }
   const [x, y, z] = p.pos;
   if (!terrain.inBounds(x, z)) return null;
   if (terrain.under) {

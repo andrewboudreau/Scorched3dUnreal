@@ -46,6 +46,7 @@ export class Sound {
     this.fxMuted = store?.getItem(FX_MUTE_KEY) === '1';
     this.nextChirp = 4;
     this.nextBleat = 9;
+    this.nextHorn = 8;
     // Recorded samples standing in for (or under) the synth, per event; only
     // the pack review (src/review.js) sets these. See sample().
     this.samples = {};
@@ -235,6 +236,8 @@ export class Sound {
     this.fireBed = { gain: cg, hiss: this.loopNoise('bandpass', 2600, 0.7), next: 0 };
     // Rain: a soft high hiss of drops over a low wash, silent until it rains.
     this.rainBed = { hiss: this.loopNoise('highpass', 1700, 0.3), wash: this.loopNoise('lowpass', 520, 0.5), loop: null };
+    // The City: a low rumble of distant traffic and a murmur over it, silent elsewhere.
+    this.cityBed = { rumble: this.loopNoise('lowpass', 140, 0.7), murmur: this.loopNoise('bandpass', 480, 0.8) };
   }
 
   // A sample chosen for 'rain' in the pack review loops in place of the synth
@@ -271,7 +274,8 @@ export class Sound {
   //   birds / sheep   distance from the camera to the nearest, or Infinity
   //   fire      0..~1.5, how much is burning near the camera
   //   rain      0..1, how hard it is raining (render/rain.js amount)
-  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0, rain = 0 } = {}) {
+  //   city      0..1, how much of the City's hum to play (0 elsewhere)
+  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0, rain = 0, city = 0 } = {}) {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
@@ -311,6 +315,15 @@ export class Sound {
     const swell = 0.85 + 0.15 * Math.sin(t * 0.29) * Math.sin(t * 0.61 + 2);
     ease(this.rainBed.hiss.gain.gain, wetOwn ? 0 : rain * 0.022 * swell, 0.5);
     ease(this.rainBed.wash.gain.gain, wetOwn ? 0 : rain * 0.016, 0.6);
+
+    // The City hums, well under everything else, and now and then a horn goes far off.
+    const hum = 0.8 + 0.2 * Math.sin(t * 0.17) * Math.sin(t * 0.43 + 1);
+    ease(this.cityBed.rumble.gain.gain, city * 0.05 * hum, 1);
+    ease(this.cityBed.murmur.gain.gain, city * 0.012 * hum, 1);
+    if ((this.nextHorn -= dt) <= 0) {
+      this.nextHorn = 7 + Math.random() * 16;
+      if (city > 0) this.horn(city);
+    }
 
     if ((this.nextChirp -= dt) <= 0) {
       this.nextChirp = 3 + Math.random() * 7;
@@ -565,6 +578,39 @@ export class Sound {
       o.start(t);
       o.stop(t + 0.1);
     }
+  }
+
+  // A car horn a few streets away: two notes together, a toot or two.
+  horn(k = 1) {
+    const ctx = this.ensure();
+    if (!ctx || this.silent) return;
+    const base = 330 + Math.random() * 120;
+    const toots = Math.random() < 0.4 ? 2 : 1;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 1400;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    f.connect(g).connect(this.fx);
+    const t0 = ctx.currentTime;
+    let end = t0;
+    for (let i = 0; i < toots; i++) {
+      const t = t0 + i * 0.32;
+      const dur = toots > 1 ? 0.18 : 0.3 + Math.random() * 0.35;
+      g.gain.setTargetAtTime(0.022 * k, t, 0.01);
+      g.gain.setTargetAtTime(0, t + dur, 0.03);
+      end = t + dur + 0.2;
+    }
+    const oscs = [base, base * 1.26].map((fr) => {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = fr;
+      o.connect(f);
+      o.start(t0);
+      o.stop(end);
+      return o;
+    });
+    oscs[0].onended = () => g.disconnect();
   }
 
   // A wobbly nasal "baa".

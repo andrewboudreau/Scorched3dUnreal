@@ -101,8 +101,11 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
       wind, terrain, gravity, windK, drag, level: target[1] - 1, field, t0,
     });
     // A shell that fell past an isle is judged by where it came down through the target's height.
-    const [ix, , iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
-    const miss = Math.hypot(ix - tx, iz - tz);
+    const [ix, iy, iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
+    // A shell that struck a building in the City (core/city.js) is judged in
+    // three dimensions: a hit high on a tower beside the target is no hit.
+    const wall = shot.point.building != null;
+    const miss = wall ? Math.hypot(ix - tx, iy - target[1], iz - tz) : Math.hypot(ix - tx, iz - tz);
     if (miss < best.miss) best = { yaw, elev, power, miss };
     if (miss <= tolerance) break;
 
@@ -113,6 +116,14 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     // Rescale power by the range ratio (square-root keeps it from overshooting,
     // like the legacy logarithmic rescale).
     const impactDist = Math.max(1, Math.hypot(ix - sx, iz - sz));
+    if (wall && impactDist < targetDist - 8 && elev < 80) {
+      // A building in the way: lob it higher, over the roofs.
+      elev = Math.min(80, elev + 9);
+      power = Math.sqrt((targetDist * gravity) / Math.sin((2 * elev) / RAD));
+      if (drag > 0) power = dragSeed(power, elev, targetDist, gravity, drag);
+      power = Math.min(TANK.maxPower, Math.max(TANK.minPower, power));
+      continue;
+    }
     const ratio = targetDist / impactDist;
     power *= Math.pow(ratio, shot.kind === 'lost' ? 0.3 : 0.55);
     if (power > TANK.maxPower) {
