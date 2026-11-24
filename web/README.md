@@ -33,6 +33,7 @@ page loads and override both Random and what Custom match remembers.
 | `room` | a 4-letter code | Opens that online room's invite; this is what the invite link carries. |
 | `wind` | `calm`, `breezy`, `gusty`, `gale`, or a number 0 to 5 | Forces the match wind (Play and Custom). |
 | `terrain` | `rolling`, `hilly`, `mountains`, `city`, `isles`, `ridgeline` | Forces the terrain. |
+| `time` | `dawn`, `day`, `dusk`, `night` | Forces the time of day (render-only; Random picks from the match seed). |
 | `fixed` | (none) | Gusty wind and Hilly terrain, the old defaults, unless `wind` or `terrain` say otherwise. `fixed=0` is ignored. |
 | `sat` | `1`, `2`, `3` | Every tank starts with a Survey Satellite at that level. |
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
@@ -160,6 +161,26 @@ second column beside the first. On a phone the players box sits top right.
     Rolling, Hilly, Mountains or, half as often as each of those, the City or
     the Floating isles. Online the host rolls and sends the concrete values in the match
     config, so every screen builds the same world.
+  - *Time of day* (`?time=`): **Random** (the default), Dawn, Day, Dusk or Night.
+    A look, not a rule: the core only carries it (`cfg.time`, `core/timeofday.js`)
+    and never reads it. Random is settled from the match seed (`pickTime`: Day
+    twice as likely as the others), so every screen of an online match agrees.
+    `render/timeofday.js` holds the presets as plain data (two keyframes each,
+    easing over the match like the old morning-to-golden-afternoon); `Sky.setTime`
+    applies them: the sun's height, direction and colour, the sky and hemisphere
+    light, the fog's colour and distance, shadow strength (`sun.shadow.intensity`),
+    and the water's tint (`SceneryMesh`). Day is the original look. Dawn is a low
+    pink-gold sun and haze; Dusk a red sinking sun and a violet sky; Night a blue
+    moon key light, a dark-blue sky with stars, and lit windows in the villages.
+    At Dusk and Night the lit things come on without any real lights: tank
+    headlights (brighter lamps plus an additive glow sprite each), village windows
+    (vertices marked by their alpha, glowing by `look.lit`), and in the City the
+    windows (an emissive map) and street lamps. Blasts hit harder in the dark
+    (the flash light's strength and reach scale with `flash`), shells carry a glow
+    and their smoke trails brighten, while ordinary smoke dims (`shade`). The
+    Floating isles keep their own dusk-violet space sky at any time; the
+    Ridgeline keeps its own dusk look on a Dusk match and takes the time's sky
+    otherwise. The banner adds the time ("· Dusk") unless it is the plain Day.
   - *Weapons*: an unticked weapon is gone for the match: not in the armory, the
     starting kit, a perk's hand-out (Quartermaster, the fog's free Scout) or the
     CPUs' hands. The Shell is always on.
@@ -630,7 +651,7 @@ second column beside the first. On a phone the players box sits top right.
   through a mask texture), tank models,
   effects, the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
   in `artifactMesh.js`), the Ridgeline's banded rock (`ridgeline.js`), the sky, sun and
-  clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round),
+  clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round; the time-of-day presets in `timeofday.js`),
   the falling rain (`rain.js`), the isles' moons
   (`moons.js`), the flux lines that show a moon or an orbiter pulling a shell
   (`gravityLines.js`, driven by the pure `core/gravityPull.js`), the flocks

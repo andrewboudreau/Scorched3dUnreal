@@ -133,6 +133,7 @@ export const BUILDER_ROWS = [
   { name: 'Rounds', text: 'How many rounds the match lasts.' },
   { name: 'Wind', text: '**Random** (the default) picks Calm, Breezy, Gusty or Gale when the match starts, and the round banner says which. Or choose one.' },
   { name: 'Terrain', text: '**Random** (the default) picks Rolling, Hilly, Mountains or, less often, the City (buildings that stop shells and come down), the Floating isles or the Ridgeline (tanks in a row, a mountain range to lob over). Or choose one.' },
+  { name: 'Time of day', text: '**Random** (the default) picks Dawn, Day, Dusk or Night for the match, the same on every screen online. Only the look changes: the sun, sky, fog and shadows. At dusk and night the windows and street lights come on and tanks switch on their headlights, and blasts light up more of the field. The Floating isles keep their own sky.' },
   { name: 'Firing', text: 'Together (volley) or Take turns. Online is always together.' },
   { name: 'Fog of war', text: 'You only see what is near your tank, or what a Scout Missile lights up.' },
   { name: 'Weapons', text: 'Untick a weapon and nobody has it: not in the armory, the starting kit, a perk’s hand-out or the CPUs’ hands. The Shell is always on.' },

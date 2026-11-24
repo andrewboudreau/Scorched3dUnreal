@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TANK } from '../core/tank.js';
+import { look } from './timeofday.js';
 
 const DEG = Math.PI / 180;
 const TRACK_PITCH = 0.7;      // metres of ground per repeat of the tread texture
@@ -26,6 +27,25 @@ function treadTexture() {
   t.magFilter = THREE.NearestFilter;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+// A soft round glow, shared by every tank's headlights.
+let glowImage = null;
+function glowTexture() {
+  if (!glowImage) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.3, 'rgba(255,230,170,0.55)');
+    grad.addColorStop(1, 'rgba(255,200,120,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    glowImage = new THREE.CanvasTexture(c);
+    glowImage.colorSpace = THREE.SRGBColorSpace;
+  }
+  return glowImage;
 }
 
 // A track run whose plates travel the right way on every face: the top goes
@@ -115,6 +135,21 @@ export class TankMesh {
     brake.rotation.z = -Math.PI / 2;
 
     this.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+    // After dark (Dusk, Night) the headlights shine: brighter lamps and a soft
+    // additive glow on each, no real lights.
+    const lit = look.lit.value;
+    if (lit > 0) {
+      lamp.emissiveIntensity = 0.6 + 3 * lit;
+      this.glowMaterial = new THREE.SpriteMaterial({ map: glowTexture(), color: '#ffe6a8', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9 * lit });
+      this.materials.push(this.glowMaterial);
+      for (const side of [-1, 1]) {
+        const s = new THREE.Sprite(this.glowMaterial);
+        s.position.set(4.1, 1.6, side * 1.25);
+        s.scale.setScalar(2.2 + 1.4 * lit);
+        this.hull.add(s);
+      }
+    }
 
     this.recoil = 0;
     this.work = 0;                    // 0..1, how hard the engine is running

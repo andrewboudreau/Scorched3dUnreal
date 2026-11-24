@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CITY } from '../core/city.js';
 import { makeRng } from '../core/rng.js';
 import { addFogShade } from './terrainMesh.js';
+import { look } from './timeofday.js';
 
 // Draws the City (core/city.js): its buildings, their rooftops, the damage
 // they have taken and the rubble of those that came down, the street lights
@@ -53,15 +54,25 @@ function windowTexture(style) {
   const S = STYLES[style];
   g.fillStyle = S.wall;
   g.fillRect(0, 0, 256, 256);
+  // The same windows, lit, on black: the emissive map for Dusk and Night.
+  const gc = document.createElement('canvas');
+  gc.width = gc.height = 256;
+  const gg = gc.getContext('2d');
+  gg.fillStyle = '#000';
+  gg.fillRect(0, 0, 256, 256);
+  const lrng = makeRng(31 + style * 7);
+  const glowOf = (x, y, w, h) => { gg.fillStyle = '#ffcf80'; gg.fillRect(x, y, w, h); };
   for (let j = 0; j < TILE; j++) {
     for (let i = 0; i < TILE; i++) {
       const x = i * c, y = j * c;
       const lit = rng.next() < 0.12;
+      const lights = lrng.next() < 0.55;    // after dark, more windows are lit than by day (its own dice: the day texture is unchanged)
       const dark = 30 + rng.int(0, 25);
       if (style === 0) {
         // Curtain wall: big panes between slim mullions, a spandrel band each floor.
         g.fillStyle = lit ? '#cfd6c4' : `rgb(${dark + 10},${dark + 35},${dark + 55})`;
         g.fillRect(x + 1, y + 2, c - 2, c * 0.72);
+        if (lit || lights) glowOf(x + 1, y + 2, c - 2, c * 0.72);
         g.fillStyle = 'rgba(255,255,255,0.10)';
         g.fillRect(x + 1, y + 2, (c - 2) * 0.45, c * 0.72);
         g.fillStyle = '#71879a';
@@ -70,6 +81,7 @@ function windowTexture(style) {
         // Ribbon windows in concrete bands.
         g.fillStyle = lit ? '#d9d6bd' : `rgb(${dark},${dark + 12},${dark + 24})`;
         g.fillRect(x, y + c * 0.18, c, c * 0.5);
+        if (lit || lights) glowOf(x, y + c * 0.18, c, c * 0.5);
         g.fillStyle = '#9aa1a6';
         g.fillRect(x + c / 2 - 0.5, y + c * 0.18, 1.5, c * 0.5);
         g.fillRect(x, y + c * 0.18, 1.5, c * 0.5);
@@ -84,6 +96,7 @@ function windowTexture(style) {
         g.fillRect(x + c * 0.22, y + c * 0.76, c * 0.56, 2);
         g.fillStyle = lit ? '#e3d6a6' : `rgb(${dark},${dark + 6},${dark + 14})`;
         g.fillRect(x + c * 0.28, y + c * 0.22, c * 0.44, c * 0.53);
+        if (lit || lights) glowOf(x + c * 0.28, y + c * 0.22, c * 0.44, c * 0.53);
         g.fillStyle = '#c8bfae';
         g.fillRect(x + c * 0.28, y + c * 0.47, c * 0.44, 1.5);
       }
@@ -94,8 +107,13 @@ function windowTexture(style) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   textures[style] = tex;
+  const glow = new THREE.CanvasTexture(gc);
+  glow.wrapS = glow.wrapT = THREE.RepeatWrapping;
+  glow.colorSpace = THREE.SRGBColorSpace;
+  glows[style] = glow;
   return tex;
 }
+const glows = [];
 
 // ---------------------------------------------------------------- geometry
 
@@ -267,6 +285,7 @@ export class CityView {
     this.lampsStale = false;
     this.walls = STYLES.map((S, i) => {
       const m = new THREE.MeshStandardMaterial({ map: windowTexture(i), vertexColors: true, roughness: S.roughness, metalness: S.metalness });
+      if (look.lit.value > 0) { m.emissiveMap = glows[i]; m.emissive.set('#ffffff'); m.emissiveIntensity = 1.6 * look.lit.value; }   // Dusk and Night: lit windows
       addFogShade(m, `cityWall${i}`);
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), m);
       mesh.castShadow = mesh.receiveShadow = true;
@@ -281,6 +300,13 @@ export class CityView {
     this.vehicleMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1 });
     addFogShade(this.vehicleMaterial, 'cityCars');
     this.lampMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
+    // Street lights come on at Dusk and Night: the lamp heads (the light vertices) shine.
+    this.lampMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uLit = look.lit;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uLit;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += step(0.5, vColor.g) * vec3(1.0, 0.8, 0.45) * uLit * 2.2;');
+    };
     addFogShade(this.lampMaterial, 'cityLamps');
     this.vehicleGeo = { car: vehicleGeometry('car'), bus: vehicleGeometry('bus'), truck: vehicleGeometry('truck') };
     this.lampGeo = lampGeometry();

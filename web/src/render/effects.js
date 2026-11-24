@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { sceneryStandIns } from './sceneryMesh.js';
 import { loadAtlas } from './fxAtlas.js';
+import { look } from './timeofday.js';
 
 // Short-lived visual effects: fireballs, debris, smoke, shell trails, and the
 // small fires that keep burning on craters, hurt tanks and wrecks.
@@ -227,6 +228,7 @@ export class Effects {
     const m = sm.material;
     m.map = map;
     m.color.set(color);
+    if (!additive) m.color.multiplyScalar(look.preset.shade);    // smoke is not lit by the scene: dim it with the light
     m.opacity = 0;
     m.rotation = 0;
     sm.center.set(0.5, 0.5);
@@ -277,8 +279,10 @@ export class Effects {
     // Flash light, borrowed from the pool: the one that is dimmest now.
     let f = this.flashes[0];
     for (const c of this.flashes) if (c.light.intensity < f.light.intensity) f = c;
-    f.life = 0; f.max = 0.45; f.peak = 40 * radius;
-    f.light.distance = radius * 9;
+    // After dark the flash lights up more of the field, and for longer.
+    const gain = look.preset.flash;
+    f.life = 0; f.max = 0.45 * (1 + 0.3 * (gain - 1)); f.peak = 40 * radius * gain;
+    f.light.distance = radius * 9 * (1 + 0.25 * (gain - 1));
     f.light.intensity = f.peak;
     f.light.position.set(x, y + radius * 0.4, z);
 
@@ -682,16 +686,19 @@ export class Effects {
   trail(pos, color, scale = 1) {
     if (this.live.trail >= this.q.trailCap) return;
     const sm = this.sprite(this.pick('smokeLight'), color);
+    // A trail stays bright in the dark, so a shell's path reads.
+    if (look.lit.value > 0) sm.material.color.set(color).multiplyScalar(1 + 0.5 * look.lit.value);
     sm.position.set(pos[0], pos[1], pos[2]);
     sm.material.rotation = rnd(0, 6.3);
     const s = rnd(1.1, 1.6) * scale;
     const max = rnd(1.0, 1.5);
+    const boost = 1 + 0.8 * look.lit.value;
     const dx = rnd(-0.6, 0.6), dy = rnd(0.2, 0.9), dz = rnd(-0.6, 0.6);
     this.add({ life: 0, max, obj: sm, pool: this.freeSprites, update: (it, t, dt) => {
       const k = t / it.max;
       sm.position.x += (dx + this.wind[0] * 0.8) * dt; sm.position.y += dy * dt; sm.position.z += (dz + this.wind[1] * 0.8) * dt;
       sm.scale.setScalar(s * (0.6 + 1.6 * k));
-      sm.material.opacity = Math.min(1, t * 10) * 0.4 * (1 - k) ** 1.5;
+      sm.material.opacity = Math.min(1, t * 10) * 0.4 * boost * (1 - k) ** 1.5;
     } }, 'trail');
   }
 
@@ -931,6 +938,12 @@ export class ShellVisual {
       }
       this.mesh.scale.setScalar(probe ? 0.75 : 1.25);
       this.mesh.visible = false;      // until it knows which way it is pointing
+    }
+    // After dark a shell shines (a soft additive glow round it), so it can be followed.
+    if (!probe && look.lit.value > 0 && TRAIL_FX) {
+      const glow = new THREE.Sprite(mat('glow', () => new THREE.SpriteMaterial({ map: TRAIL_FX.glowTex, color: '#ffd9a0', blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 })));
+      glow.scale.setScalar(2.4 + 2.6 * look.lit.value);
+      this.mesh.add(glow);
     }
     this.last = null;
     this.trailAt = null;          // where the last smoke puff was left
