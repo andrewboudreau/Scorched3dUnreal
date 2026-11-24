@@ -64,10 +64,11 @@ sign in.
 
 Mods are tracked in #10.
 
-**Mods come from perks.** The draft offers an unlock card for a mod you do
-not have, then level-up cards for one you do, up to its top level. A draft
-holds at most one mod card, and a tank takes at most four mod levels from
-perks in a match. The armory does not sell mods. The host can untick a mod's
+**Mods come from the draft.** The draft offers a new-mod card for a mod you
+do not have (while you have a free mod bay), then level cards for one you do,
+up to its top level. A draft holds at most one mod card, and a tank takes at
+most four mod levels from perks in a match. The armory does not sell a new
+mod, but it sells the next level of one you own. The host can untick a mod's
 cards in the match builder to turn it off; `?sat=` and `?orbiter=` give
 everyone one at a set level for testing.
 
@@ -85,6 +86,99 @@ trades a turn for a turn (plus the shooter's pay, and a turn in which every
 enemy shoots past no orbiter), rather than deciding the round, and the
 mod you drafted stays part of how you play. A mod lost with its tank comes
 back next round.
+
+## How you get things (the run, round by round)
+
+One rule each, so a player can say where anything came from:
+
+| Kind | Where it comes from | Kept |
+| --- | --- | --- |
+| **Starting kit** | Every tank starts the match with it (see below) | Ammo until fired |
+| **Weapons and gear** | Bought in the **armory** with money, after every round | Ammo until fired; gear for the next round |
+| **Perks** | The **draft**: pick one of three after every round | The whole match |
+| **Mods** | A **new mod** card in the draft gives level 1. The draft (a level card) or the armory (an upgrade, for money) raises it, up to level 3 | The whole match |
+
+In short: **the draft gives you new things; the armory stocks and upgrades
+them.** The draft never sells ammo; the armory never sells perks, and only
+upgrades a mod you already own.
+
+**Mod bays.** A tank holds at most **two** mods. With two, no more new-mod
+cards come up, only levels for the two you have. That keeps each tank to a
+clear plan (say, satellite plus decoy) and stops one tank stacking every
+defense.
+
+### The between-rounds screen
+
+Three steps, one screen, a stepper across the top (**Results · Draft ·
+Armory**), so it reads as one stop rather than three pop-ups:
+
+1. **Results**: who won the round, what everyone earned and why (damage, kill,
+   survived, round win, stipend).
+2. **Draft**: three cards, each badged **Perk**, **New mod** or **Mod level**
+   in its own colour. A mod card shows the level it gives and what that level
+   adds.
+3. **Armory**: sections, in this order: **Weapons** (Standard, then Advanced,
+   the latter locked with "opens in round N" until it does), **Gear**
+   (Armor Plate, Fuel Can, Jump Jets) and **Mod upgrades** (one card per mod
+   you own: the next level, what it adds, its price). A **Your kit** strip at
+   the top lists what you hold: ammo counts, mods with levels, perk tags.
+
+### Weapons: roles, tiers and prices
+
+Every weapon names its **role** (one word on its card) and a **tier**:
+
+- **Standard**: in the armory from the first visit (before round 2).
+- **Advanced**: from the second visit on (before round 3). The big blasts and
+  tricks you build towards.
+
+| Weapon | Role | Tier | Per buy | Price | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Shell | Damage | Kit | ∞ | free | 38 at the centre, 11 m |
+| Rangefinder | Aim | Standard | 3 | $60 | five markers, no damage |
+| Scout Missile | Recon | Standard | 2 | $50 | fog of war only |
+| Mound | Terrain | Standard | 3 | $90 | cover, or bury a tank |
+| Guided Missile | Damage | Standard | 2 | $90 | steer for 3 s (not online) |
+| Roller | Damage | Standard | 3 | $130 | finds tanks in hollows |
+| Breacher | Damage | Standard | 3 | $180 | 70, 22 m |
+| Flak | Anti-air | Standard | 2 | $220 | the answer to mods in the sky |
+| Teleport | Move | Advanced | 2 | $120 | |
+| Scatter | Damage | Advanced | 2 | $220 | five shells over a row |
+| Thunderhead | Damage | Advanced | 1 | $300 | 95, 34 m: the big one |
+
+Prices follow one yardstick: **about $2 per point of damage a good shot
+deals**, the same rate the game pays for damage, so a weapon pays for itself
+when it lands. Tools (aim, recon, terrain, move) are priced by what they save.
+`test/economy.test.js` holds the yardstick so a new weapon cannot drift.
+
+**Starting kit:** Shell (unlimited), 1 Breacher, 1 Roller, 1 Mound,
+2 Rangefinders, 1 Guided Missile (not online), 1 Jump Jet charge. Shown on
+the first round's banner and in the guide.
+
+**Pay:** $150 stipend every round, $80 for surviving it, $300 for winning it,
+$2 a point of damage, $150 a kill, $60 for shooting down a mod. A typical
+round earns $350 to $700.
+
+### Mods and their levels
+
+Each level adds something you can name, not only bigger numbers.
+
+| Mod | Family | Level 1 | Level 2 | Level 3 |
+| --- | --- | --- | --- | --- |
+| Gravity Orbiter | Defense | one well bends enemy shells | stronger and faster | two wells: a three-body slingshot |
+| Survey Satellite | Recon | aim labels, no wind | labels count wind, moons and orbiters | more labels |
+| **Decoy Beacon** (new) | Deception | Blink: fire it like a shot and your tank warps where it lands; a decoy of your tank stays where you were and fizzles after 20 damage | the decoy takes 35 and shows your hit points | when it fizzles it goes off: a 25-damage blast that hurts whoever is near |
+| **Point Defense** (new) | Defense | shoots down the first enemy shell coming down within 18 m, once a round | twice a round | 26 m, and it also stops a split shell's fragments |
+
+The Decoy is the answer to being ranged: when an enemy has your distance
+dialled in, blink and leave the decoy to eat the shot. CPUs aim at the decoy
+some of the time (easy ones more often). It beats recon (the satellite's
+labels and an enemy's aim history point at the decoy); a blast that catches
+both still finds you. Point Defense beats single heavy shells; Scatter, Flak
+bursts, Double Strike's second shell and Rollers get past it.
+
+More mod ideas for later: a recon drone that reveals fog, a jammer drone
+(jamming family), a shield bubble that soaks one blast, a repair drone, a
+mine layer.
 
 ## Attributes: buffs and debuffs
 
@@ -145,7 +239,8 @@ If it beats everything, it's a perk number, not a mod.
 | --- | --- | --- | --- |
 | Survey Satellite (L1–3) | Recon | Built as a mod (#10): from perks (Sat Recon, then Sharper Optics), deployed 70 m over its owner, 20–30 hp, a 5–7 turn battery | Voronoi patch with aim labels; L2+ includes wind and enemy orbiters (recon beats defense). CPUs don't use it |
 | Gravity Orbiter (L1–3) | Defense | Built (#10): from perks (Orbital Mechanic, then Tighter Orbit), 30–50 hp, lasts 6–8 turns | L3 is two wells orbiting each other around you (three-body); scrambles shots rather than blocking them. Owner's shells are exempt. CPUs misread it, more at higher levels |
-| Missile Defense | Defense | Idea | Intercepts the first enemy shell entering a radius; a few charges per round |
+| Point Defense (was Missile Defense) | Defense | Being built | Shoots down the first enemy shell coming down near you; charges per round (see "Mods and their levels") |
+| Decoy Beacon | Deception | Being built | Blink away and leave a decoy that soaks a ranged shot (see "Mods and their levels") |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
 | Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |
 | Comms uplink ("satcom") | Recon (support) | Idea | Buffs your other mods (Uplinked); could share recon with an ally in team play |
