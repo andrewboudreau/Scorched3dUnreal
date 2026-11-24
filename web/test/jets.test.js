@@ -359,7 +359,7 @@ test('teleport: other shells already in flight at the old spot miss', () => {
 test('flak: data, price, and a proximity burst into 12', () => {
   const w = WEAPON_BY_ID.flak;
   const burst = w.flight.find((f) => f.type === 'airburst');
-  assert.equal(w.price, 220);
+  assert.equal(w.price, 200);
   assert.equal(w.bundle, 2);
   assert.equal(burst.count, 12);
   assert.equal(burst.child, 'flaklet');

@@ -29,7 +29,8 @@ import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
-import { ModsUI, modShopCards } from './modsui.js';
+import { ModsUI } from './modsui.js';
+import { stepperHtml, resultsHtml, draftCardsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
@@ -349,9 +350,10 @@ function handleEvents() {
         effects.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
-        if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)}`, 1800);
+        if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
+        else if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg)}`, 1800);
         else {
-          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg)}` : game.modifier.desc, 3000);
+          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg)} · Your kit: ${kitWords({ online: game.online })}` : game.modifier.desc, e.round === 1 ? 3600 : 3000);
           bannerHold = performance.now() + 2800;
         }
         break;
@@ -2026,8 +2028,9 @@ function showRoundResult(kind) {
     return;
   }
   $('ro-title').textContent = w ? `Round ${game.round}: ${w.name} wins` : `Round ${game.round} is a draw`;
-  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.draftOn ? 'Continue to the perk draft' : 'Continue to the armory';
-  $('ro-table').innerHTML = standingsTable([...game.players].sort((a, b) => b.wins - a.wins));
+  $('ro-continue').textContent = !game.localHumans.length ? `Start round ${game.round + 1}` : game.draftOn ? 'Continue to the draft' : 'Continue to the armory';
+  $('ro-steps').innerHTML = stepperHtml('results', { draft: game.draftOn, round: game.round });
+  $('ro-table').innerHTML = resultsHtml([...game.players].sort((a, b) => b.wins - a.wins));
   $('roundover').classList.remove('hidden');
 }
 
@@ -2064,17 +2067,11 @@ function openDraftFor(pid) {
   $('draft').classList.remove('hidden');
   $('draft-card').style.borderTopColor = p.color;
   $('draft-swatch').style.background = p.color;
-  $('draft-player').textContent = whose(p, 'perk draft');
-  $('draft-step').textContent = hotseatStep(p, 'pick one, it lasts the whole match');
-  $('draft-owned').innerHTML = p.perks.length ? `Already yours: ${[...new Set(p.perks)].map((id) => perkChip(id, true)).join(' ')}` : 'Your first perk. They stack, round after round.';
-  $('draft-items').innerHTML = game.draft[pid].map((id) => {
-    const k = PERK_BY_ID[id];
-    return `<div class="shop-item draft-item">
-      <div class="si-head"><b>${k.name}</b><span class="perk">${k.tag}</span></div>
-      <div class="desc">${k.desc}</div>
-      <button class="buy" data-id="${id}">Take ${k.name}</button>
-    </div>`;
-  }).join('');
+  $('draft-player').textContent = whose(p, 'draft');
+  $('draft-step').textContent = hotseatStep(p, 'pick one: it lasts the whole match');
+  $('draft-steps').innerHTML = stepperHtml('draft', { round: game.round });
+  $('draft-owned').innerHTML = kitHtml(game, p);
+  $('draft-items').innerHTML = draftCardsHtml(game, p);
   $('draft-items').onclick = (e) => {
     const b = e.target.closest('button.buy');
     if (!b || !game.pickPerk(pid, b.dataset.id)) return;
@@ -2087,13 +2084,7 @@ function openDraftFor(pid) {
 // The armory, one human at a time. Each item is a card that says what it is,
 // what one purchase gives, what the shopper already holds, and has one button.
 const SHOP_ITEMS = [...WEAPONS.filter((w) => !w.hidden && !w.infinite), ...ITEMS];
-const SHOP_HINT = 'Shells are free and never run out. Everything here is extra.';
-// The armory items that are not weapons: what the shopper has queued, and what one purchase adds.
-const ITEM_INFO = {
-  armor: { have: (p) => p.pendingArmor, owned: (n) => `+${n} fitted`, none: 'None fitted', gives: '+30 armor' },
-  fuel: { have: (p) => p.pendingFuel, owned: (n) => `+${n} m loaded`, none: 'None loaded', gives: `+${TANK.fuelCan} m of driving` },
-  jet: { have: (p) => p.jets, owned: (n) => `You have ${n}`, none: 'You have none', gives: `${ITEMS.find((i) => i.id === 'jet').bundle} charges per purchase` },
-};
+const SHOP_HINT = 'Money you keep carries over to the next armory.';
 
 function openShopFor(pid) {
   const p = game.players[pid];
@@ -2103,6 +2094,7 @@ function openShopFor(pid) {
   $('shop-swatch').style.background = p.color;
   $('shop-player').textContent = whose(p, 'armory');
   $('shop-step').textContent = hotseatStep(p, `shopping for round ${game.round + 1}`);
+  $('shop-steps').innerHTML = stepperHtml('armory', { draft: game.draftOn, round: game.round });
   $('shop-done').textContent = next ? `Done · pass to ${next.name}` : session ? 'Done · ready for the next round' : `Done · start round ${game.round + 1}`;
   const note = (text, good = false) => {
     $('shop-note').textContent = text;
@@ -2110,32 +2102,19 @@ function openShopFor(pid) {
   };
   const render = (justBought) => {
     $('shop-money').textContent = `$${p.money}`;
-    $('shop-items').innerHTML = SHOP_ITEMS.filter((it) => !(game.online && it.id === 'guided') && !(it.fog && !game.cfg.fog) && (!WEAPON_BY_ID[it.id] || game.weaponOn(it.id))).map((it) => {
-      const isW = !!WEAPON_BY_ID[it.id];
-      const info = ITEM_INFO[it.id];
-      const have = isW ? p.inventory[it.id] || 0 : info.have(p);
-      const owned = isW ? `You have ${have}` : have ? info.owned(have) : info.none;
-      const gives = isW ? `${it.bundle} per purchase` : typeof info.gives === 'function' ? info.gives(p) : info.gives;
-      const price = game.priceOf(p, it.id);
-      const short = Number.isFinite(price) ? price - p.money : 0;
-      return `<div class="shop-item${short > 0 ? ' cant' : ''}${it.id === justBought ? ' bought' : ''}">
-        <div class="si-head"><b>${it.name}</b><span class="si-own${have ? ' has' : ''}">${owned}</span></div>
-        <div class="desc">${it.desc}</div>
-        <div class="si-foot">
-          <span class="si-gives">${gives}${short > 0 ? `<span class="si-short">need $${short} more</span>` : ''}</span>
-          <button class="buy" data-id="${it.id}" aria-label="Buy ${it.name} for $${price}" ${short > 0 || !Number.isFinite(price) ? 'disabled' : ''}>${Number.isFinite(price) ? `$${price}` : 'Max'}</button>
-        </div>
-      </div>`;
-    }).join('') + modShopCards(game, p, justBought);
+    $('shop-kit').innerHTML = kitHtml(game, p);
+    $('shop-items').innerHTML = armoryHtml(game, p, justBought);
   };
   $('shop-items').onclick = (e) => {
     const b = e.target.closest('button.buy');
-    const it = SHOP_ITEMS.find((x) => x.id === b?.dataset.id) || MOD_BY_ID[b?.dataset.id];
+    const id = b?.dataset.id;
+    const it = SHOP_ITEMS.find((x) => x.id === id) || MOD_BY_ID[id];
     const price = it ? game.priceOf(p, it.id) : 0;
-    if (!b || b.disabled || !game.buy(pid, it.id)) return;
+    const level = MOD_BY_ID[id] ? game.modLevel(p, id) + 1 : 0;
+    if (!b || b.disabled || !it || !game.buy(pid, it.id)) return;
     sound.click();
     render(it.id);
-    note(`Bought ${it.bundle ? `${it.bundle} × ${it.name}` : it.name} for $${price}. $${p.money} left.`, true);
+    note(`Bought ${level ? `${it.name} level ${level}` : it.bundle ? `${it.bundle} × ${it.name}` : it.name} for $${price}. $${p.money} left.`, true);
     const funds = $('shop-money');
     funds.classList.remove('pulse');
     void funds.offsetWidth;   // restart the animation
@@ -2143,7 +2122,7 @@ function openShopFor(pid) {
   };
   render();
   const haggle = perkSum(p, 'discount') ? ' Haggler prices applied.' : '';
-  note(SHOP_ITEMS.some((it) => game.priceOf(p, it.id) <= p.money) ? SHOP_HINT + haggle : `Nothing in reach this time. ${SHOP_HINT}`);
+  note(SHOP_ITEMS.some((it) => game.priceOf(p, it.id) <= p.money) ? SHOP_HINT + haggle : `Nothing in reach this time. ${SHOP_HINT}`);   // mod upgrades aside
   $('shop-done').onclick = nextShopper;
 }
 

@@ -17,8 +17,9 @@ test('weaponRows lists the sale weapons, with prices, and skips hidden or namele
   const names = rows.map((r) => r.name);
   assert.ok(names.includes('Shell') && names.includes('Flak'));
   assert.ok(!names.includes('Scatterlet') && !names.includes('Flak fragment'));
-  assert.equal(rows.find((r) => r.name === 'Shell').meta, 'free');
-  assert.equal(rows.find((r) => r.name === 'Guided Missile').meta, '$90 for 2');
+  assert.equal(rows.find((r) => r.name === 'Shell').meta, 'Damage · free · always in stock');
+  assert.equal(rows.find((r) => r.name === 'Guided Missile').meta, 'Damage · $90 for 2 · start with 1');
+  assert.match(rows.find((r) => r.name === 'Thunderhead').meta, /Advanced/);
   assert.deepEqual(weaponRows([{ id: 'x' }, null, 7, { name: '  ' }]), []);
   assert.deepEqual(weaponRows(undefined), []);
 });

@@ -1,7 +1,7 @@
 import { makeRng } from './rng.js';
 import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
@@ -12,13 +12,15 @@ import { MODS, MOD_BY_ID, MOD_PAY, modLab, modLevel, modPrice, buyLevel, fitMods
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
 const DEG = Math.PI / 180;
-const START_INVENTORY = { shell: Infinity, guided: 1, breacher: 1, roller: 1, mound: 1, scatter: 0, ranger: 2 };
 const START_JETS = 1;   // jump jet charges each tank starts the match with (they carry over between rounds)
 
 // Money awards.
 // Everyone gets the stipend, so even a tank that was knocked out early has
 // something to spend in the shop.
 export const PAY = { perDamage: 2, kill: 150, survive: 80, roundWin: 300, stipend: 150 };
+// What a tank earned this round, by where it came from (`p.earned`), for the
+// between-rounds results: damage, kills, mods shot down, survived, won, stipend.
+export const EARNINGS = ['damage', 'kill', 'mod', 'survive', 'win', 'stipend'];
 
 // Each tank remembers its last few shots (`p.shots`, oldest first) so the UI
 // can show what changed since. Driving or falling further than `moved` metres
@@ -200,7 +202,7 @@ export class Game {
   // What every tank starts the match with, less any weapon that is off (and
   // no Guided Missile online: no steering there).
   startInventory() {
-    const inv = { ...START_INVENTORY, ...(this.cfg.local ? { guided: 0 } : {}) };
+    const inv = { ...startKit(), ...(this.cfg.local ? { guided: 0 } : {}) };
     for (const id of Object.keys(inv)) if (!this.weaponOn(id)) inv[id] = 0;
     return inv;
   }
@@ -259,6 +261,7 @@ export class Game {
       p.power = 60;
       p.elev = 45;
       p.roundDamage = 0;
+      p.earned = {};
       p.reloading = false;
       fitMods(this.cfg.lab, p);   // an up mod carries on; the rest are fitted fresh
       anchorMod(p, 'satellite', (x, z) => this.groundAt(x, z));   // over its owner's new spot
@@ -819,7 +822,7 @@ export class Game {
     const m = p.mods[mod];
     const pos = mod === 'satellite' ? [m.x, m.y, m.z] : null;
     this.emit({ type: 'mod', what: r, player: owner, mod, hp: m.hp, by: from ?? null, pos });
-    if (r === 'down' && from != null && from !== owner) this.players[from].money += Math.round(MOD_PAY * (this.modifier.pay || 1));
+    if (r === 'down' && from != null && from !== owner) this.earn(this.players[from], 'mod', Math.round(MOD_PAY * (this.modifier.pay || 1)));
   }
 
   // A blast at `point` reaches the enemy mods near it, like it reaches tanks.
@@ -955,9 +958,9 @@ export class Game {
     if (alive.length === 1) winner = alive[0];
     else if (alive.length > 1) winner = alive.reduce((a, b) => (b.hp > a.hp ? b : a));
     const payK = this.modifier.pay || 1;
-    for (const p of this.players) p.money += PAY.stipend * payK;
-    for (const p of alive) p.money += PAY.survive * payK;
-    if (winner) { winner.wins++; winner.money += PAY.roundWin * payK; winner.score += 1; }
+    for (const p of this.players) this.earn(p, 'stipend', PAY.stipend * payK);
+    for (const p of alive) this.earn(p, 'survive', PAY.survive * payK);
+    if (winner) { winner.wins++; this.earn(winner, 'win', PAY.roundWin * payK); winner.score += 1; }
     this.lastRoundResult = { round: this.round, winner: winner ? winner.id : null };
     this.phase = this.round >= this.cfg.rounds ? 'matchOver' : 'roundOver';
     this.phaseTime = 0;
@@ -1027,11 +1030,25 @@ export class Game {
     this.startRound();
   }
 
+  // Money in, counted by where it came from (EARNINGS) for the results.
+  earn(p, kind, amount) {
+    p.money += amount;
+    p.earned = p.earned || {};
+    p.earned[kind] = (p.earned[kind] || 0) + amount;
+  }
+
+  // The armory visit this is (1 after round 1, ...), and the one `id` is first
+  // sold on (weapons.js TIERS: Advanced weapons wait for the second).
+  get armoryVisit() { return this.round; }
+  opensOn(id) { return opensOnVisit(WEAPON_BY_ID[id], this.cfg.rounds); }
+  inStock(id) { return !WEAPON_BY_ID[id] || this.opensOn(id) <= this.armoryVisit; }
+
   // What this tank pays for an armory item (perks can lower it).
   priceOf(p, id) {
     const it = WEAPON_BY_ID[id] || ITEMS.find((x) => x.id === id);
     if (!MOD_BY_ID[id] && (!it || !(it.price > 0))) return Infinity;
     if (WEAPON_BY_ID[id] && !this.weaponOn(id)) return Infinity;   // off in this match: not for sale
+    if (!this.inStock(id)) return Infinity;                        // its tier is not open yet
     const base = MOD_BY_ID[id] ? modPrice(this.cfg.lab, p, id) : it.price;   // a mod is priced per level
     if (!Number.isFinite(base)) return Infinity;
     return Math.round((base * (1 - Math.min(0.5, perkSum(p, 'discount')))) / 5) * 5;
@@ -1057,9 +1074,12 @@ export class Game {
   // host's Lab puts mods in the armory (by default they come from perks).
   aiShop(p) {
     if (p.ai !== 'easy' && p.money >= this.priceOf(p, 'orbiter') + 150) this.buy(p.id, 'orbiter');
+    for (const d of MODS) if (p.ai !== 'easy' && this.modLevel(p, d.id) > 0 && p.money >= this.priceOf(p, d.id) + 200) this.buy(p.id, d.id);   // a level up for a mod it has
     const wishlist = ['breacher', 'scatter', 'flak', 'armor', 'roller', 'fuel', 'jet', 'breacher'];
-    // Its temper's own buys (ai.TEMPERS) come right after the first Breacher.
-    for (const id of [wishlist[0], ...TEMPERS[this.aiTemper(p)].buys, ...wishlist.slice(1)]) this.buy(p.id, id);
+    // Its temper's own buys (ai.TEMPERS) come right after the first Breacher; a
+    // Hard CPU saves for a Thunderhead first when the armory has one.
+    const big = p.ai === 'hard' ? ['thunderhead'] : [];
+    for (const id of [...big, wishlist[0], ...TEMPERS[this.aiTemper(p)].buys, ...wishlist.slice(1)]) this.buy(p.id, id);
   }
 
   // ---------- input (current human player) ----------
@@ -1543,7 +1563,7 @@ export class Game {
     const attacker = from != null ? this.players[from] : null;
     const payK = this.modifier.pay || 1;
     if (attacker && attacker !== p) {
-      attacker.money += Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK);
+      this.earn(attacker, 'damage', Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK));
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
       p.hitBy = attacker.id;
@@ -1557,7 +1577,7 @@ export class Game {
     this.emit({ type: 'damage', player: p.id, amount, hp: p.hp, by: attacker ? attacker.id : null });
     if (p.hp <= 0 && p.alive) {
       p.alive = false;
-      if (attacker && attacker !== p) { attacker.money += PAY.kill * payK; attacker.stats.kills++; }
+      if (attacker && attacker !== p) { this.earn(attacker, 'kill', PAY.kill * payK); attacker.stats.kills++; }
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
       this.dropMods(p);
       // The wreck cooks off: a small crater of its own.

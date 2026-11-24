@@ -140,15 +140,17 @@ Every weapon names its **role** (one word on its card) and a **tier**:
 | Guided Missile | Damage | Standard | 2 | $90 | steer for 3 s (not online) |
 | Roller | Damage | Standard | 3 | $130 | finds tanks in hollows |
 | Breacher | Damage | Standard | 3 | $180 | 70, 22 m |
-| Flak | Anti-air | Standard | 2 | $220 | the answer to mods in the sky |
+| Flak | Anti-air | Standard | 2 | $200 | the answer to mods in the sky |
 | Teleport | Move | Advanced | 2 | $120 | |
 | Scatter | Damage | Advanced | 2 | $220 | five shells over a row |
-| Thunderhead | Damage | Advanced | 1 | $300 | 95, 34 m: the big one |
+| Thunderhead | Damage | Advanced | 1 | $200 | 95, 30 m: the big one |
 
-Prices follow one yardstick: **about $2 per point of damage a good shot
-deals**, the same rate the game pays for damage, so a weapon pays for itself
-when it lands. Tools (aim, recon, terrain, move) are priced by what they save.
-`test/economy.test.js` holds the yardstick so a new weapon cannot drift.
+Prices follow one yardstick: **a damage weapon costs $0.50 to $1.40 a shot
+for each point a good shot deals** (blast damage, times the share of a
+spread that lands, scaled by the blast's size). The game pays $2 a point, so
+a shot that lands always pays for itself. Flak is priced as anti-air, and the
+tools (aim, recon, terrain, move) by what they save. `test/economy.test.js`
+holds the yardstick so a new weapon cannot drift.
 
 **Starting kit:** Shell (unlimited), 1 Breacher, 1 Roller, 1 Mound,
 2 Rangefinders, 1 Guided Missile (not online), 1 Jump Jet charge. Shown on

@@ -125,7 +125,7 @@ test('CPUs never buy or fire a weapon that is off', () => {
     if (g.phase === 'roundOver') {
       for (const p of g.players) p.money += 5000;
       g.openShop();
-      for (const p of g.players) for (const id of p.bought) assert.ok(['roller', 'mound', 'armor', 'fuel', 'jet'].includes(id), `bought ${id}`);
+      for (const p of g.players) for (const id of p.bought) assert.ok(['roller', 'mound', 'armor', 'fuel', 'jet', 'orbiter', 'satellite'].includes(id), `bought ${id}`);   // or an upgrade of a drafted mod
       continue;
     }
     g.update(1 / 20);

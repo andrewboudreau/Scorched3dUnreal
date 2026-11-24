@@ -26,6 +26,7 @@
   <meta property="og:image:alt" content="A red tank tipped on the rim of a fresh crater, a shell bursting ahead and a blue tank on the far hill." />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/armory.css" />
   <script type="importmap">
     { "imports": { "three": "./vendor/three/three.module.js" } }
   </script>
@@ -165,18 +166,20 @@
     </div>
   </div>
 
-  <!-- Between rounds -->
+  <!-- Between rounds: Results, Draft, Armory (src/armory.js builds their contents) -->
   <div id="roundover" class="screen hidden">
-    <div class="card">
+    <div class="card ar-card">
+      <div id="ro-steps" class="ar-steps"></div>
       <h2 id="ro-title">Round over</h2>
-      <table id="ro-table"></table>
+      <table id="ro-table" class="ar-results"></table>
       <button id="ro-continue" class="primary">Continue</button>
     </div>
   </div>
 
-  <!-- Perk draft: one human at a time, before their armory -->
+  <!-- The draft: one human at a time, before their armory -->
   <div id="draft" class="screen hidden">
-    <div id="draft-card" class="card shop-card">
+    <div id="draft-card" class="card shop-card ar-card">
+      <div id="draft-steps" class="ar-steps"></div>
       <div class="shop-head">
         <div>
           <div id="draft-step" class="shop-step"></div>
@@ -184,12 +187,13 @@
         </div>
       </div>
       <div id="draft-items" class="shop-grid"></div>
-      <div id="draft-owned" class="shop-note"></div>
+      <div id="draft-owned" class="ar-kit"></div>
     </div>
   </div>
 
   <div id="shop" class="screen hidden">
-    <div id="shop-card" class="card shop-card">
+    <div id="shop-card" class="card shop-card ar-card">
+      <div id="shop-steps" class="ar-steps"></div>
       <div class="shop-head">
         <div>
           <div id="shop-step" class="shop-step"></div>
@@ -197,6 +201,7 @@
         </div>
         <div class="shop-funds"><label>Funds left</label><div id="shop-money">$0</div></div>
       </div>
+      <div id="shop-kit" class="ar-kit"></div>
       <div id="shop-items" class="shop-grid"></div>
       <div id="shop-note" class="shop-note"></div>
       <button id="shop-done" class="primary">Done</button>

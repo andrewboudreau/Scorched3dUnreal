@@ -56,7 +56,10 @@ test('mods: data, Lab options, prices and perks', () => {
   assert.deepEqual(PERK_BY_ID.orbital.mods, { orbiter: 1 });
   assert.equal(modLevel({}, { ...p, perks: ['orbital'] }, 'orbiter'), 1);
   assert.equal(modLevel({}, { ...p, perks: ['orbital', 'orbitalup', 'orbitalup'] }, 'orbiter'), 3);
-  assert.equal(modLevel({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 1, 'nothing bought counts outside the armory');
+  assert.equal(modLevel({}, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 1 } } }, 'orbiter'), 2, 'armory upgrades count once the draft gave it');
+  assert.equal(modLevel({}, { ...p, mods: { orbiter: { bought: 2 } } }, 'orbiter'), 0, 'but the armory never sells the first level by default');
+  assert.equal(modPrice({}, { ...p, perks: ['orbital'] }, 'orbiter'), MOD_BY_ID.orbiter.prices[1], 'the armory sells the next level of one you own');
+  assert.equal(modPrice({}, { ...p, perks: ['orbital', 'orbitalup', 'orbitalup'] }, 'orbiter'), Infinity, 'at the top level');
   assert.equal(modLevel(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), 3);
   assert.equal(modPrice(shop, { ...p, perks: ['orbital'], mods: { orbiter: { bought: 2 } } }, 'orbiter'), Infinity, 'at the top level');
 

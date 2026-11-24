@@ -63,6 +63,10 @@ export const SKY = { altitude: 70, lean: 14, radius: 5 };
 // Pay for shooting down an enemy mod.
 export const MOD_PAY = 60;
 
+// A tank holds at most this many mods: once it owns that many, the draft
+// offers only levels for them, no new ones (game.perkFits).
+export const MOD_BAYS = 2;
+
 export const MODS = [
   {
     id: 'orbiter', name: 'Gravity Orbiter', tag: 'ORB', family: 'defense', maxLevel: 3,
@@ -135,17 +139,24 @@ export function modLevel(lab, p, id) {
   if (!m) return 0;
   const { mode, level } = modLab(lab, id);
   if (mode === 'off') return 0;
-  const base = mode === 'all' ? level : mode === 'shop' ? boughtLevels(p, id) : 0;
-  return Math.min(m.maxLevel, base + perkLevels(p, id));
+  const perks = perkLevels(p, id);
+  const bought = boughtLevels(p, id);
+  // 'perk': the draft gives level 1, and then armory upgrades count too.
+  const base = mode === 'all' ? level : mode === 'shop' ? bought : perks > 0 ? bought : 0;
+  return Math.min(m.maxLevel, base + perks);
 }
 
-// What the next level costs `p` before any discount, or Infinity when it is
-// not for sale (not in the armory, or at the top level already).
+// The armory's price for the next level of `id`: any level when the host's
+// Lab sells mods ('shop'); by default ('perk') only an upgrade of one `p`
+// already has (the draft gives the first level); never when the Lab hands
+// everyone a level ('all') or turns it off. Infinity when it is not for sale.
 export function modPrice(lab, p, id) {
   const m = MOD_BY_ID[id];
-  if (!m || modLab(lab, id).mode !== 'shop') return Infinity;
+  const mode = modLab(lab, id).mode;
+  if (!m || mode === 'off' || mode === 'all') return Infinity;
   const have = modLevel(lab, p, id);
-  return have >= m.maxLevel ? Infinity : m.prices[have];
+  if (have >= m.maxLevel || (mode === 'perk' && have < 1)) return Infinity;
+  return m.prices[have];
 }
 
 // One more armory level.

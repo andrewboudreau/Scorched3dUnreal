@@ -118,10 +118,10 @@ test('perks: wide blast and heavy charge reach further and hit harder', () => {
 test('perks: haggler lowers prices, bounty raises damage pay', () => {
   const g = plain();
   const [a, b] = g.players;
-  assert.equal(g.priceOf(a, 'breacher'), 160);
+  assert.equal(g.priceOf(a, 'breacher'), 180);
   a.perks.push('haggler');
-  assert.equal(g.priceOf(a, 'breacher'), 130);
-  a.money = 130;
+  assert.equal(g.priceOf(a, 'breacher'), 145);
+  a.money = 145;
   assert.ok(g.buy(0, 'breacher'));
   assert.equal(a.money, 0);
   g.damage(a, 10, 1);

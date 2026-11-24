@@ -18,26 +18,34 @@
 //                                       within `radius` of where it lands, for
 //                                       their next `turns` shots
 //   warp   {}                           the shooter's tank is moved to where it lands
+//
+// Every weapon a player can hold also says how it is got (docs/design-guide.md,
+// "How you get things"):
+//   role   one word for what it is for, shown on its armory card
+//   tier   'kit' (the Shell: always there), 'standard' (in the armory from the
+//          first visit) or 'advanced' (from the second visit on; see TIERS)
+//   start  how many every tank starts the match with (the starting kit)
+//   price, bundle   what one armory purchase costs and gives
 
 export const WEAPONS = [
   {
-    id: 'shell', name: 'Shell', price: 0, bundle: 0, infinite: true,
+    id: 'shell', name: 'Shell', price: 0, bundle: 0, infinite: true, role: 'Damage', tier: 'kit',
     desc: 'Standard round. Always in stock.',
     impact: [{ type: 'blast', radius: 11, damage: 38, depth: 0.6 }],
   },
   {
-    id: 'guided', name: 'Guided Missile', price: 90, bundle: 2,
+    id: 'guided', name: 'Guided Missile', price: 90, bundle: 2, role: 'Damage', tier: 'standard', start: 1,
     desc: 'Steer it in flight with A / D for a few seconds. Shell-sized blast.',
     flight: [{ type: 'steer', rate: 34, fuel: 3 }],
     impact: [{ type: 'blast', radius: 11, damage: 38, depth: 0.6 }],
   },
   {
-    id: 'breacher', name: 'Breacher', price: 160, bundle: 3,
+    id: 'breacher', name: 'Breacher', price: 180, bundle: 3, role: 'Damage', tier: 'standard', start: 1,
     desc: 'Heavy round. Wide crater, heavy damage.',
     impact: [{ type: 'blast', radius: 22, damage: 70, depth: 0.7 }],
   },
   {
-    id: 'scatter', name: 'Scatter', price: 240, bundle: 2,
+    id: 'scatter', name: 'Scatter', price: 220, bundle: 2, role: 'Damage', tier: 'advanced',
     desc: 'Splits into five shells at the top of its arc.',
     flight: [{ type: 'split', count: 5, spread: 9, child: 'scatterlet' }],
     impact: [{ type: 'blast', radius: 10, damage: 30, depth: 0.55 }],
@@ -47,7 +55,7 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 10, damage: 28, depth: 0.55 }],
   },
   {
-    id: 'flak', name: 'Flak', price: 220, bundle: 2,
+    id: 'flak', name: 'Flak', price: 200, bundle: 2, role: 'Anti-air', tier: 'standard',
     desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Anti-air: it also bursts by an enemy orbiter or satellite and can bring it down. Passing nobody, it bursts just above the ground.',
     // On the way down it bursts at its nearest pass over an enemy tank (within
     // `range` across, `low`..`high` above it), or `floor` over the ground.
@@ -69,32 +77,84 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 6, damage: 16, depth: 0.45 }],
   },
   {
-    id: 'roller', name: 'Roller', price: 130, bundle: 3,
+    id: 'roller', name: 'Roller', price: 130, bundle: 3, role: 'Damage', tier: 'standard', start: 1,
     desc: 'Lands, rolls downhill and blows up where it stops or on the first tank it touches.',
     impact: [{ type: 'roll', then: [{ type: 'blast', radius: 14, damage: 55, depth: 0.6 }] }],
   },
   {
-    id: 'mound', name: 'Mound', price: 90, bundle: 3,
+    id: 'mound', name: 'Mound', price: 90, bundle: 3, role: 'Terrain', tier: 'standard', start: 1,
     desc: 'Throws up a hill of dirt. Bury a tank or build cover.',
     impact: [{ type: 'mound', radius: 20, height: 14 }],
   },
   {
-    id: 'ranger', name: 'Rangefinder', price: 60, bundle: 3,
+    id: 'ranger', name: 'Rangefinder', price: 60, bundle: 3, role: 'Aim', tier: 'standard', start: 2,
     desc: 'No damage. Five markers: as aimed, turret ±2° and power ±5. Shows which way to adjust.',
     flight: [{ type: 'range', turn: 2, power: 5 }],
     impact: [],
   },
   {
-    id: 'teleport', name: 'Teleport', price: 120, bundle: 2,
+    id: 'teleport', name: 'Teleport', price: 120, bundle: 2, role: 'Move', tier: 'advanced',
     desc: 'No damage. Your tank is moved to where it lands (nudged off water, houses and other tanks).',
     impact: [{ type: 'warp' }],
   },
   {
-    id: 'scout', name: 'Scout Missile', price: 50, bundle: 2, fog: true,
+    id: 'scout', name: 'Scout Missile', price: 50, bundle: 2, fog: true, role: 'Recon', tier: 'standard',
     desc: 'Fog of war only. No damage: lights up everything within 120 m of where it lands, for you, for your next two shots.',
     impact: [{ type: 'scout', radius: 120, turns: 2 }],
   },
+  {
+    id: 'thunderhead', name: 'Thunderhead', price: 200, bundle: 1, role: 'Damage', tier: 'advanced',
+    desc: 'The big one: a 30 m blast that hits as hard as anything in the armory. Mind your own tank.',
+    impact: [{ type: 'blast', radius: 30, damage: 95, depth: 0.75 }],
+  },
 ];
+
+// When each tier is in the armory: `visit` is the armory visit it opens on
+// (the first visit is after round 1). A short match never waits for it: with
+// fewer visits than that, it opens on the last one.
+export const TIERS = {
+  kit: { name: 'Kit', visit: 0 },
+  standard: { name: 'Standard', visit: 1 },
+  advanced: { name: 'Advanced', visit: 2 },
+};
+
+// The armory visit (1, 2, ...) a weapon is first sold on, in a match of
+// `rounds` rounds (which has rounds - 1 visits).
+export function opensOnVisit(weapon, rounds = Infinity) {
+  const v = TIERS[weapon?.tier]?.visit ?? 1;
+  return Math.max(1, Math.min(v, rounds - 1));
+}
+
+// The starting kit, as an inventory: the Shell's endless supply plus every
+// weapon's `start`.
+export function startKit() {
+  const inv = {};
+  for (const w of WEAPONS) {
+    if (w.infinite) inv[w.id] = Infinity;
+    else if (w.start) inv[w.id] = w.start;
+  }
+  return inv;
+}
+
+// What a damage weapon can do with one good shot, as one number: its centre
+// damage over every shell it becomes, a little more for a wider blast
+// (scaled by the square root of its radius against the Shell's 11 m). The
+// armory's yardstick (test/economy.test.js): a damage weapon costs between
+// VALUE_BAND dollars a point of this per shot, so nothing is a steal or a
+// waste, and since the game pays PAY.perDamage ($2) a point, a shot that lands
+// pays for itself.
+export const VALUE_BAND = [0.5, 1.4];
+export function shotValue(weapon) {
+  const blastOf = (w) => (w.impact || []).flatMap((p) => (p.type === 'roll' ? p.then : [p])).find((p) => p.type === 'blast');
+  const split = (weapon.flight || []).find((p) => p.type === 'split' || p.type === 'airburst');
+  const child = split ? WEAPONS.find((w) => w.id === split.child) : null;
+  const b = blastOf(child || weapon);
+  if (!b) return 0;
+  const n = split ? split.count : 1;
+  // An airburst's fragments come down over an area: about half land on the tank.
+  const share = split?.type === 'airburst' ? 0.5 : split ? 0.6 : 1;
+  return b.damage * n * share * Math.sqrt(b.radius / 11);
+}
 
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },

@@ -57,7 +57,11 @@ export function weaponRows(weapons) {
     let price = '';
     if (w.infinite || w.price === 0) price = 'free';
     else if (Number.isFinite(w.price)) price = w.bundle > 1 ? `$${w.price} for ${w.bundle}` : `$${w.price}`;
-    rows.push({ name: w.name, meta: price, text: firstSentence(w.desc) });
+    // Role, when it opens, and how many every tank starts with.
+    const tier = w.tier === 'advanced' ? 'Advanced, from the 2nd armory' : '';
+    const start = w.start ? `start with ${w.start}` : w.infinite ? 'always in stock' : '';
+    const meta = [w.role, price, tier, start].filter(Boolean).join(' · ');
+    rows.push({ name: w.name, meta, text: firstSentence(w.desc) });
   }
   return rows;
 }

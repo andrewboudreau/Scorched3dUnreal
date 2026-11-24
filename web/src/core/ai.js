@@ -301,9 +301,10 @@ export const UTILITY = ['ranger', 'scout', 'mound', 'teleport'];
 //   deep      m in a hole: Teleport out
 //   hurt      share of its hit points left under which it counts as hurt
 //   behind    its hp + armor under this share of the strongest enemy's
+//   big       m: no Thunderhead at a target closer than this (its blast would reach back)
 //   easyDull  how keenly an Easy CPU reads the situation (1: fully)
 //   easyWild  chance an Easy CPU just grabs any weapon it could use
-export const ARSENAL = { finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, easyDull: 0.5, easyWild: 0.12 };
+export const ARSENAL = { big: 60, finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, easyDull: 0.5, easyWild: 0.12 };
 
 // Does it still not have the range on a target? `m` is its aim memory for it
 // (planShot): none yet, or an error left bigger than about a degree or 2% of the charge.
@@ -339,6 +340,8 @@ export function weaponWeights(me, target, ctx = {}) {
   const hits = ctx.hits || 0;
 
   add('breacher', 0.9 * (tough <= A.tough ? sit(1.5) : 1));
+  // The Thunderhead's 30 m blast: kept for a target it has the range on, never one close enough to catch itself.
+  if ((ctx.dist || 0) > A.big) add('thunderhead', 1.1 * (unsure ? 0.5 : sit(1.8)));
   add('scatter', 0.45 * (unsure ? sit(1.5) : 1));
   add('flak', 0.35 * (target.shielded || target.aloft ? sit(4) : 1) * (unsure ? sit(1.3) : 1));
   add('roller', 0.35 * (dy < -A.below ? sit(4) : dy > A.below ? 0.3 : 1));

@@ -419,7 +419,7 @@ test('shop: buying spends money and grants a bundle', () => {
   const a = g.players[0];
   a.money = 500;
   assert.ok(g.buy(0, 'breacher'));
-  assert.equal(a.money, 340);
+  assert.equal(a.money, 320);
   assert.equal(a.inventory.breacher, 4);
   assert.equal(g.buy(0, 'shell'), false, 'shell is free and infinite, not for sale');
   a.money = 10;
