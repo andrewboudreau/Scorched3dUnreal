@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { CITY } from '../core/city.js';
+import { CITY, chunkBox } from '../core/city.js';
 import { makeRng } from '../core/rng.js';
 import { addFogShade } from './terrainMesh.js';
+import { Debris, Falls } from './cityFx.js';
 
 // Draws the City (core/city.js): its buildings, their rooftops, the damage
 // they have taken and the rubble of those that came down, the street lights
@@ -12,8 +13,16 @@ import { addFogShade } from './terrainMesh.js';
 // the windows line up with the floors); everything else that stands still
 // (roofs, parapets, water towers, broken tops, scars, rubble) is one
 // vertex-coloured mesh. Both are rebuilt only when the town changes (its
-// `version`). Street lights are one InstancedMesh, and each kind of vehicle
-// another, moved every frame.
+// `version`), and then only the buildings that changed are made again.
+// Street lights are one InstancedMesh, and each kind of vehicle another,
+// moved every frame.
+//
+// An intact building is one box of walls. Once it has lost a chunk it is
+// drawn chunk by chunk (`chunked`): the outer walls of the chunks still
+// standing, windows lined up as before, and broken edges where chunks are
+// gone: a dark inside with floor slabs sticking out, ragged wall ends, broken
+// caps and undersides. Debris, toppling corners and buildings dropping into
+// their rubble are render/cityFx.js.
 
 const BAY = 3;                 // m of wall a window texture column covers
 const TILE = 8;                // bays and storeys in one window texture
@@ -32,6 +41,8 @@ const TINTS = [[1, 1, 1], [0.92, 0.95, 1], [1, 0.95, 0.88], [0.88, 0.9, 0.87], [
 const ROOF = '#55585c';
 const SLAB = '#6f6a62';         // a broken floor, open to the sky
 const SCAR = '#2c2622';
+const INSIDE = '#3e3a36';       // a building's inside, where a chunk is gone
+const BX = [0, 0, 0, 0, 0, 0];  // scratch: a chunk's box (core chunkBox)
 const AWNINGS = ['#b0473a', '#3f7a5a', '#3b6a9a', '#c99a3a', '#7a4a7a'];
 const PAINT = {
   car: ['#c23b30', '#2f5d9e', '#e8e4da', '#2b2d31', '#8a9096', '#d9a23a', '#3f7a4f', '#6b3f78'],
@@ -287,9 +298,15 @@ export class CityView {
     this.cars = {};      // kind -> { mesh, list: [vehicle index] }
     this.lamps = null;
     this.burning = new Set();
+    this.debris = new Debris();
+    this.group.add(this.debris.mesh);
+    this.falls = new Falls(this.group);
+    this.groundAt = (x, z) => (this.town ? this.town.terrain.heightAt(x, z) : 0);
   }
 
   dispose() {
+    this.falls.clear();
+    this.debris.dispose();
     for (const w of this.walls) { w.geometry.dispose(); w.material.dispose(); }
     this.plain.geometry.dispose();
     this.plain.material.dispose();
@@ -308,8 +325,8 @@ export class CityView {
     this.burning.clear();
   }
 
-  // Called every frame.
-  update() {
+  // Called every frame, with the game's time step.
+  update(dt = 1 / 60) {
     const town = this.game.town;
     this.group.visible = !!town;
     if (!town) { this.town = null; return; }
@@ -317,6 +334,8 @@ export class CityView {
       this.town = town;
       this.version = -1;
       this.pieces = [];
+      this.debris.clear();
+      this.falls.clear();
       this.setTraffic(town.traffic);
     }
     if (town.version !== this.version) {
@@ -324,6 +343,8 @@ export class CityView {
       this.rebuild(town);
     } else if (this.lampsStale) this.placeLamps(town);
     this.syncTraffic(town.traffic);
+    this.falls.update(dt);
+    this.debris.update(dt, this.groundAt);
   }
 
   // ---- buildings ----
@@ -333,7 +354,7 @@ export class CityView {
   groundMoved() {
     if (!this.town) return;
     this.groundStamp++;
-    if (this.town.buildings.some((b) => b.collapsed)) this.version = -1;
+    if (this.town.buildings.some((b) => b.collapsed || b.lost)) this.version = -1;
     this.lampsStale = true;
   }
 
@@ -341,12 +362,14 @@ export class CityView {
     const walls = STYLES.map(() => []);
     const plain = [];
     for (const b of town.buildings) {
-      const sig = b.collapsed ? `c${this.groundStamp}` : `${b.floors}|${b.broken ? 1 : 0}|${b.hits.length}|${Math.round(b.hp)}`;
+      const sig = b.collapsed ? `c${this.groundStamp}` : `${b.lost ? b.cells.map((v) => (v > 0 ? 1 : 0)).join('') + 'g' + this.groundStamp : 'whole'}|${b.hits.length}`;
       let q = this.pieces[b.id];
       if (!q || q.sig !== sig) {
+        // It just came down: show it falling, as it stood, into its rubble.
+        if (b.collapsed && q && q.sig[0] !== 'c') this.fallDown(b, q);
         const W = new Batch(true), B = new Batch();
         this.building(W, B, b, town.terrain);
-        q = this.pieces[b.id] = { sig, wall: W.pack(), plain: B.pack() };
+        q = this.pieces[b.id] = { sig, wall: W.pack(), plain: B.pack(), tall: b.top - b.base };
       }
       if (q.wall.p.length) walls[b.style].push(q.wall);
       plain.push(q.plain);
@@ -375,6 +398,7 @@ export class CityView {
     const low = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72];
     const u0 = rng.int(0, TILE - 1) / TILE, v0 = rng.int(0, TILE - 1) / TILE;
     const vOf = (y) => v0 + (y - b.base) / CITY.floor / TILE;
+    if (b.lost) { this.chunked(W, plain, b, S, tint, wallCol, u0, vOf, low, shade); this.spill(plain, b, t, wallCol); return; }
     const ground = b.base + CITY.floor;
     // Four walls, each from the corner it starts at along U; the ground floor darker.
     const sides = [
@@ -466,6 +490,260 @@ export class CityView {
       const r = rng.range(0.4, 1.3);
       B.box(x, y1, z, r, r * rng.range(0.5, 1.2), r * rng.range(0.6, 1.2), rng.next() < 0.5 ? dark : rgb('#77736b'), rng.range(0, 3));
     }
+  }
+
+  // ---- a damaged building, chunk by chunk ----
+
+  chunked(W, B, b, S, tint, wallCol, u0, vOf, low, shade) {
+    const F = CITY.floor, per = b.nx * b.nz, cells = b.cells, n = cells.length;
+    let topWhole = true;
+    for (let k = n - per; k < n; k++) if (cells[k] <= 0) topWhole = false;
+    const dark = [wallCol[0] * 0.8, wallCol[1] * 0.8, wallCol[2] * 0.8];
+    const inside = rgb(INSIDE);
+    for (let k = 0; k < n; k++) {
+      if (cells[k] <= 0) continue;
+      chunkBox(b, k, BX);
+      const rng = makeRng(b.seed + k * 7919 + 13);   // its own, so its broken edges keep their shape
+      const band = (k / per) | 0, c = k % per, ix = c % b.nx, iz = (c / b.nx) | 0;
+      const x0 = BX[0], x1 = BX[1], z0 = BX[4], z1 = BX[5];
+      const f0 = band * b.bf, f1 = Math.min(f0 + b.bf, b.floors0);
+      const y0 = band ? b.base + f0 * F : b.base - 3, y1 = b.base + f1 * F;
+      // Sides +x, -x, +z, -z: does each face out of the building, and which chunk is next door?
+      const out = [b.nx === 1 || ix === 1, b.nx === 1 || ix === 0, b.nz === 1 || iz === 1, b.nz === 1 || iz === 0];
+      const next = [k + 1, k - 1, k + b.nx, k - b.nx];
+      const plane = [x1, x0, z1, z0];
+      for (let side = 0; side < 4; side++) {
+        const a0 = side < 2 ? z0 : x0, a1 = side < 2 ? z1 : x1;
+        if (out[side]) this.facade(W, b, side, plane[side], a0, a1, y0, y1, u0, vOf, low, shade);
+        else if (cells[next[side]] <= 0) {
+          // Open to where its neighbour was. Do its two ends meet an outer wall?
+          const e0 = side < 2 ? out[3] : out[1], e1 = side < 2 ? out[2] : out[0];
+          this.openSide(B, b, side, plane[side], a0, a1, band ? y0 : b.base, y1, f0, f1, e0, e1, rng, wallCol, inside);
+        }
+      }
+      if (f1 === b.floors0) { if (!topWhole) this.chunkRoof(B, S, tint, rng, x0, x1, z0, z1, y1, out); }
+      else if (cells[k + per] <= 0) this.cap(B, rng, x0, x1, z0, z1, y1, out, dark);
+      if (band && cells[k - per] <= 0) this.underside(B, rng, x0, x1, z0, z1, y0, dark, inside);
+    }
+    if (topWhole) this.roof(B, b, makeRng(b.seed + 5), S, tint, b.base + b.floors0 * F);
+    // Scars where blasts struck the walls, where that wall still stands.
+    for (const [face, along, up, size] of b.hits) {
+      const y = b.base + up;
+      const x = face === 0 ? b.x + b.hx - 0.3 : face === 1 ? b.x - b.hx + 0.3 : b.x + along;
+      const z = face === 2 ? b.z + b.hz - 0.3 : face === 3 ? b.z - b.hz + 0.3 : b.z + along;
+      if (this.town.solid(b, x, z, y) && this.town.solid(b, x, z, y + size * 0.45)) this.scar(B, b, face, along, y, size);
+    }
+  }
+
+  // A windowed wall on side 0..3 (+x, -x, +z, -z) at `p`, from a0 to a1
+  // along it, y0 to y1: the windows line up with the whole building's.
+  facade(W, b, side, p, a0, a1, y0, y1, u0, vOf, low, shade) {
+    const L = BAY * TILE, ground = b.base + CITY.floor;
+    let ox, oz, ux, uz, s0;
+    if (side === 0) { ox = p; oz = a1; ux = 0; uz = a0 - a1; s0 = b.z + b.hz - a1; }
+    else if (side === 1) { ox = p; oz = a0; ux = 0; uz = a1 - a0; s0 = a0 - (b.z - b.hz); }
+    else if (side === 2) { ox = a0; oz = p; ux = a1 - a0; uz = 0; s0 = a0 - (b.x - b.hx); }
+    else { ox = a1; oz = p; ux = a0 - a1; uz = 0; s0 = b.x + b.hx - a1; }
+    const ua = u0 + s0 / L, ub = u0 + (s0 + a1 - a0) / L;
+    if (y0 < ground) {
+      const y = Math.min(y1, ground);
+      W.face(ox, y0, oz, ux, 0, uz, 0, y - y0, 0, low, [ua, vOf(y0), ub, vOf(y)]);
+    }
+    if (y1 > ground) {
+      const y = Math.max(y0, ground);
+      W.face(ox, y, oz, ux, 0, uz, 0, y1 - y, 0, shade, [ua, vOf(y), ub, vOf(y1)]);
+    }
+  }
+
+  // A plain quad on side 0..3 at p (+ off outwards), a0..a1 along it, ya..yb.
+  plane(B, side, p, a0, a1, ya, yb, col, off = 0) {
+    const h = yb - ya;
+    if (side === 0) B.face(p + off, ya, a1, 0, 0, a0 - a1, 0, h, 0, col);
+    else if (side === 1) B.face(p - off, ya, a0, 0, 0, a1 - a0, 0, h, 0, col);
+    else if (side === 2) B.face(a0, ya, p + off, a1 - a0, 0, 0, 0, h, 0, col);
+    else B.face(a1, ya, p - off, a0 - a1, 0, 0, 0, h, 0, col);
+  }
+
+  // A box poking `out` m out of side 0..3 at p, `half` either way of `along`, y up h.
+  stick(B, side, p, along, half, y, h, out, col) {
+    const c = (out - 0.1) / 2, w = (out + 0.1) / 2;
+    if (side === 0) B.box(p + c, y, along, w, h, half, col);
+    else if (side === 1) B.box(p - c, y, along, w, h, half, col);
+    else if (side === 2) B.box(along, y, p + c, half, h, w, col);
+    else B.box(along, y, p - c, half, h, w, col);
+  }
+
+  // Where a neighbouring chunk is gone: the dark inside, the floor slabs
+  // broken off at different lengths, and the ragged ends of the outer walls.
+  openSide(B, b, side, p, a0, a1, ya, y1, f0, f1, e0, e1, rng, wallCol, inside) {
+    const F = CITY.floor;
+    this.plane(B, side, p, a0, a1, ya, y1, inside);
+    const slab = rgb(SLAB, 0.85 + rng.next() * 0.2);
+    for (let f = Math.max(f0, 1); f <= f1; f++) {
+      const y = b.base + f * F;
+      for (let s = a0; s < a1 - 0.3;) {
+        const w = Math.min(a1 - s, rng.range(1.2, 3.5));
+        if (rng.next() < 0.8) this.stick(B, side, p, s + w / 2, w / 2, y - 0.3, 0.3, rng.range(0.15, 1.0), slab);
+        s += w;
+      }
+    }
+    for (const [on, a, dir] of [[e0, a0, 1], [e1, a1, -1]]) {
+      if (!on) continue;
+      for (let f = f0; f < f1; f++) {
+        const y = b.base + f * F;
+        const k = 0.75 + rng.next() * 0.3;
+        const col = [wallCol[0] * k, wallCol[1] * k, wallCol[2] * k];
+        const h = rng.range(0.4, 1) * F;
+        this.stick(B, side, p, a + dir * 0.2, 0.2, y, h, rng.range(0.4, 1.8), col);
+        if (h < F * 0.9) this.stick(B, side, p, a + dir * 0.2, 0.2, y + h, F - h, rng.range(0.1, 0.6), col);
+      }
+    }
+  }
+
+  // The top of a chunk whose upper neighbour is gone: an open floor, stubs of
+  // the outer walls, a few lumps of rubble.
+  cap(B, rng, x0, x1, z0, z1, y1, out, dark) {
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, hx = (x1 - x0) / 2, hz = (z1 - z0) / 2;
+    B.box(cx, y1 - 0.25, cz, hx, 0.3, hz, rgb(SLAB, 0.85 + rng.next() * 0.2));
+    const edges = [[out[0], x1, false, -1], [out[1], x0, false, 1], [out[2], z1, true, -1], [out[3], z0, true, 1]];
+    for (const [on, e, alongX, inward] of edges) {
+      if (!on) continue;
+      const lo = alongX ? x0 : z0, hi = alongX ? x1 : z1;
+      for (let s = lo; s < hi - 0.4;) {
+        const w = Math.min(hi - s, rng.range(1.2, 4));
+        const h = rng.next() < 0.3 ? 0 : rng.range(0.4, CITY.floor * 0.9);
+        if (h > 0) {
+          if (alongX) B.box(s + w / 2, y1, e + inward * 0.25, w / 2, h, 0.25, dark);
+          else B.box(e + inward * 0.25, y1, s + w / 2, 0.25, h, w / 2, dark);
+        }
+        s += w;
+      }
+    }
+    for (let k = rng.int(1, 3); k > 0; k--) {
+      const r = rng.range(0.4, 1.2);
+      B.box(cx + rng.range(-0.7, 0.7) * hx, y1, cz + rng.range(-0.7, 0.7) * hz, r, r * rng.range(0.5, 1.1), r * rng.range(0.6, 1.2), rng.next() < 0.5 ? dark : rgb('#77736b'), rng.range(0, 3));
+    }
+  }
+
+  // Rubble in the street below each quadrant that lost chunks, over the heap
+  // core/city.js raised there.
+  spill(B, b, t, wallCol) {
+    const per = b.nx * b.nz, grey = rgb('#7c776f');
+    const dark = [wallCol[0] * 0.75, wallCol[1] * 0.75, wallCol[2] * 0.75];
+    for (let c = 0; c < per; c++) {
+      let gone = 0;
+      for (let k = c; k < b.cells.length; k += per) if (b.cells[k] <= 0) gone++;
+      if (!gone) continue;
+      const rng = makeRng(b.seed + c * 104729 + 3);
+      const ix = c % b.nx, iz = (c / b.nx) | 0;
+      let ox = b.nx > 1 ? (ix ? 1 : -1) : 0, oz = b.nz > 1 ? (iz ? 1 : -1) : 0;
+      if (!ox && !oz) { if (rng.next() < 0.5) ox = rng.next() < 0.5 ? -1 : 1; else oz = rng.next() < 0.5 ? -1 : 1; }
+      chunkBox(b, c, BX);
+      const hx = ox ? b.x + ox * (b.hx + 2) : (BX[0] + BX[1]) / 2;
+      const hz = oz ? b.z + oz * (b.hz + 2) : (BX[4] + BX[5]) / 2;
+      const spread = Math.min(5, 2 + gone * 0.8);
+      for (let k = Math.min(14, 4 + gone * 2); k > 0; k--) {
+        const x = hx + rng.range(-1, 1) * (ox ? spread * 0.6 : (BX[1] - BX[0]) / 2);
+        const z = hz + rng.range(-1, 1) * (oz ? spread * 0.6 : (BX[5] - BX[4]) / 2);
+        const r = rng.range(0.5, 1.8);
+        const pick = rng.next();
+        B.box(x, t.heightAt(x, z) - r * 0.4, z, r, r * rng.range(0.35, 0.9), r * rng.range(0.5, 1.1), pick < 0.45 ? wallCol : pick < 0.8 ? grey : dark, rng.range(0, 3));
+      }
+    }
+  }
+
+  // The underside of a chunk hanging over a gap, with bits hanging off it.
+  underside(B, rng, x0, x1, z0, z1, y0, dark, inside) {
+    B.face(x0, y0, z0, x1 - x0, 0, 0, 0, 0, z1 - z0, rgb(SLAB, 0.6));
+    for (let k = rng.int(2, 4); k > 0; k--) {
+      const h = rng.range(0.3, 1.4);
+      B.box(rng.range(x0 + 0.5, x1 - 0.5), y0 - h, rng.range(z0 + 0.5, z1 - 0.5), rng.range(0.3, 1.1), h, rng.range(0.3, 1.1), rng.next() < 0.5 ? dark : inside, rng.range(0, 3));
+    }
+  }
+
+  // The roof of one top chunk, its parapet along the outer edges.
+  chunkRoof(B, S, tint, rng, x0, x1, z0, z1, y1, out) {
+    const cap = rgb(S.cap, 1, tint);
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, hx = (x1 - x0) / 2, hz = (z1 - z0) / 2;
+    B.box(cx, y1 - 0.2, cz, hx, 0.3, hz, rgb(ROOF, 0.9 + rng.next() * 0.2));
+    const p = CITY.parapet, w = 0.3;
+    if (out[0]) B.box(x1 - w, y1, cz, w, p, hz, cap);
+    if (out[1]) B.box(x0 + w, y1, cz, w, p, hz, cap);
+    if (out[2]) B.box(cx, y1, z1 - w, hx, p, w, cap);
+    if (out[3]) B.box(cx, y1, z0 + w, hx, p, w, cap);
+    if (hx > 2.5 && hz > 2.5 && rng.next() < 0.6) B.box(cx + rng.range(-0.5, 0.5) * hx, y1 + 0.1, cz + rng.range(-0.5, 0.5) * hz, 0.9, 1.1, 0.7, rgb('#b9bcbf', 0.9 + rng.next() * 0.15));
+  }
+
+  // ---- things coming down (render/cityFx.js) ----
+
+  // A building's wall colour, slab grey and a darker wall: debris colours.
+  colours(b) {
+    const wall = rgb(STYLES[b.style].wall, 1, TINTS[b.tint % TINTS.length]);
+    return [wall, rgb('#7c776f'), [wall[0] * 0.7, wall[1] * 0.7, wall[2] * 0.7]];
+  }
+
+  // A building that gave way: it drops into its rubble as it stood (piece q),
+  // shedding blocks and dust off its top as it goes.
+  fallDown(b, q) {
+    const meshes = [];
+    if (q.wall.p.length) meshes.push(new THREE.Mesh(join([q.wall], true), this.walls[b.style].material));
+    meshes.push(new THREE.Mesh(join([q.plain], false), this.plain.material));
+    const cols = this.colours(b);
+    const fx = this.effects;
+    let n = 0;
+    this.falls.collapse(meshes, b, q.tall, (it, y) => {
+      if (y < b.base - 1) return;
+      for (let k = 0; k < 3; k++) {
+        const side = (Math.random() * 4) | 0, s = Math.random() * 2 - 1;
+        const ox = side === 0 ? 1 : side === 1 ? -1 : 0, oz = side === 2 ? 1 : side === 3 ? -1 : 0;
+        const x = b.x + (ox ? ox * b.hx : s * b.hx), z = b.z + (oz ? oz * b.hz : s * b.hz);
+        this.debris.throw(x, y, z, ox * (2 + Math.random() * 6), 1 + Math.random() * 3, oz * (2 + Math.random() * 6), 0.7 + Math.random() * 1.4, cols[k]);
+      }
+      if (fx && n++ % 9 === 4) fx.dust([b.x + (Math.random() - 0.5) * b.hx, y - 2, b.z + (Math.random() - 0.5) * b.hz], Math.max(b.hx, b.hz) * 0.7);
+    });
+  }
+
+  // A stack of chunks that lost its footing (chunk ids `ks`, bottom first)
+  // topples outwards into the street and breaks up as it lands.
+  topple(b, ks, from) {
+    const F = CITY.floor, per = b.nx * b.nz;
+    const tint = TINTS[b.tint % TINTS.length];
+    const shade = [tint[0], tint[1], tint[2]], low = [tint[0] * 0.72, tint[1] * 0.72, tint[2] * 0.72];
+    const rng = makeRng(b.seed);   // as building() draws it, so the windows match
+    const u0 = rng.int(0, TILE - 1) / TILE, v0 = rng.int(0, TILE - 1) / TILE;
+    const vOf = (y) => v0 + (y - b.base) / F / TILE;
+    const W = new Batch(true), P = new Batch();
+    let ya = Infinity, yb = -Infinity;
+    for (const k of ks) {
+      chunkBox(b, k, BX);
+      const band = (k / per) | 0, f0 = band * b.bf, f1 = Math.min(f0 + b.bf, b.floors0);
+      const y0 = b.base + f0 * F, y1 = b.base + f1 * F;
+      const plane = [BX[1], BX[0], BX[5], BX[4]];
+      for (let side = 0; side < 4; side++) this.facade(W, b, side, plane[side], side < 2 ? BX[4] : BX[0], side < 2 ? BX[5] : BX[1], y0, y1, u0, vOf, low, shade);
+      ya = Math.min(ya, y0);
+      yb = Math.max(yb, y1);
+    }
+    const x0 = BX[0], x1 = BX[1], z0 = BX[4], z1 = BX[5];
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    P.box(cx, yb - 0.3, cz, (x1 - x0) / 2, 0.5, (z1 - z0) / 2, rgb(SLAB, 0.8));
+    P.face(x0, ya, z0, x1 - x0, 0, 0, 0, 0, z1 - z0, rgb(SLAB, 0.5));
+    const c = ks[0] % per, ix = c % b.nx, iz = (c / b.nx) | 0;
+    let ox = b.nx > 1 ? (ix ? 1 : -1) : 0, oz = b.nz > 1 ? (iz ? 1 : -1) : 0;
+    if (!ox && !oz) { ox = Math.sign(b.x - from[0]) || 1; oz = Math.sign(b.z - from[2]); }
+    const px = ox > 0 ? x1 : ox < 0 ? x0 : cx, pz = oz > 0 ? z1 : oz < 0 ? z0 : cz;
+    const meshes = [new THREE.Mesh(W.build(), this.walls[b.style].material), new THREE.Mesh(P.build(), this.plain.material)];
+    const cols = this.colours(b);
+    const len = yb - ya, l = Math.hypot(ox, oz);
+    this.falls.topple(meshes, px, ya, pz, [ox, oz], () => {
+      // It breaks up where it lands, along the street.
+      for (let k = Math.min(40, 10 + Math.round(len * 0.8)); k > 0; k--) {
+        const t = 0.15 + Math.random() * 0.85;
+        const x = px + (ox / l) * len * t + (Math.random() - 0.5) * (x1 - x0), z = pz + (oz / l) * len * t + (Math.random() - 0.5) * (z1 - z0);
+        this.debris.throw(x, this.groundAt(x, z) + 1 + Math.random() * 3, z, (ox / l) * Math.random() * 5, 2 + Math.random() * 4, (oz / l) * Math.random() * 5, 0.8 + Math.random() * 1.6, cols[k % 3]);
+      }
+      const mx = px + (ox / l) * len * 0.5, mz = pz + (oz / l) * len * 0.5;
+      this.effects?.dust([mx, this.groundAt(mx, mz), mz], Math.max(4, len * 0.4));
+    });
   }
 
   // A blackened, ragged hole in a wall: [face, along, up] as core/city.js keeps them.
@@ -605,9 +883,26 @@ export class CityView {
     if (e.how === 'hit') {
       fx.dust(e.pos, 3);
       fx.rubble(e.pos, 6, 3);
-    } else if (e.how === 'floors') {
-      fx.dust(e.pos, 5 + e.lost * 1.5);
-      fx.rubble(e.pos, 10 + e.lost * 5, 5);
+    } else if (e.how === 'chunks') {
+      // Chunks blown out throw blocks away from the blast; stacks that lost
+      // their footing topple (the building itself is redrawn without them).
+      const b = this.game.town?.buildings[e.id];
+      if (!b) return;
+      const cols = this.colours(b);
+      for (const k of e.lost) {
+        chunkBox(b, k, BX);
+        if (BX[2] < b.base) BX[2] = b.base;
+        const vol = (BX[1] - BX[0]) * (BX[3] - BX[2]) * (BX[5] - BX[4]);
+        this.debris.burst(BX, Math.min(16, 5 + Math.round(vol / 150)), cols, e.pos, 11, 1.1);
+        if (k === e.lost[0] || k === e.lost[e.lost.length - 1]) fx.dust([(BX[0] + BX[1]) / 2, BX[2], (BX[4] + BX[5]) / 2], 4);
+      }
+      fx.rubble(e.pos, 8 + e.lost.length * 3, 4);
+      const per = b.nx * b.nz, stacks = new Map();
+      for (const k of e.fell) {
+        if (!stacks.has(k % per)) stacks.set(k % per, []);
+        stacks.get(k % per).push(k);
+      }
+      for (const ks of stacks.values()) this.topple(b, ks, e.pos);
     } else if (e.how === 'collapse') {
       const [x, y, z] = e.pos;
       const [hx, hz] = e.size;
