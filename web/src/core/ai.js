@@ -108,6 +108,9 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const miss = wall ? Math.hypot(ix - tx, iy - target[1], iz - tz) : Math.hypot(ix - tx, iz - tz);
     if (miss < best.miss) best = { yaw, elev, power, miss };
     if (miss <= tolerance) break;
+    // Off the arena's wall, or back off it or round it (Edges): too far, so
+    // less power, the bearing as it was.
+    if (shot.edges) { power = Math.max(TANK.minPower, power * 0.85); continue; }
 
     // Correct bearing by the angular error of where the shot went.
     const impactBearing = Math.atan2(iz - sz, ix - sx) * RAD;

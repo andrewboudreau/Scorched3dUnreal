@@ -1,5 +1,6 @@
 import { makePerlin, fbm } from './noise.js';
 import { makeRng } from './rng.js';
+import { crumbleCoast } from './island.js';
 
 // Floating isles: a vertex is open sky when its top is within this of its underside.
 export const OPEN = 0.3;
@@ -30,6 +31,7 @@ export class Heightfield {
     this.heights = new Float32Array(this.n * this.n);
     this.scorch = new Float32Array(this.n * this.n); // 0..1, darkens blasted ground
     this.waterLevel = -Infinity;      // set by Scenery; ground below it shows as water
+    this.sea = null;                  // the Island's sea level (core/island.js), else null
     this.baseBedrock = bedrock;
     // Floating isles (generateIsles): the underside height of every vertex,
     // or null for an ordinary field that is solid all the way down. A vertex
@@ -50,6 +52,7 @@ export class Heightfield {
 
   generate({ seed = 7, amplitude = 45, frequency = 0.0035, octaves = 4, edgeFalloff = true } = {}) {
     this.waterLevel = -Infinity;
+    this.sea = null;
     this.under = null;
     this.isles = [];
     this.wells = [];
@@ -84,6 +87,7 @@ export class Heightfield {
   // underside tapering to a point, so an isle is thickest in the middle.
   generateIsles({ seed = 7, amplitude = 45, pads = [] } = {}) {
     this.waterLevel = -Infinity;
+    this.sea = null;
     this.bedrock = ISLES.bedrock;
     const rng = makeRng(seed * 13 + 1);
     const shape = makePerlin(seed * 7 + 3);
@@ -295,6 +299,11 @@ export class Heightfield {
         const s = 1 - dist / radius;
         this.scorch[k] = Math.min(1, this.scorch[k] + s * 0.9);
       }
+    }
+    // On the Island the low ground round a blast slumps into the sea.
+    if (this.sea != null) {
+      const c = crumbleCoast(this, cx, cz, radius);
+      return { i0: Math.min(r.i0, c.i0), i1: Math.max(r.i1, c.i1), j0: Math.min(r.j0, c.j0), j1: Math.max(r.j1, c.j1) };
     }
     return r;
   }

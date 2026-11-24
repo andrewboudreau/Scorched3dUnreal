@@ -1,12 +1,13 @@
 import { makeRng } from './rng.js';
 import { Heightfield, ISLES } from './terrain.js';
-import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY } from './ballistics.js';
+import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
 import { generateRidgeline, keepCrust, rowStarts } from './ridgeline.js';
+import { ISLAND, islandShape, islandStarts, generateIsland } from './island.js';
 import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
 import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
 import { normalizeLab } from './survey.js';
@@ -84,7 +85,11 @@ export class Game {
     terrainSize = 800,
     resolution = 256,
     hills = 45,
-    world = 'meadow',   // 'meadow'; 'isles': floating isles in open sky, with moons that pull on shells; 'ridgeline': a mountain range in cross-section (core/ridgeline.js); 'city': streets and buildings (core/city.js)
+    world = 'meadow',   // 'meadow'; 'isles': floating isles in open sky, with moons that pull on shells; 'ridgeline': a mountain range in cross-section (core/ridgeline.js); 'city': streets and buildings (core/city.js); 'island': one island in the sea (core/island.js)
+    // What a shell does at the arena's edge (ballistics.js EDGE_KINDS): 'open'
+    // (the default: it flies off), 'wall', 'bounce', 'wrap', or 'random': one
+    // of the four rolled each round on the seeded dice.
+    edges = 'open',
     maxTurnsPerRound = 40,
     // What the match uses (the Custom match checkboxes): each a list of the ids
     // that are on, or null for all of them. A weapon that is off is never in
@@ -114,6 +119,7 @@ export class Game {
     const noTwists = twists === false;
     this.cfg = {
       rounds, seed, maxWind, terrainSize, resolution, hills, world, maxTurnsPerRound, firing, local, fog,
+      edges: EDGE_KINDS.includes(edges) || edges === 'random' ? edges : 'open',
       weapons: known(weapons, WEAPONS),
       perks: noTwists ? [] : known(perks, PERKS),
       modifiers: noTwists ? [] : known(modifiers, MODIFIERS),
@@ -126,6 +132,7 @@ export class Game {
     this.volley = null;                         // { queue, plans, shown } while a volley is being planned
     this.rng = makeRng(seed);
     this.rogue = makeRng(seed ^ 0x5bd1e995);   // drafts, modifiers and CPU driving roll their own dice
+    this.edge = 'open';                         // this round's edge rule (cfg.edges, rolled when 'random'); also on the terrain
     this.modifier = MODIFIER_BY_ID.clear;
     this.gravity = GRAVITY;
     this.drag = 0;                              // air drag on shells (the Rain modifier, ballistics.stepProjectile)
@@ -245,6 +252,8 @@ export class Game {
     this.drag = mod.drag || 0;
     const w = this.cfg.maxWind;
     this.maxWind = mod.calm ? 0 : mod.wind ? Math.max(w, Math.min(w * mod.wind, GALE_CAP)) : w;
+    this.edge = this.cfg.edges === 'random' ? this.rogue.pick(EDGE_KINDS) : this.cfg.edges;
+    t.edge = this.edge;
     const starts = this.placeTanks();
     this.makeGround(this.round, starts);
     this.scenery.generate({ seed: this.cfg.seed + this.round * 104729, tanks: this.players });
@@ -292,7 +301,7 @@ export class Game {
     this.turnsThisRound = 0;
     this.firstShooter = (this.firstShooter + 1) % this.players.length;
     this.startIntel();
-    this.emit({ type: 'roundStart', round: this.round, modifier: mod.id });
+    this.emit({ type: 'roundStart', round: this.round, modifier: mod.id, edge: this.edge });
     this.emit({ type: 'terrain', full: true });
     if (this.volleyMode) this.beginVolley();
     else this.beginTurn(this.firstShooter);
@@ -310,6 +319,7 @@ export class Game {
     }
     this.padOrder = order;   // pads are flattened in this order; overlaps depend on it
     if (this.ridgeline) return rowStarts(order, t, this.rng);   // a row from west to east
+    if (this.island) return islandStarts(order, islandShape(this.groundSeed(this.round), t.half), this.rng);   // round the island
     return order.map((pi, k) => {
       const a = base + (k / n) * Math.PI * 2 + this.rng.range(-0.25, 0.25);
       const r = ring * this.rng.range(0.8, 1.15);
@@ -320,14 +330,17 @@ export class Game {
   get isles() { return this.cfg.world === 'isles'; }
   get ridgeline() { return this.cfg.world === 'ridgeline'; }
   get city() { return this.cfg.world === 'city'; }
+  get island() { return this.cfg.world === 'island'; }
+  groundSeed(round) { return this.cfg.seed + round * 7919; }
 
   // The round's ground from its seed, then a flat pad under each tank, in pad
   // order (`starts` is [player index, x, z]). The isles are laid out around
   // the pads, so every tank starts on an isle of its own.
   makeGround(round, starts) {
     const t = this.terrain;
-    const seed = this.cfg.seed + round * 7919;
-    if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    const seed = this.groundSeed(round);
+    if (this.island) generateIsland(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
+    else if (this.isles) t.generateIsles({ seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
     else if (this.ridgeline) generateRidgeline(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z]) => [x, z]) });
     else if (this.city) t.generate({ seed, amplitude: Math.min(this.cfg.hills, 9), frequency: 0.0022 });   // a gentle grade
     else t.generate({ seed, amplitude: this.cfg.hills });
@@ -1478,7 +1491,7 @@ export class Game {
   }
 
   spawnProjectile(pos, vel, weaponId, owner, shot = 0) {
-    const pr = makeProjectile(pos, vel);
+    const pr = makeProjectile(pos, vel, this.terrain);
     pr.id = (this.nextProjectileId = (this.nextProjectileId || 0) + 1);
     pr.weapon = weaponId;
     pr.owner = owner;
@@ -1594,6 +1607,12 @@ export class Game {
         pr.steer.fuel = Math.max(0, pr.steer.fuel - dt);
       }
       stepProjectile(pr, this.wind, dt);
+      if (pr.crossed) {
+        // The arena's edge (ballistics.crossEdge): off a wall it goes off there.
+        const c = pr.crossed;
+        this.emit({ type: 'edge', kind: c.kind, id: pr.id, pos: [...c.point], ...(c.to ? { to: [...c.to] } : {}) });
+        if (c.kind === 'wall') { this.detonate(pr, c.point, null); continue; }
+      }
       const w = WEAPON_BY_ID[pr.weapon];
       // Apex split.
       if (!pr.splitDone && vyBefore > 0 && pr.vel[1] <= 0 && w.flight) {
@@ -1660,6 +1679,7 @@ export class Game {
         continue;
       }
       const g = groundContact(pr, t);
+      if (g?.sea) { this.splash(pr, g); continue; }
       if (g) { this.detonate(pr, g, null); continue; }
       if (pr.time > MAX_FLIGHT) this.lose(pr);
     }
@@ -1671,6 +1691,13 @@ export class Game {
   lose(pr) {
     pr.dead = true;
     this.emit({ type: 'lost', id: pr.id, pos: [...pr.pos] });
+  }
+
+  // Into the Island's sea: lost there, with a splash. No crater, no damage, and
+  // no effect (a Teleport or a blink that lands in the sea goes nowhere).
+  splash(pr, point) {
+    pr.dead = true;
+    this.emit({ type: 'impact', id: pr.id, pos: [...point], splash: true });
   }
 
   // Does a tank's Point Defense shoot shell `pr` down this step (mods.js
@@ -1692,7 +1719,7 @@ export class Game {
   // `moon`: it struck a moon. `struck`: it struck a mod ({ owner, mod }), in the air.
   detonate(pr, point, directHit, moon = false, struck = null) {
     const w = WEAPON_BY_ID[pr.weapon];
-    const wall = point.building != null;   // it struck a building in the City
+    const wall = point.building != null || !!point.edge;   // it struck a building in the City, or the arena's wall
     // A rolling weapon that lands on open ground starts its run instead.
     if (rollPart(w) && !directHit && !pr.roller && !moon && !struck && !wall) {
       pr.roller = makeRoller(point, pr.vel, this.terrain);
@@ -1729,6 +1756,8 @@ export class Game {
   // road or bumps into a tank (its owner included).
   stepRolling(pr, spheres, dt) {
     const end = stepRoller(pr.roller, this.terrain, dt);
+    const c = pr.roller.crossed;
+    if (c) this.emit({ type: 'edge', kind: c.kind, id: pr.id, pos: [...c.point], ...(c.to ? { to: [...c.to] } : {}) });
     const [x, y, z] = pr.pos;
     const ground = [x, y - ROLL.radius, z];
     for (const s of spheres) {
@@ -1740,7 +1769,8 @@ export class Game {
     // A roller that sinks into a lake goes off there instead of crawling along
     // the bed; one that runs into a building goes off against it.
     const sunk = y < this.terrain.waterLevel - 0.5;
-    if (end || sunk || this.town?.inside(x, z, y)) this.detonate(pr, ground, null);
+    if (sunk && this.terrain.sea != null) this.splash(pr, [x, this.terrain.waterLevel, z]);   // rolled into the sea
+    else if (end || sunk || this.town?.inside(x, z, y)) this.detonate(pr, ground, null);
   }
 
   applyEffect(fx, owner, directHit, shot = 0) {
@@ -1794,7 +1824,7 @@ export class Game {
       for (const p of this.players) {
         if (!p.alive) continue;
         // Whoever blows the ground out from under a tank on the isles gets the credit for its fall.
-        if (this.isles && Math.hypot(p.x - bx, p.z - bz) < radius * 1.5) p.blamed = owner;
+        if ((this.isles || this.island) && Math.hypot(p.x - bx, p.z - bz) < radius * 1.5) p.blamed = owner;
         const s = hitSphere(p);
         const dist = p === directHit ? 0 : Math.max(0, Math.hypot(s.x - bx, s.y - by, s.z - bz) - TANK.hitRadius * 0.5);
         const dmg = blastDamage(dist, radius, damage);
@@ -1909,7 +1939,7 @@ export class Game {
     const copy = (o) => JSON.parse(JSON.stringify(o));   // Infinity becomes null; restore puts it back
     return {
       round: this.round, turnsThisRound: this.turnsThisRound, firstShooter: this.firstShooter,
-      wind: [...this.wind], gravity: this.gravity, drag: this.drag, maxWind: this.maxWind, modifier: this.modifier.id,
+      wind: [...this.wind], gravity: this.gravity, drag: this.drag, maxWind: this.maxWind, modifier: this.modifier.id, edge: this.edge,
       rng: this.rng.state(), rogue: this.rogue.state(), nextProjectileId: this.nextProjectileId || 0, clock: this.clock,
       lastRoundResult: this.lastRoundResult,
       volley: this.volley ? { plans: copy(this.volley.plans), done: [...this.volley.done] } : null,
@@ -1938,6 +1968,7 @@ export class Game {
     this.intel = JSON.parse(JSON.stringify(s.intel || []));
     this.modifier = MODIFIER_BY_ID[s.modifier] || MODIFIER_BY_ID.clear;
     this.drag = s.drag ?? (this.modifier.drag || 0);
+    this.edge = this.terrain.edge = EDGE_KINDS.includes(s.edge) ? s.edge : this.cfg.edges === 'random' ? 'open' : this.cfg.edges;
     this.rng.setState(s.rng);
     this.rogue.setState(s.rogue);
     s.players.forEach((q, i) => {
@@ -2010,6 +2041,11 @@ export class Game {
       } else if (p.falling) {
         p.falling = false;
         p.vy = 0;
+      }
+      // On the Island: ground gone under the sea, and the tank with it.
+      if (p.alive && !p.falling && t.sea != null && p.y < t.waterLevel - ISLAND.drown) {
+        this.emit({ type: 'void', player: p.id, pos: [p.x, p.y, p.z], sea: true });
+        this.damage(p, p.hp + p.armor, p.blamed ?? null);
       }
     }
   }
