@@ -304,6 +304,25 @@ second column beside the first. On a phone the players box sits top right.
 - **Roller** lands, then rolls downhill along the ground with the momentum it
   landed with. It goes off when it comes to rest, touches a tank, sinks into a
   lake or has rolled 160 m. A direct hit in flight goes off at once.
+- **Napalm** (Advanced, $100 for two) spills burning fuel where it lands. The
+  fuel runs downhill over the ground and pools in hollows (`core/napalm.js`:
+  a fixed 48-step flow over the heightfield's vertices, the same on every
+  copy of an online game). It burns for about 4 s in seven ticks: a tank is
+  hurt by how deep the fuel is within 5 m of it, up to 56 in all, credited to
+  the shooter. So a tank in a crater or a valley takes the full dose, one on
+  the level about 17 from a direct hit, and one on a crest almost nothing.
+  Water and open sky swallow the fuel: in a lake it goes out at once. It
+  leaves the ground scorched but makes no crater. CPU tanks fire it at a
+  target sitting in a hollow (`holeDepth`), rarely at one on a crest.
+- **Dirt Bomb** (Standard, $130 for two) bursts into a dome of earth, 20 m
+  across the base and 16 m high, the Mound's heap made bigger. A tank with
+  2.5 m or more of soil over it (anyone within about 18 m) is **buried**,
+  unhurt: it cannot drive or jump, Napalm cannot reach it, and its next shot
+  goes off at the muzzle and digs it out instead of flying (the ammo is kept).
+  That costs it a turn. A blast that clears the soil off it frees it too. A
+  "Buried" tag floats over a buried tank, and the HUD says so. CPU tanks bury
+  whoever is hurting them, or the strongest enemy while they are behind, and
+  dig themselves out.
 - **CPU tanks walk their shots in.** Each keeps an aim memory per target: the
   first shot is a rough guess and the error shrinks with every shot at the same
   target. It grows back when the target or shooter moves or the wind swings.
@@ -315,13 +334,14 @@ second column beside the first. On a phone the players box sits top right.
   orbiter or a satellite, a Scout at a target it only has a rough fix on);
   a Rangefinder before a long shot (over 180 m) with no reading; a Mound at
   its own feet when it sits in a hole or keeps being hit; a Teleport out of a
-  deep hole, a losing fight or a lost position. Offline it fires Guided
+  deep hole, a losing fight or a lost position; Napalm at a target in a hollow;
+  a Dirt Bomb on whoever is hurting it. Offline it fires Guided
   Missiles too, mostly at targets it has no reading on, and steers them along
   the line to the target as it flies (Hard reacts soonest and finest, Easy
   late and coarse). With a kill on offer it never spends the turn on a
   utility round. Each CPU also has a temper for the match, fixed by the match
-  seed: a *gunner* favours the damage rounds, a *sapper* the Roller, Mound
-  and Teleport (and buys them), a *spotter* the Rangefinder, Scout, Guided
+  seed: a *gunner* favours the damage rounds, a *sapper* the Roller, Mound,
+  Teleport, Dirt Bomb and Napalm (and buys the Mound, Teleport and Dirt Bomb), a *spotter* the Rangefinder, Scout, Guided
   Missile and Survey Satellite, a *skirmisher* the Teleport. Easy CPUs read
   the situation less keenly and sometimes just grab anything; the
   difficulty still sets how well they aim.
@@ -547,7 +567,7 @@ second column beside the first. On a phone the players box sits top right.
   both for themselves. A "Your kit" strip shows what you hold.
 - **Armory.** Weapons come in tiers: the **Kit** (Shells, free and unlimited),
   **Standard** (in stock from the first visit) and **Advanced** (Scatter,
-  Teleport and the Thunderhead, from the second visit; a two-round match
+  Teleport, Napalm and the Thunderhead, from the second visit; a two-round match
   sells everything on its only one). Every tank starts with Shells,
   1 Guided Missile (not online), 1 Breacher, 1 Roller, 1 Mound,
   2 Rangefinders and 1 Jump Jet charge. A damage weapon costs $0.50 to $1.40 a

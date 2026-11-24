@@ -286,7 +286,7 @@ export function wantsDouble({ target, memory, difficulty = 'normal', rng }) {
 // right after its first Breacher (game.aiShop).
 export const TEMPERS = {
   gunner:     { breacher: 1.4, scatter: 1.3, roller: 1.2, ranger: 0.5, mound: 0.6, teleport: 0.6, satellite: 0.5, likes: [], buys: [] },
-  sapper:     { roller: 1.5, mound: 1.8, teleport: 1.4, breacher: 0.9, likes: ['dugin', 'shocks'], buys: ['mound', 'teleport'] },
+  sapper:     { roller: 1.5, mound: 1.8, teleport: 1.4, dirtbomb: 1.5, napalm: 1.3, breacher: 0.9, likes: ['dugin', 'shocks'], buys: ['mound', 'teleport', 'dirtbomb'] },
   spotter:    { ranger: 1.8, scout: 1.5, guided: 1.5, flak: 1.2, breacher: 0.9, satellite: 1.6, likes: ['satrecon', 'satrecon2'], buys: ['ranger'] },
   skirmisher: { teleport: 2, guided: 1.3, scatter: 1.2, flak: 1.1, mound: 0.8, likes: ['longtanks'], buys: ['teleport'] },
 };
@@ -301,7 +301,7 @@ export function cpuTemper(seed, id) {
 }
 
 // Rounds that do no damage: never half of a Double Strike.
-export const UTILITY = ['ranger', 'scout', 'mound', 'teleport'];
+export const UTILITY = ['ranger', 'scout', 'mound', 'teleport', 'dirtbomb'];
 
 // The situations, in numbers.
 //   finish    target hp + armor a Shell can finish: no utility rounds then
@@ -313,13 +313,16 @@ export const UTILITY = ['ranger', 'scout', 'mound', 'teleport'];
 //   hurt      share of its hit points left under which it counts as hurt
 //   behind    its hp + armor under this share of the strongest enemy's
 //   big       m: no Thunderhead at a target closer than this (its blast would reach back)
+//   pooled    m the target sits below the ground 14 m round it (holeDepth): Napalm pools on it
+//   crest     m it sits above that ground: Napalm runs off it
+//   near      m: no Napalm or Dirt Bomb at a target closer than this (the fuel or the dome reaches back)
 //   easyDull  how keenly an Easy CPU reads the situation (1: fully)
 //   easyWild  chance an Easy CPU just grabs any weapon it could use
 // Against a target with Point Defense up: the weapons that get past it weigh
 // `past` times as much, single shells `single` times.
 export const GUARDED = { past: 3, single: 0.5 };
 
-export const ARSENAL = { big: 60, finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, easyDull: 0.5, easyWild: 0.12 };
+export const ARSENAL = { big: 60, finish: 45, tough: 75, below: 8, far: 180, sunk: 4, deep: 7, hurt: 0.6, behind: 0.5, pooled: 3, crest: 2, near: 45, easyDull: 0.5, easyWild: 0.12 };
 
 // Does it still not have the range on a target? `m` is its aim memory for it
 // (planShot): none yet, or an error left bigger than about a degree or 2% of the charge.
@@ -339,7 +342,11 @@ export const unsureOf = (m) => !m || !(m.shots > 0) || Math.abs(m.yaw) > AIM_SUR
 //   heap                 a Mound fired at its feet would land there (planHeap)
 //   warp                 there is somewhere to Teleport to (findWarp)
 //   steer                it may steer a Guided Missile (offline)
-// and the target's own flags (game.knownFoes): `shielded` (an orbiter up),
+//   pit                  m the target sits below the ground round it (holeDepth; Napalm)
+//   danger               the target is the one hurting it, or the strongest
+//                        enemy while it is hurt or behind (Dirt Bomb: cost it a turn)
+// and the target's own flags (game.knownFoes): `buried` (it is under a Dirt
+// Bomb's dome already), `shielded` (an orbiter up),
 // `aloft` (a satellite up), `guarded` (Point Defense up: it shoots down single
 // shells, so Scatter, Flak and Rollers, which get past it, weigh more).
 // Returns { weapon id: weight }; the Shell is always there.
@@ -367,7 +374,12 @@ export function weaponWeights(me, target, ctx = {}) {
   add('roller', 0.35 * (dy < -A.below ? sit(4) : dy > A.below ? 0.3 : 1) * past);
   if (ctx.steer) add('guided', 0.6 * (!ctx.seen ? sit(1.8) : unsure ? 1.2 : 0.4) * (target.shielded ? sit(1.5) : 1) * single);
   if (target.rough) add('scout', 1.6);
+  // Napalm pools on a target in a hollow and runs off one on a crest.
+  const pit = ctx.pit ?? 0;
+  if ((ctx.dist ?? Infinity) > A.near) add('napalm', 0.3 * (pit >= A.pooled ? sit(5) : pit <= -A.crest ? 0.15 : 1));
   if (finish) return w;   // it can finish the target: no time for anything else
+  // Bury whoever is dangerous, to cost it a turn (not one already buried).
+  if (ctx.danger && !target.buried && (ctx.dist ?? Infinity) > A.near) add('dirtbomb', 1.2 * keen);
   if (unsure && !target.rough && (ctx.dist || 0) > A.far && !(ctx.seen && keen < 1)) add('ranger', 0.7 * keen * (ctx.seen ? 0.6 : 1));
   if (ctx.heap) {
     const shaken = ctx.threat && (hits >= 2 || (hits >= 1 && ctx.hurt));
