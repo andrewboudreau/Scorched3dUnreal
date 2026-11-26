@@ -207,6 +207,131 @@ More mod ideas for later: a recon drone that reveals fog, a jammer drone
 (jamming family), a shield bubble that soaks one blast, a repair drone, a
 mine layer.
 
+## Variants, the run and the boss (plan, #15)
+
+The next layer of the roguelike: weapons that grow in two directions, a short
+solo **run** across a small map of fights, and a **boss** at the end of it,
+fought two against one. Built in stages, each playable on its own (see Build
+order).
+
+### Weapon variants
+
+A **variant** is the same weapon doing its job a different way. It is picked
+in the **skill tree**, so the rule stays whole: points decide how your weapons
+behave, money buys the rounds. A variant applies to every round of that weapon
+you hold or buy for the rest of the match.
+
+Each variant weapon gets a branch with two ranks:
+
+1. **A fork:** pick one of two variants. The other closes for the match.
+2. **An upgrade** of the variant you picked: one named improvement.
+
+The branch only shows when the weapon is in the match. Each rank costs a
+point, like any other. First five families:
+
+| Weapon | Variant A | Variant B | Rank 2 (either) |
+| --- | --- | --- | --- |
+| Breacher | **Bunker Buster**: digs half as deep again and hits a buried or dug-in tank in full | **Splitter**: throws three bomblets outward on impact | 15% wider |
+| Roller | **Seeker**: leans toward the nearest tank as it rolls | **Hopper**: hops once over a bump instead of stopping | rolls half as far again |
+| Napalm | **Sticky**: burns 2 s longer, runs half as far | **Flood**: runs twice as far, burns shorter | burns through rain and shallow water |
+| Scatter | **Line**: five shells in a tight row along the aim | **Ring**: five shells round the aim point | a sixth shell |
+| Thunderhead | **Deep Strike**: a deeper crater, more damage at the centre | **Airburst**: goes off 8 m up, no crater, full damage in the radius, hits through a Dirt Bomb dome | 15% wider |
+
+Rules for a good variant:
+
+- **A trade, never a straight upgrade.** Each one gives up something (reach,
+  burn time, crater) for something else, and each passes the price yardstick
+  in `test/economy.test.js` at its own damage.
+- **Readable on a phone.** One line on the card; the armory and the weapon
+  button show the variant's name ("Napalm · Sticky").
+- **Data first.** A variant is a patch on the weapon in `weapons.js`
+  (`variants: [{ id, name, desc, patch }]`): changed numbers and flags, with
+  new behaviours (seeking, airburst, hopping) as named hooks in
+  `ballistics.js` so the aim arc, the CPUs' `simulateShot` and the kill cam
+  fly the same path. The game resolves a player's weapon as base plus patch.
+- **CPUs** choose by personality (an aggressive CPU picks Splitter and Flood,
+  a careful one Bunker Buster and Sticky).
+
+**The skill screen grows**, so on a phone it gets three tabs: **Weapons**
+(the variant branches), **Mods**, and **Tank** (Firepower, Hull, Gunnery,
+Supply, Chassis).
+
+Upgrades stay in the tree; the armory still sells only ammo and gear. Paying
+money for upgrades would blur the one rule a player can say aloud.
+
+### The run
+
+A solo mode beside the quick match: you against CPUs across a **short map of
+fights**, kit carried from one to the next, ending in the boss. About 20 to 30
+minutes.
+
+**The map** is a few tiers of stops, two or three per tier, joined by paths;
+from each stop you choose one of the next tier's. About seven stops from start
+to boss, so a run has five or six fights and a choice at every step. Each stop
+shows, before you pick it: the world, the edges, the time of day, a round
+modifier, the foes (one to three CPUs and how hard), and the reward.
+
+| Stop | What happens |
+| --- | --- |
+| **Fight** | A short match (one or two rounds) against one or two CPUs |
+| **Elite** | A tougher CPU with a mod already up. A better reward |
+| **Cache** | No fight: pick one of three (a skill rank, a crate of ammo, money) |
+| **Depot** | No fight: the armory, and you may swap a variant |
+| **Boss** | The last stop, two against one (below) |
+
+**What carries:** money, ammo, skill ranks and variants, and mods with their
+levels. **Health resets** each fight, since artillery swings and a carried
+wound would decide the run before it got going. Instead you start with **two
+spare hulls**: losing a fight costs one, and with none left the run ends.
+
+**One point per fight won**, plus whatever a Cache gives. The same tree as
+the quick match.
+
+**Seeded like everything else.** The run has a seed; the map is generated
+from it, and each stop's match seed comes from the run seed and the stop. A
+run's state is a small record (seed, stop, kit, ranks, money, hulls) saved in
+the browser, and later against the player id (stage 3 of Players and
+accounts) so a run follows you to another device.
+
+### The boss: two against one
+
+The last stop is you and an **ally** against a **boss tank**. The ally is a
+CPU you choose from the tanks you beat on the way, so the run decides your
+partner. Online later: two players against the boss, a co-op run.
+
+The boss is a tank with a script, deterministic like the rest of the core (a
+`boss` flag on the player, its moves chosen in `ai.js` by phase):
+
+- **Big:** half as large again as a tank, with about 400 hp, on a raised
+  platform at one end of a walled arena (Ridgeline or City, Wall edges).
+- **Phases** by health:
+  1. **Full to 60%:** Scatter and Breacher, with Point Defense up.
+  2. **60% to 25%:** puts up a Gravity Orbiter, jumps between ledges, and
+     answers whoever hurt it most with a Dirt Bomb.
+  3. **Under 25%:** fires twice a turn, and once a Thunderhead.
+- **Telegraphs:** a turn before a big shot it marks its target on the field
+  ("Thunderhead locked on Tester"), so the target has a turn to move, dig in
+  or raise a mound. On a phone a warning you can act on beats a surprise.
+- **A weak spot:** hits from above (Airburst, or a high lob onto its turret)
+  do a quarter more, so the variants you picked can matter.
+
+Beating it ends the run with a summary: the route, the fights, the build.
+
+### Build order
+
+Each stage ships on its own:
+
+1. **Variants:** the data, the fork rank in the tree, the five families,
+   the skill screen's tabs, CPUs choosing.
+2. **The boss in the sandbox:** Custom match > Boss (and `?boss=1`), you and a
+   CPU ally against it, so it can be played and tuned before the run exists.
+3. **The run:** map generation, the map screen (touch first), the stops,
+   spare hulls, saving.
+4. **Polish:** map art, reward cards, the run summary, a balance pass.
+
+Open: how long a run should be; whether the ally keeps its own skill ranks
+from the fight you beat it in; co-op runs online.
+
 ## Attributes: buffs and debuffs
 
 Mods and abilities mostly act by putting **status effects** on tanks or on
