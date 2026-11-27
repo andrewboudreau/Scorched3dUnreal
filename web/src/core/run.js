@@ -6,7 +6,7 @@
 // only keeps the seed and what happened; each stop's match seed comes from the
 // run seed and the stop. The run's state is a small JSON record:
 //
-//   { v, seed, name, at, done, path, kit, hulls, beaten, log, over, swapped, fighting }
+//   { v, seed, name, at, done, path, kit, hulls, beaten, log, over, swapped, fighting, stats }
 //
 //   at       the stop you are at (null before the first)
 //   done     whether that stop is settled (a fight played, a cache taken, the
@@ -17,7 +17,10 @@
 //            a mod's level is its ranks), unspent skill points, gear
 //   hulls    spare hulls: a lost fight costs one; at none the run is over
 //   beaten   the CPUs beaten on the way, the boss fight's possible allies
-//   log      one line per stop settled, for the summary
+//   log      one line per stop settled, for the summary (a fight's line also
+//            keeps the damage `dealt` and `taken` in it)
+//   stats    { dealt, taken }: damage you did and took over the whole run, every
+//            try of every fight (saves from before it load as zeros)
 //   over     null, 'won' or 'lost'
 //   swapped  the depot where a variant was already swapped (once a visit)
 //   fighting the stop whose fight was started and not settled yet: a page
@@ -281,7 +284,7 @@ export const startKitCarried = () => {
 export function startRun(seed, name = 'You') {
   return {
     v: RUN.version, seed: seed >>> 0, name: String(name || 'You').slice(0, 14),
-    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null, fighting: null,
+    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null, fighting: null, stats: { dealt: 0, taken: 0 },
   };
 }
 
@@ -323,6 +326,15 @@ function addTo(kit, { money = 0, ammo = null, points = 0 } = {}) {
   for (const [id, n] of Object.entries(ammo || {})) if (WEAPON_BY_ID[id]) kit.inventory[id] = (kit.inventory[id] || 0) + n;
 }
 
+const whole = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+
+// What the human (the match's first tank) did and took in a match, for the
+// run's totals: { damage, taken }, whole numbers.
+export const fightStats = (game) => {
+  const st = game.players[0]?.stats || {};
+  return { damage: whole(st.damage), taken: whole(st.taken) };
+};
+
 // Did the human (the match's first tank) win the fight? A boss match: the
 // boss is down. Otherwise it must win a round and no foe more than it.
 export function fightWon(game) {
@@ -342,11 +354,13 @@ export function fightWon(game) {
 // them on.
 // Returns { state, outcome: { won, reward, pay, hullLost, over } }: `pay` is
 // the money the match itself left you up or down (net of shopping in it).
-export function applyFightResult(state, { won, kit }) {
+export function applyFightResult(state, { won, kit, stats = null }) {
   const stop = currentStop(state);
   if (!stop || state.done || !stop.match) throw new Error('no fight to settle here');
   const s = clone(state);
   s.fighting = null;
+  const dealt = whole(stats?.damage), taken = whole(stats?.taken);
+  s.stats = { dealt: whole(s.stats?.dealt) + dealt, taken: whole(s.stats?.taken) + taken };
   if (kit && stop.kind !== 'boss') s.kit = cleanKit(kit);
   const outcome = { won: !!won, reward: null, pay: stop.kind === 'boss' ? 0 : s.kit.money - state.kit.money, hullLost: false, over: null };
   if (won) {
@@ -364,7 +378,7 @@ export function applyFightResult(state, { won, kit }) {
     if (s.hulls <= 0) { s.over = 'lost'; s.done = true; } else if (stop.kind !== 'boss') s.done = true;
   }
   outcome.over = s.over;
-  s.log.push({ stop: stop.id, kind: stop.kind, won: !!won, ...(outcome.reward ? { reward: outcome.reward } : {}), hullLost: outcome.hullLost });
+  s.log.push({ stop: stop.id, kind: stop.kind, won: !!won, ...(outcome.reward ? { reward: outcome.reward } : {}), hullLost: outcome.hullLost, dealt, taken });
   return { state: s, outcome };
 }
 
@@ -558,6 +572,32 @@ export function rewardWords(r) {
   return out.join(' · ');
 }
 
+// A reward or a cache offer as things to show, one per kind: [{ kind, text,
+// n?, items? }]. Money is `{ kind: 'money', n, text: '$150' }`, a skill point
+// `{ kind: 'point', n, text: '+1 skill point' }`, and ammo one `{ kind: 'ammo',
+// items: [{ id, name, n }], text: '2 Breacher · 1 Roller' }`, the crate's
+// contents by their real names.
+export function rewardItems(r) {
+  if (!r) return [];
+  const out = [];
+  if (r.money) out.push({ kind: 'money', n: r.money, text: `$${r.money}` });
+  const items = Object.entries(r.ammo || {}).filter(([, n]) => n > 0).map(([id, n]) => ({ id, n, name: WEAPON_BY_ID[id]?.name || id }));
+  if (items.length) out.push({ kind: 'ammo', items, text: items.map((i) => `${i.n} ${i.name}`).join(' · ') });
+  if (r.points) out.push({ kind: 'point', n: r.points, text: `+${r.points} skill point${r.points > 1 ? 's' : ''}` });
+  return out;
+}
+
+// The variant swaps open at a Depot, each as what you have and what you would
+// switch to: [{ weapon, name, now: { id, name, desc }, then: { id, name, desc }, upgrade }].
+// `desc` is the variant's line without its "Weapon Variant: " lead.
+export function variantSwaps(kit) {
+  const perks = kit.perks || [];
+  const side = (id) => ({ id, name: PERK_BY_ID[id].name, desc: PERK_BY_ID[id].desc.replace(/^[^:]*: /, '') });
+  return forksTaken(kit).map((f) => ({
+    weapon: f.weapon, name: WEAPON_BY_ID[f.weapon].name, now: side(f.taken), then: side(f.other), upgrade: perks.includes(`${f.weapon}:up`),
+  }));
+}
+
 // The mods a kit holds, from its ranks: [{ id, name, level }].
 export function kitMods(kit) {
   const p = { perks: kit.perks || [] };
@@ -571,14 +611,19 @@ export function runSummary(state) {
     const stop = map.byId[id];
     const fights = state.log.filter((l) => l.stop === id && l.won != null);
     const d = stop.match ? stopDetails(stop) : null;
-    return { id, kind: stop.kind, name: KINDS[stop.kind].name, where: d ? d.world : '', won: fights.length ? fights[fights.length - 1].won : null, tries: fights.length };
+    const took = state.log.filter((l) => l.stop === id && l.kind === 'cache').pop()?.offer;
+    return {
+      id, kind: stop.kind, name: KINDS[stop.kind].name, where: d ? d.world : '', won: fights.length ? fights[fights.length - 1].won : null, tries: fights.length,
+      foes: d ? d.foes.map((f) => f.name) : [], took: took ? rewardWords(took) : '',
+      dealt: fights.reduce((n, l) => n + whole(l.dealt), 0), taken: fights.reduce((n, l) => n + whole(l.taken), 0),
+    };
   });
   const fought = state.log.filter((l) => l.won != null);
   const perks = state.kit.perks || [];
   const ranks = [...new Set(perks)].filter((id) => !PERK_BY_ID[id]?.weapon && !PERK_BY_ID[id]?.mods).map((id) => PERK_BY_ID[id].name);
   const variants = forksTaken(state.kit).map((f) => `${WEAPON_BY_ID[f.weapon].name} · ${PERK_BY_ID[f.taken].name}${perks.includes(`${f.weapon}:up`) ? ' +' : ''}`);
   return {
-    over: state.over, hulls: state.hulls, route,
+    over: state.over, hulls: state.hulls, route, damage: { dealt: whole(state.stats?.dealt), taken: whole(state.stats?.taken) },
     fights: { won: fought.filter((l) => l.won).length, lost: fought.filter((l) => !l.won).length },
     build: { ranks, variants, mods: kitMods(state.kit), money: state.kit.money, points: state.kit.points,
       ammo: Object.entries(state.kit.inventory).map(([id, n]) => `${n} ${WEAPON_BY_ID[id]?.name || id}`) },
@@ -608,6 +653,7 @@ export function loadRun(storage) {
     over: raw.over === 'won' || raw.over === 'lost' ? raw.over : null,
     swapped: map.byId[raw.swapped] ? raw.swapped : null,
     fighting: raw.fighting != null && raw.fighting === at && raw.done === false ? at : null,
+    stats: { dealt: whole(raw.stats?.dealt), taken: whole(raw.stats?.taken) },   // saves from before the totals load as zeros
   };
 }
 

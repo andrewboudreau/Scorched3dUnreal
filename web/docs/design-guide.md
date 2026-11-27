@@ -213,7 +213,7 @@ The next layer of the roguelike: weapons that grow in two directions, a short
 solo **run** across a small map of fights, and a **boss** at the end of it,
 fought two against one. Built in stages, each playable on its own (see Build
 order). Stages 1 to 3, the variants, the boss and the run, are built; the
-polish (stage 4) is next.
+polish (stage 4) is built too.
 
 ### Weapon variants (built)
 
@@ -365,7 +365,41 @@ accounts) so a run follows you to another device.
   7 · Badlands"; "3/7" in portrait, where the points pill gives way to the
   Skills badge). The boss's card shows the Bulwark's health, its phases and
   weak spot (from `core/boss.js`), and each ally's ranks and mod levels.
-- **Left for later:** map art, richer reward cards, a fuller summary.
+
+**Stage 4 as built (the second polish pass: the screen):**
+
+- **Map art** (`runui.js` `fieldHtml`, `css/run.css`): our own, light and
+  still. Behind each stop a `run-terr` patch: a soft tint and contour rings
+  from `repeating-radial-gradient`, masked to fade, tinted by the stop's
+  world (`TERRAIN` in `runui.js`; the city is a grid, the ridgeline slanting
+  ridges, mountains have the tightest rings; Cache and Depot are neutral
+  teal, the boss red). The walked route is three lines on one path (a wide
+  bed, a solid line, dark tread marks as a dash pattern). A reachable stop
+  gets a ring (`::after`) that scales and fades: transform and opacity only,
+  nothing per frame in JS, off under `prefers-reduced-motion`. The boss's
+  mark is a filled fort (towers, keep, flag) instead of a line drawing. The
+  map's markup is a few KB; there are no images.
+- **Reward cards:** `rewardItems(reward)` (`core/run.js`) splits a reward
+  or a cache offer into money, ammo (the weapons by name and count) and
+  skill points; the UI gives each an icon (a coin, a crate of shells, a star)
+  and a colour (amber, steel, violet). Used on the stop card (chips), the
+  result card (rows, with what you hold now) and the Cache's three cards (the
+  crate lists its weapons and how many you already hold before you pick).
+- **Summary:** damage dealt and taken is tracked in the run state
+  (`stats: { dealt, taken }`, and `dealt`/`taken` on each fight's log line),
+  read from the human tank's match stats by `fightStats(game)`; a retried
+  boss fight counts every try. Old saves load with zeros. The summary shows
+  the tallies, the route as a mini map (the same `fieldHtml`, always laid out
+  left to right) with a tick or a cross on each fight, a row per stop (world,
+  foes, damage, or what a Cache gave), the final build, and **New run**.
+- **Depot:** a swap card shows "You have X" and "Switch to Y" side by side
+  (stacked in portrait) with each variant's line (`variantSwaps(kit)`), and
+  the button names the target. Once swapped, the cards say so and grey the
+  button. The Leave button is sticky at the foot in landscape and portrait.
+- **Left for later:** a route-aware ground (the terrain could follow the
+  actual match's map seed), a per-fight replay of the damage (a bar rather
+  than a number), sound on a reward, and showing the finished summary again
+  from the launch screen (it appears once, when the run ends).
 
 ### The boss: two against one (built in the sandbox)
 
@@ -408,8 +442,8 @@ Each stage ships on its own:
 3. **The run** (built): map generation, the map screen (touch first), the
    stops, spare hulls, saving, a result card after each fight and a plain
    summary at the end.
-4. **Polish** (started): the run's money (built), the header and boss
-   card (built); map art, reward cards and the run summary to come.
+4. **Polish** (built): the run's money, the header and boss card, the map
+   art, reward cards, the fuller summary and the Depot's swap view.
 
 Open: how long a run should be; co-op runs online. (The run's money, once
 open here, is tuned: see "Stage 4 as built" above.)

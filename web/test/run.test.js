@@ -7,7 +7,7 @@ import {
   RUN, RUN_KEY, TIER_PLAN, KINDS, runMap, generateMap, crosses, stopSeed, startRun, reachable, chooseStop, currentStop,
   applyFightResult, applyCache, swapVariant, leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, fightWon,
   loadRun, saveRun, clearRun, runSummary, stopDetails, rewardWords, kitMods, stopMoney, startFight, fightCutOff, runProgress,
-  TIER_NAMES, allyWords, bossWords,
+  TIER_NAMES, allyWords, bossWords, rewardItems, variantSwaps, fightStats,
 } from '../src/core/run.js';
 
 // The run (core/run.js): a map of stops from a seed, the kit carried from
@@ -527,4 +527,121 @@ test('the boss\'s card shows its health and what it does, and the ally\'s ranks'
   assert.deepEqual(allyWords({ name: 'Warden', ai: 'hard', elite: true, perks: ['pdturret', 'pdup', 'hull', 'hull', 'dugin'] }),
     { level: 'Elite', ranks: ['Point Defense L2', 'Reinforced Hull ×2', 'Dug In'] });
   assert.deepEqual(allyWords({ name: 'Rook', ai: 'normal', perks: [] }), { level: 'Normal', ranks: [] });
+});
+
+// ---------------------------------------------------------------- stage 4: stats, rewards, summary, swaps
+
+test('a run keeps the damage you dealt and took: in the total and on each fight\'s line', () => {
+  let s = startRun(SEEDS[20]);
+  assert.deepEqual(s.stats, { dealt: 0, taken: 0 });
+  s = chooseStop(s, reachable(s)[0]);
+  const r = applyFightResult(s, { won: true, kit: s.kit, stats: { damage: 212.4, taken: 77 } });
+  assert.deepEqual(r.state.stats, { dealt: 212, taken: 77 });
+  assert.equal(r.state.log[0].dealt, 212);
+  assert.equal(r.state.log[0].taken, 77);
+  assert.deepEqual(s.stats, { dealt: 0, taken: 0 }, 'the state given is not changed');
+  // A lost fight adds too; junk counts as nothing.
+  let t = chooseStop(r.state, reachable(r.state)[0]);
+  t = applyFightResult(t, { won: false, kit: t.kit, stats: { damage: 40, taken: NaN } }).state;
+  assert.deepEqual(t.stats, { dealt: 252, taken: 77 });
+  // Without stats (an older caller) nothing breaks.
+  const u = chooseStop(t, reachable(t)[0]);
+  assert.deepEqual(applyFightResult(u, { won: true, kit: u.kit }).state.stats, { dealt: 252, taken: 77 });
+  const sum = runSummary(t);
+  assert.deepEqual(sum.damage, { dealt: 252, taken: 77 });
+  assert.deepEqual(sum.route.map((x) => [x.dealt, x.taken]), [[212, 77], [40, 0]]);
+  // The totals come from a real game's first tank.
+  const g = new Game({ players: [{ name: 'A', ai: null }, { name: 'B', ai: 'easy' }], seed: 5, resolution: 16 });
+  g.players[0].stats.damage = 90.6;
+  g.players[0].stats.taken = 12;
+  assert.deepEqual(fightStats(g), { damage: 91, taken: 12 });
+});
+
+test('the totals survive a save, and a save from before them loads as zeros', () => {
+  const store = fakeStorage();
+  let s = startRun(SEEDS[21], 'Tester');
+  s = chooseStop(s, reachable(s)[0]);
+  s = applyFightResult(s, { won: true, kit: s.kit, stats: { damage: 150, taken: 30 } }).state;
+  saveRun(store, s);
+  assert.deepEqual(loadRun(store).stats, { dealt: 150, taken: 30 });
+  assert.deepEqual(loadRun(store), s);
+  // An old save: no `stats`, and its log lines have no damage.
+  const old = JSON.parse(JSON.stringify(s));
+  delete old.stats;
+  for (const l of old.log) { delete l.dealt; delete l.taken; }
+  store.setItem(RUN_KEY, JSON.stringify(old));
+  const loaded = loadRun(store);
+  assert.ok(loaded, 'still loads');
+  assert.deepEqual(loaded.stats, { dealt: 0, taken: 0 });
+  assert.deepEqual(runSummary(loaded).route.map((x) => [x.dealt, x.taken]), [[0, 0]]);
+  // It plays on: the next fight adds to the zeros.
+  const map = runMap(loaded.seed);
+  const next = chooseStop(loaded, reachable(loaded).find((id) => map.byId[id].match));
+  assert.deepEqual(applyFightResult(next, { won: true, kit: next.kit, stats: { damage: 20, taken: 5 } }).state.stats, { dealt: 20, taken: 5 });
+  // Damaged totals are cleaned.
+  store.setItem(RUN_KEY, JSON.stringify({ ...s, stats: { dealt: -4, taken: 'lots' } }));
+  assert.deepEqual(loadRun(store).stats, { dealt: 0, taken: 0 });
+});
+
+test('a reward or an offer is itemised by kind, with the crate\'s real weapon names', () => {
+  assert.deepEqual(rewardItems(null), []);
+  const items = rewardItems({ money: 180, ammo: { napalm: 2, breacher: 1 }, points: 2 });
+  assert.deepEqual(items.map((i) => i.kind), ['money', 'ammo', 'point']);
+  assert.equal(items[0].text, '$180');
+  assert.deepEqual(items[1].items, [{ id: 'napalm', n: 2, name: 'Napalm' }, { id: 'breacher', n: 1, name: 'Breacher' }]);
+  assert.equal(items[1].text, '2 Napalm · 1 Breacher');
+  assert.equal(items[2].text, '+2 skill points');
+  // Every cache's three offers each make one item of their own kind.
+  for (const seed of SEEDS) {
+    for (const st of runMap(seed).stops.filter((x) => x.kind === 'cache')) {
+      const kinds = st.offers.map((o) => rewardItems(o).map((i) => i.kind));
+      assert.deepEqual(kinds, [['point'], ['ammo'], ['money']]);
+      const crate = rewardItems(st.offers[1])[0];
+      assert.ok(crate.items.length >= 2 && crate.items.every((i) => i.name && i.name !== i.id));
+      assert.equal(rewardWords(st.offers[1]), crate.text, 'agrees with the older wording');
+    }
+  }
+});
+
+test('the summary has the route\'s foes, the cache taken, and the damage per stop', () => {
+  let s = walkTo(startRun(SEEDS[22]), 'cache');
+  if (!s) s = walkTo(startRun(SEEDS[23]), 'cache');
+  assert.ok(s, 'a cache on the way');
+  const cache = currentStop(s);
+  s = applyCache(s, 'ammo');
+  const sum = runSummary(s);
+  const last = sum.route[sum.route.length - 1];
+  assert.equal(last.kind, 'cache');
+  assert.equal(last.took, rewardWords(cache.offers[1]));
+  assert.ok(last.took.length > 0);
+  const fights = sum.route.filter((r) => r.kind !== 'cache');
+  assert.ok(fights.length >= 1);
+  for (const f of fights) {
+    assert.ok(f.foes.length >= 1 && f.foes.every((n) => typeof n === 'string' && n), 'foe names');
+    assert.ok(f.where);
+  }
+});
+
+test('a depot\'s swaps say what you have and what you would switch to', () => {
+  assert.deepEqual(variantSwaps({ perks: [] }), []);
+  const kit = { perks: ['napalm:sticky', 'napalm:up', 'roller:seeker'] };
+  const swaps = variantSwaps(kit);
+  const nap = swaps.find((x) => x.weapon === 'napalm');
+  assert.equal(nap.name, 'Napalm');
+  assert.equal(nap.now.id, 'napalm:sticky');
+  assert.equal(nap.then.id, 'napalm:flood');
+  assert.equal(nap.upgrade, true);
+  assert.ok(nap.now.desc && !/^Napalm becomes/.test(nap.now.desc), 'without the lead-in');
+  assert.ok(nap.then.desc.length > 10);
+  assert.equal(swaps.find((x) => x.weapon === 'roller').upgrade, false);
+  // After a swap the sides turn over, and the upgrade stays.
+  let s = null;
+  for (const seed of SEEDS) { s = walkTo(startRun(seed), 'depot'); if (s) break; }
+  assert.ok(s, 'a depot on some map');
+  s = setKit(s, { ...s.kit, perks: kit.perks });
+  s = swapVariant(s, 'napalm');
+  const after = variantSwaps(s.kit).find((x) => x.weapon === 'napalm');
+  assert.equal(after.now.id, 'napalm:flood');
+  assert.equal(after.then.id, 'napalm:sticky');
+  assert.equal(after.upgrade, true);
 });

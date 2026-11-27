@@ -837,8 +837,30 @@ second column beside the first. On a phone the players box sits top right.
   **Abandon** (tap twice) throws it away. A match left by closing the page is
   played again from the start, and says so: the save marks a fight as
   started (`fighting`), so **Continue run** reads "its fight starts over" and
-  the stop's card offers **Start the fight over**. At the end, a summary: the route, the fights
-  won and lost, and the build.
+  the stop's card offers **Start the fight over**.
+
+  **The map has some character**, in plain SVG and CSS (nothing moves but a
+  pulse): each stop sits on a patch of faint contour lines tinted by its world
+  (green rolling, olive hilly, grey mountains with tight lines, blue grid for
+  the city, cyan isles, rust ridges, teal island; the boss's ground is red),
+  the route you have walked is a solid track with tread marks across it, a stop
+  you can go to has a soft ring that swells and fades (off under reduced
+  motion), and the boss is a small fort with a flag. **Rewards show what they
+  are**: an icon per kind (a coin for money, a crate of shells for ammo, a star
+  for a skill point), on the stops' cards, the result card and the Cache's
+  three cards. A crate lists its weapons by name (and how many you hold)
+  before you pick it. A Depot's variant swap reads "You have Sticky" beside an
+  arrow and "Switch to Flood", each with its line, and the Leave button stays
+  at the foot of the screen.
+
+  **The run's summary** (shown when it ends) has four tallies (fights won of
+  tried, damage dealt, damage taken over the run, spare hulls left), the
+  route as a small copy of the map with a tick or a cross on each fight, a row
+  per stop (the world and the foes, the damage in that fight, or what a Cache
+  gave), the final build (variants, mods, ranks, unspent points, money and
+  ammo), and **New run** beside the way back to the menu. The damage totals
+  are kept in the run's state (`stats`, plus `dealt` and `taken` on each
+  fight's log line); a save from before them loads with zeros.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (the wind ×1.8, at most 3.5, so a Gale round on Gale wind stays playable), Dead calm, Low gravity,

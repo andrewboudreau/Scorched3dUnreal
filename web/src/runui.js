@@ -18,10 +18,9 @@
 import {
   RUN, KINDS, runMap, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, swapVariant,
   leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, kitOf, fightWon, loadRun, saveRun, clearRun,
-  runSummary, stopDetails, rewardWords, startFight, fightCutOff, runProgress, allyWords, bossWords,
+  runSummary, stopDetails, rewardWords, startFight, fightCutOff, runProgress, allyWords, bossWords, rewardItems, variantSwaps, fightStats,
 } from './core/run.js';
 import { BOSS } from './core/boss.js';
-import { PERK_BY_ID } from './core/perks.js';
 import { WEAPON_BY_ID } from './core/weapons.js';
 import { skillTreeHtml, skillTabsHtml, skillTabs, kitHtml, armoryHtml } from './armory.js';
 
@@ -34,9 +33,37 @@ const ICONS = {
   elite: '<path d="M12 2.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 15.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z"/><circle cx="12" cy="11.6" r="1.6" class="f"/>',
   cache: '<rect x="4" y="7" width="16" height="12" rx="1"/><path d="M4 11h16M12 7v12M8 7l2-3h4l2 3"/>',
   depot: '<path d="M3.5 11L12 4.5l8.5 6.5V20h-17z"/><path d="M9.5 20v-5.5h5V20"/>',
-  boss: '<path d="M4 20V9h3v2h2.5V8h5v3H17V9h3v11z"/><path d="M10.5 20v-4h3v4"/>',
+  // The boss's mark is a small filled fort: two towers and a keep with a flag.
+  boss: '<path class="f fort" d="M2 21V7.5h1.7V9h1.6V7.5H7V21zM17 21V7.5h1.7V9h1.6V7.5H22V21zM6.5 12h11v9h-11zM8.5 21V6h1.6v1.5h1.5V6h1.6v1.5h1.5V6h1.6v15z"/><path class="gate" d="M10.4 21v-3.6a1.6 1.6 0 0 1 3.2 0V21z"/><path d="M12.4 6V2.2"/><path class="f fort" d="M12.4 2.2l3.3 1.2-3.3 1.2z"/>',
 };
 const icon = (kind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[kind] || ICONS.fight}</svg>`;
+
+// What a reward is made of: money, a crate of ammo, a skill point.
+const GAIN = {
+  money: '<circle cx="12" cy="12" r="8.5"/><path d="M12 6.5v11M14.8 9.3c-.6-.9-1.6-1.3-2.8-1.3-1.5 0-2.7.8-2.7 2s1.2 1.7 2.7 2c1.6.3 2.8.8 2.8 2s-1.3 2-2.8 2c-1.3 0-2.3-.5-2.9-1.4"/>',
+  ammo: '<rect x="3" y="13.5" width="18" height="7" rx="1"/><path d="M5 13.5V9l1.5-3L8 9v4.5M10.5 13.5V9l1.5-3 1.5 3v4.5M16 13.5V9l1.5-3L19 9v4.5"/>',
+  point: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+};
+const gainIcon = (kind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GAIN[kind]}</svg>`;
+
+// The tint of the ground behind a stop, by its world (an r,g,b triplet), and
+// the spacing of its contour lines.
+const TERRAIN = {
+  rolling: '120,190,105', hilly: '165,175,95', mountains: '170,160,150', city: '120,160,210',
+  isles: '125,215,235', ridgeline: '225,150,90', island: '85,205,195', neutral: '95,208,189', boss: '255,115,95',
+};
+
+// A reward's items, each with its icon: a row for the result card, a chip on a
+// stop's card. `have` (the kit's ammo) adds what you carry of each weapon.
+function gainsHtml(items, have = null) {
+  return items.map((it) => {
+    const body = it.kind === 'ammo'
+      ? `<b>Ammo crate</b><ul class="run-crate">${it.items.map((i) => `<li><b>${i.n}×</b> ${esc(i.name)}${have ? `<small>now ${have[i.id] || 0} in all</small>` : ''}</li>`).join('')}</ul>`
+      : `<b>${esc(it.text)}</b>`;
+    return `<div class="run-gain g-${it.kind}"><i>${gainIcon(it.kind)}</i><div>${body}</div></div>`;
+  }).join('');
+}
+const chipsHtml = (items) => items.map((it) => `<span class="run-gchip g-${it.kind}">${gainIcon(it.kind)}${esc(it.text)}</span>`).join('');
 const HULL = '<svg viewBox="0 0 24 14" aria-hidden="true"><path d="M2 9h20l-3 4H5z"/><path d="M7 9V5h8v4M15 6.5h7"/></svg>';
 
 // The point on the map of stop `index` of `count` in column `col` of `cols`,
@@ -90,10 +117,7 @@ export class RunUI {
     (hint || top.lastElementChild).after(row);
     row.querySelector('#run-new').onclick = () => {
       if (this.live() && !this.confirmNew) { this.confirmNew = true; this.refreshLaunch(); return; }
-      this.begin();
-      this.state = startRun((Math.random() * 1e9) >>> 0, this.name() || 'You');
-      this.save();
-      this.open();
+      this.newRun();
     };
     row.querySelector('#run-continue').onclick = () => { this.begin(); this.open(); };
     row.querySelector('#run-abandon').onclick = () => {
@@ -104,6 +128,16 @@ export class RunUI {
       this.refreshLaunch();
     };
     this.refreshLaunch();
+  }
+
+  // A fresh run on a new seed (the launch screen's Run, the summary's New run).
+  newRun() {
+    this.begin();
+    this.confirmNew = false;
+    this.state = startRun((Math.random() * 1e9) >>> 0, this.name() || 'You');
+    this.sel = null;
+    this.save();
+    this.open();
   }
 
   live() { return !!this.state && !this.state.over; }
@@ -179,18 +213,35 @@ export class RunUI {
   // ---------------------------------------------------------------- the map
 
   mapHtml() {
+    const portrait = this.drawnPortrait = this.portrait.matches;
+    return `<div class="run-mapview${portrait ? ' portrait' : ''}">
+      <div class="run-map"><div class="run-field">${this.fieldHtml({ portrait })}</div></div>
+      <aside class="run-panel">${this.panelHtml()}</aside>
+    </div>`;
+  }
+
+  // The inside of a map's field: the ground behind each stop (a patch of
+  // contour lines tinted by the stop's world), the paths, the stops. All of it
+  // still: only CSS moves (a reachable stop's pulse). `mini` is the summary's
+  // small copy (always laid out left to right): stops are marks, not buttons,
+  // and what you did not visit is dim.
+  fieldHtml({ portrait = false, mini = false } = {}) {
     const s = this.state;
     const map = runMap(s.seed);
-    const portrait = this.drawnPortrait = this.portrait.matches;
     const cols = map.tiers.length + 1;
-    const open = new Set(reachable(s));
+    const open = mini ? new Set() : new Set(reachable(s));
     const path = new Set(s.path);
     const hereTier = s.at ? map.byId[s.at].tier : -1;
     const pos = { start: nodeAt(0, cols, 0, 1, portrait) };
     map.tiers.forEach((tier, t) => tier.forEach((st) => { pos[st.id] = nodeAt(t + 1, cols, st.index, tier.length, portrait); }));
     const lines = [];
-    const line = (a, b, cls) => lines.push(`<line x1="${pos[a].x}" y1="${pos[a].y}" x2="${pos[b].x}" y2="${pos[b].y}" class="${cls}"/>`);
-    for (const st of map.tiers[0]) line('start', st.id, s.path[0] === st.id ? 'walked' : s.at == null ? 'open' : '');
+    const trail = [];   // the route walked: a bed, a line, then tread marks across it
+    const line = (a, b, cls) => {
+      const xy = `x1="${pos[a].x}" y1="${pos[a].y}" x2="${pos[b].x}" y2="${pos[b].y}"`;
+      if (cls === 'walked') trail.push(`<line ${xy} class="bed"/><line ${xy} class="walked"/><line ${xy} class="tread"/>`);
+      else lines.push(`<line ${xy} class="${cls}"/>`);
+    };
+    for (const st of map.tiers[0]) line('start', st.id, s.path[0] === st.id ? 'walked' : s.at == null && !mini ? 'open' : '');
     for (const st of map.stops) {
       for (const id of st.next) {
         const i = s.path.indexOf(st.id);
@@ -198,27 +249,38 @@ export class RunUI {
         line(st.id, id, walked ? 'walked' : st.id === s.at && open.has(id) ? 'open' : '');
       }
     }
+    const lastTry = (id) => s.log.filter((l) => l.stop === id && l.won != null).pop();
     const node = (st) => {
       const cls = ['run-node', `k-${st.kind}`];
       if (path.has(st.id)) cls.push('visited');
-      if (st.id === s.at) cls.push('here');
-      if (open.has(st.id)) cls.push('open');
-      else if (!path.has(st.id) && st.tier <= hereTier) cls.push('gone');
-      if (st.id === this.sel) cls.push('sel');
+      if (mini) { if (!path.has(st.id)) cls.push('gone'); } else {
+        if (st.id === s.at) cls.push('here');
+        if (open.has(st.id)) cls.push('open');
+        else if (!path.has(st.id) && st.tier <= hereTier) cls.push('gone');
+        if (st.id === this.sel) cls.push('sel');
+      }
       const p = pos[st.id];
-      const won = s.log.filter((l) => l.stop === st.id && l.won != null).pop();
+      const won = lastTry(st.id);
       const mark = won ? `<em class="${won.won ? 'w' : 'l'}">${won.won ? '✓' : '✗'}</em>` : '';
-      return `<button class="${cls.join(' ')}" style="left:${p.x}%;top:${p.y}%" data-stop="${st.id}" aria-label="${esc(KINDS[st.kind].name)}">${icon(st.kind)}${mark}<span>${esc(KINDS[st.kind].name)}</span></button>`;
+      const at = `style="left:${p.x}%;top:${p.y}%"`;
+      return mini
+        ? `<i class="${cls.join(' ')}" ${at}>${icon(st.kind)}${mark}</i>`
+        : `<button class="${cls.join(' ')}" ${at} data-stop="${st.id}" aria-label="${esc(KINDS[st.kind].name)}">${icon(st.kind)}${mark}<span>${esc(KINDS[st.kind].name)}</span></button>`;
+    };
+    // A patch of ground behind each stop: about two tiers across, a tier's share of the short side.
+    const ground = (st) => {
+      const p = pos[st.id];
+      const long = (100 / cols) * 1.9, short = (100 / map.tiers[st.tier].length) * 1.05;
+      const w = portrait ? short : long, h = portrait ? long : short;
+      const kind = st.kind === 'boss' ? 'boss' : st.match ? st.match.world : 'neutral';
+      const ox = 35 + ((st.tier * 37 + st.index * 53) % 31), oy = 35 + ((st.tier * 19 + st.index * 29) % 31);
+      return `<i class="run-terr w-${kind}" style="left:${p.x}%;top:${p.y}%;width:${w.toFixed(1)}%;height:${h.toFixed(1)}%;--c:${TERRAIN[kind]};--ox:${ox}%;--oy:${oy}%"></i>`;
     };
     const p0 = pos.start;
-    return `<div class="run-mapview${portrait ? ' portrait' : ''}">
-      <div class="run-map"><div class="run-field">
-        <svg class="run-lines" viewBox="0 0 100 100" preserveAspectRatio="none">${lines.join('')}</svg>
-        <span class="run-node k-start visited" style="left:${p0.x}%;top:${p0.y}%">${icon('start')}</span>
-        ${map.stops.map(node).join('')}
-      </div></div>
-      <aside class="run-panel">${this.panelHtml()}</aside>
-    </div>`;
+    return `${map.stops.map(ground).join('')}
+      <svg class="run-lines" viewBox="0 0 100 100" preserveAspectRatio="none">${lines.join('')}${trail.join('')}</svg>
+      <i class="run-node k-start visited" style="left:${p0.x}%;top:${p0.y}%">${icon('start')}</i>
+      ${map.stops.map(node).join('')}`;
   }
 
   // The panel beside the map: the tapped stop, or where you are.
@@ -249,9 +311,9 @@ export class RunUI {
         <div class="run-sub">${st.kind === 'boss' ? 'The boss' : d.foes.length > 1 ? 'Foes' : 'Foe'} · ${d.rounds} round${d.rounds > 1 ? 's' : ''}</div>
         <ul class="run-foes">${foes}</ul>`;
       if (st.kind === 'boss') body += `<ul class="run-bossfacts">${bossWords().lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${this.allyHtml()}`;
-      else body += `<div class="run-reward"><span>Reward</span> ${esc(rewardWords({ ...st.reward, points: (st.reward.points || 0) + RUN.winPoints }))}</div>`;
+      else body += `<div class="run-reward"><span>Reward</span><div class="run-gchips">${chipsHtml(rewardItems({ ...st.reward, points: (st.reward.points || 0) + RUN.winPoints }))}</div></div>`;
     } else if (st.kind === 'cache') {
-      body = `<p class="run-note">No fight. Take one of three:</p><ul class="run-foes">${st.offers.map((o) => `<li><b>${esc(o.name)}</b> <small>${esc(offerWords(o))}</small></li>`).join('')}</ul>`;
+      body = `<p class="run-note">No fight. Take one of three:</p><ul class="run-foes">${st.offers.map((o) => `<li><b>${esc(o.name)}</b><div class="run-gchips">${chipsHtml(rewardItems(o))}</div></li>`).join('')}</ul>`;
     } else if (st.kind === 'depot') {
       body = `<p class="run-note">No fight. The armory is open (you have $${s.kit.money}), and you may turn one weapon's variant the other way.</p>`;
     }
@@ -315,6 +377,7 @@ export class RunUI {
         this.view = 'map'; this.sel = null; this.render();
         break;
       case 'next': this.view = this.state.over ? 'summary' : 'map'; this.sel = this.state.done ? null : this.state.at; this.render(); break;   // a lost boss fight: its card, ready to try again
+      case 'newrun': this.newRun(); break;
       case 'end':
         clearRun(localStorage);
         this.state = null;
@@ -342,8 +405,9 @@ export class RunUI {
   matchOver(game) {
     if (!this.fighting || !game) return false;
     const won = fightWon(game);
-    const { state, outcome } = applyFightResult(this.state, { won, kit: kitOf(game.players[0]) });
-    this.last = { stop: this.fighting.stop, outcome };
+    const stats = fightStats(game);
+    const { state, outcome } = applyFightResult(this.state, { won, kit: kitOf(game.players[0]), stats });
+    this.last = { stop: this.fighting.stop, outcome, stats };
     this.fighting = false;
     this.state = state;
     this.save();
@@ -387,10 +451,17 @@ export class RunUI {
 
   cacheHtml() {
     const st = currentStop(this.state);
-    const cards = st.offers.map((o) => `
-      <button class="run-card k-cache" data-act="take" data-kind="${o.kind}">
-        <span class="run-card-ico">${o.kind === 'rank' ? '★' : o.kind === 'ammo' ? icon('cache') : '$'}</span>
-        <b>${esc(o.name)}</b><small>${esc(offerWords(o))}</small></button>`).join('');
+    const k = this.state.kit;
+    const sub = { rank: `A rank in the tree. You have ${k.points} point${k.points === 1 ? '' : 's'} now.`, money: `For the armory. You have $${k.money} now.`, ammo: 'Added to the rounds you carry.' };
+    const cards = st.offers.map((o) => {
+      const it = rewardItems(o)[0];
+      return `
+      <button class="run-card k-cache g-${it.kind}" data-act="take" data-kind="${o.kind}">
+        <span class="run-card-ico">${gainIcon(it.kind)}</span>
+        <b>${esc(o.name)}</b>
+        <span class="run-card-gives">${it.kind === 'ammo' ? `<span class="run-crate">${it.items.map((i) => `<span><b>${i.n}×</b> ${esc(i.name)}<small>have ${k.inventory[i.id] || 0}</small></span>`).join('')}</span>` : esc(it.text)}</span>
+        <small>${sub[o.kind] || ''}</small></button>`;
+    }).join('');
     return `<div class="run-sheet">
       <div class="run-sheet-head"><h2>Cache</h2><span class="run-note">Take one. The other two stay behind.</span></div>
       <div class="run-cards">${cards}</div>
@@ -403,16 +474,20 @@ export class RunUI {
     const g = this.kit();
     const p = g.players[0];
     const swapped = s.swapped === st.id;
-    const forks = forksTaken(s.kit);
-    const swaps = forks.length ? forks.map((f) => `
-      <div class="shop-item sk-weapon"><div class="si-head"><b>${esc(WEAPON_BY_ID[f.weapon].name)}</b><span class="ar-badge">Variant</span></div>
-        <div class="desc">${esc(PERK_BY_ID[f.taken].name)} now. Swap to <b>${esc(PERK_BY_ID[f.other].name)}</b>: ${esc(PERK_BY_ID[f.other].desc.replace(/^[^:]*: /, ''))}</div>
-        <div class="si-foot"><span class="si-gives">Upgrade kept</span><button class="buy" data-act="swap" data-weapon="${f.weapon}" ${swapped ? 'disabled' : ''}>Swap</button></div></div>`).join('')
-      : '<p class="run-note">You have no variant yet: take one in the skill tree (Weapons) and a depot can turn it the other way.</p>';
+    // Each swap says what you have and what you would switch to, side by side.
+    const swaps = variantSwaps(s.kit).map((f) => `
+      <div class="shop-item sk-weapon run-swap${swapped ? ' used' : ''}"><div class="si-head"><b>${esc(f.name)}</b><span class="ar-badge">Variant</span></div>
+        <div class="run-swap-row">
+          <div class="run-swap-side now"><small>You have</small><b>${esc(f.now.name)}</b><span>${esc(f.now.desc)}</span></div>
+          <div class="run-swap-arrow" aria-hidden="true"></div>
+          <div class="run-swap-side then"><small>Switch to</small><b>${esc(f.then.name)}</b><span>${esc(f.then.desc)}</span></div>
+        </div>
+        <div class="si-foot"><span class="si-gives">${f.upgrade ? 'Your upgrade stays' : 'No upgrade yet'}</span><button class="buy" data-act="swap" data-weapon="${f.weapon}" ${swapped ? 'disabled' : ''}>${swapped ? 'Used' : `Switch to ${esc(f.then.name)}`}</button></div></div>`).join('')
+      || '<p class="run-note">You have no variant yet: take one in the skill tree (Weapons) and a depot can turn it the other way.</p>';
     const html = `<div class="run-sheet">
       <div class="run-sheet-head"><h2>Depot</h2><span class="run-funds">$${p.money}</span></div>
       ${kitHtml(g, p)}
-      <div class="shop-section">Swap a variant <small>${swapped ? 'Done for this depot.' : 'Once a depot.'}</small></div>
+      <div class="shop-section">Swap a variant <small>${swapped ? 'Done for this depot: these show what you have now.' : 'Once a depot. Only the fork turns; the upgrade stays.'}</small></div>
       <div class="shop-grid run-grid">${swaps}</div>
       <div class="shop-grid run-grid">${armoryHtml(g, p, this.justBought)}</div>
       <button class="primary" data-act="leave">Leave the depot</button>
@@ -424,15 +499,16 @@ export class RunUI {
   // ---------------------------------------------------------------- after a fight, the end
 
   resultHtml() {
-    const { stop, outcome } = this.last || {};
+    const { stop, outcome, stats } = this.last || {};
     const st = stop ? runMap(this.state.seed).byId[stop] : null;
     if (!st) { this.view = 'map'; return this.mapHtml(); }
     const d = stopDetails(st);
     const boss = st.kind === 'boss';
     const title = outcome.won ? (boss ? `The ${BOSS.name} is down!` : 'Fight won') : boss ? `The ${BOSS.name} holds` : 'Fight lost';
     const lines = [];
-    if (!boss && outcome.pay > 0) lines.push(`<div class="run-reward run-pay"><span>From the match</span> $${outcome.pay}</div>`);
-    if (outcome.won && !boss) lines.push(`<div class="run-reward"><span>Reward</span> ${esc(rewardWords(outcome.reward))}</div>`);
+    if (stats && (stats.damage || stats.taken)) lines.push(`<div class="run-dmg"><span><b>${stats.damage}</b> damage dealt</span><span><b>${stats.taken}</b> taken</span></div>`);
+    if (!boss && outcome.pay > 0) lines.push(`<div class="run-sub">From the match</div>${gainsHtml(rewardItems({ money: outcome.pay }))}`);
+    if (outcome.won && !boss) lines.push(`<div class="run-sub">Reward</div>${gainsHtml(rewardItems(outcome.reward), this.state.kit.inventory)}`);
     if (outcome.hullLost) lines.push(`<p class="run-loss">${HULL} A hull lost. ${this.state.hulls ? `${this.state.hulls} spare left.` : 'None left.'}</p>`);
     if (outcome.over === 'lost') lines.push('<p class="run-note">The run is over.</p>');
     else if (!outcome.won && boss) lines.push('<p class="run-note">You may try the boss again.</p>');
@@ -447,18 +523,26 @@ export class RunUI {
 
   summaryHtml() {
     const sum = runSummary(this.state);
-    const route = sum.route.map((r) => `<li class="k-${r.kind}">${icon(r.kind)}<b>${esc(r.name)}</b>${r.where ? `<small>${esc(r.where)}</small>` : ''}${r.won == null ? '' : `<em class="${r.won ? 'w' : 'l'}">${r.won ? '✓' : '✗'}${r.tries > 1 ? ` ×${r.tries}` : ''}</em>`}</li>`).join('');
+    // One row per stop walked: what it was, who was there, how it went.
+    const route = sum.route.map((r) => {
+      const mark = r.won == null ? '' : `<em class="${r.won ? 'w' : 'l'}">${r.won ? '✓' : '✗'}${r.tries > 1 ? ` ×${r.tries}` : ''}</em>`;
+      const sub = r.foes.length ? `${esc(r.where)} · vs ${esc(r.foes.join(', '))}` : r.took ? `Took ${esc(r.took)}` : '';
+      const dmg = r.dealt || r.taken ? `<span class="rt-dmg"><b>${r.dealt}</b> dealt · <b>${r.taken}</b> taken</span>` : '';
+      return `<li class="k-${r.kind}">${icon(r.kind)}<div class="rt-main"><b>${esc(r.name)}</b>${sub ? `<small>${sub}</small>` : ''}</div>${dmg}${mark}</li>`;
+    }).join('');
     const b = sum.build;
     const chips = (list, cls = '') => list.map((x) => `<span class="ar-chip ${cls}">${esc(x)}</span>`).join('');
+    const tile = (n, label, cls = '') => `<div class="run-tile ${cls}"><b>${n}</b><span>${label}</span></div>`;
     return `<div class="run-sheet run-summary ${sum.over}">
-      <div class="run-sheet-head"><h2>${sum.over === 'won' ? `Run won: the ${esc(BOSS.name)} is down` : 'Run over'}</h2>
-        <span class="run-note">${sum.fights.won} fight${sum.fights.won === 1 ? '' : 's'} won, ${sum.fights.lost} lost · ${sum.hulls} spare hull${sum.hulls === 1 ? '' : 's'} left</span></div>
+      <div class="run-sheet-head"><h2>${sum.over === 'won' ? `Run won: the ${esc(BOSS.name)} is down` : 'Run over'}</h2></div>
+      <div class="run-tiles">${tile(`${sum.fights.won}<i>/${sum.fights.won + sum.fights.lost}</i>`, 'fights won')}${tile(sum.damage.dealt, 'damage dealt', 'dealt')}${tile(sum.damage.taken, 'damage taken', 'taken')}${tile(sum.hulls, `spare hull${sum.hulls === 1 ? '' : 's'} left`)}</div>
       <div class="shop-section">Route</div>
+      <div class="run-map run-minimap"><div class="run-field">${this.fieldHtml({ mini: true })}</div></div>
       <ol class="run-route">${route}</ol>
-      <div class="shop-section">Build</div>
-      <div class="ar-kit-row">${chips(b.variants, 'var')}${chips(b.mods.map((m) => `${m.name} L${m.level}`), 'mod')}${chips(b.ranks)}${b.points ? chips([`${b.points} unspent point${b.points > 1 ? 's' : ''}`], 'pts') : ''}</div>
+      <div class="shop-section">Final build</div>
+      <div class="ar-kit-row">${chips(b.variants, 'var')}${chips(b.mods.map((m) => `${m.name} L${m.level}`), 'mod')}${chips(b.ranks)}${b.points ? chips([`${b.points} unspent point${b.points > 1 ? 's' : ''}`], 'pts') : ''}${!b.variants.length && !b.mods.length && !b.ranks.length && !b.points ? '<span class="run-note">No ranks taken.</span>' : ''}</div>
       <div class="ar-kit-row run-ammo">${chips([`$${b.money}`, ...b.ammo])}</div>
-      <button class="primary" data-act="end">Back to the menu</button>
+      <div class="run-actions"><button class="primary" data-act="newrun">New run</button><button data-act="end">Menu</button></div>
     </div>`;
   }
 }
