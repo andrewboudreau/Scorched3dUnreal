@@ -403,6 +403,7 @@ export class MatchEvents {
       const z = lerp(h.from[2], h.to[2]);
       const y = lerp(h.from[1], h.to[1]) + 4 * JET.apex * s * (1 - s);
       t.root.position.set(x, y, z);
+      t.layBlob(game.terrain);   // the Low blob stays on the ground under the arc
       if (s < 0.6 && (h.puff -= dt) <= 0 && seen(game.players[id])) {
         h.puff = 0.04;
         effects.jetFlame({ x, y: y + 0.3, z });

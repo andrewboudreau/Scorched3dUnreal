@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from '../../vendor/three/addons/utils/BufferGeometryUtils.js';
 import { TANK } from '../core/tank.js';
 import { look } from './timeofday.js';
+import { blobLay } from '../graphics.js';
 
 const DEG = Math.PI / 180;
 const TRACK_PITCH = 0.7;      // metres of ground per repeat of the tread texture
@@ -121,7 +122,7 @@ export class TankMesh {
     const blobGeo = new THREE.PlaneGeometry(this.trackHalf * 2 + 4.6, this.trackHalf * 2 + 1.8);
     blobGeo.rotateX(-Math.PI / 2);
     this.blob = new THREE.Mesh(blobGeo, blobMat());
-    this.blob.position.y = 0.06;
+    this.blob.position.y = 0.06;   // layBlob() puts it on the ground
     this.blob.renderOrder = 1;
     this.root.add(this.blob);
     this.recoil = 0;
@@ -296,6 +297,18 @@ export class TankMesh {
     }
     this.antenna.rotation.z = -this.sway[0] + Math.sin(this.time * 1.7) * 0.02;
     this.antenna.rotation.x = this.sway[1] + Math.sin(this.time * 2.3 + 1) * 0.02;
+    this.layBlob(terrain);
+  }
+
+  // The Low blob, on the ground under the tank wherever the root is now (a jump
+  // jet hop moves the root after sync: events.js updateHops calls this again).
+  layBlob(terrain) {
+    if (!blobsOn) return;
+    const { x, y, z } = this.root.position;
+    const { dy, scale } = blobLay(y, terrain.heightAt(x, z), terrain.solidAt(x, z));
+    this.blob.visible = scale > 0.02;
+    this.blob.position.y = dy;
+    this.blob.scale.set(scale, 1, scale);
   }
 
   // Pose the instanced road wheels: each turns about its own axle by its

@@ -12,6 +12,19 @@
 export const GRAPHICS_KEY = 'craterfall.graphics';
 export const CHOICES = ['auto', 'high', 'low'];
 
+// The soft blob under a tank at Low (render/tankMesh.js): it lies on the ground
+// under the tank, not on the tank, and shrinks away as the tank rises (a jump
+// jet hop peaks 10 m up). `rootY` is the tank's height, `groundY` the terrain's
+// there, `solid` whether there is ground at all (an isle's edge is open sky).
+// Gives `dy`, where the blob sits relative to the tank (a hair above the
+// ground), and `scale`, 1 on the ground to 0 at BLOB_FADE m above it.
+export const BLOB_FADE = 12;
+export function blobLay(rootY, groundY, solid = true) {
+  const up = Math.max(0, rootY - groundY);
+  const scale = solid ? Math.max(0, 1 - up / BLOB_FADE) : 0;
+  return { dy: groundY - rootY + 0.06, scale };
+}
+
 // The saved choice, or 'auto'.
 export function loadChoice(storage) {
   try {

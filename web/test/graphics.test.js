@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GRAPHICS_KEY, loadChoice, deviceTier, resolveTier, FrameJudge, median, Graphics } from '../src/graphics.js';
+import { GRAPHICS_KEY, loadChoice, deviceTier, resolveTier, FrameJudge, median, Graphics, blobLay, BLOB_FADE } from '../src/graphics.js';
 
 const memory = (start = {}) => {
   const m = new Map(Object.entries(start));
@@ -111,4 +111,17 @@ test('a chosen tier is saved and applied at once; a Low device needs no check', 
   g.set('nonsense');
   assert.equal(g.choice, 'high');
   assert.equal(new Graphics({ storage: s, coarse: true, cores: 4, apply: () => {} }).tier, 'high');
+});
+
+test('the Low blob follows the ground under the tank and shrinks as the tank rises', () => {
+  const on = blobLay(10, 10);
+  assert.ok(Math.abs(on.dy - 0.06) < 1e-9 && on.scale === 1);                 // on the ground: just above it, full size
+  const hop = blobLay(15, 10);                                              // 5 m up: it stays on the ground below
+  assert.ok(Math.abs(hop.dy - (-5 + 0.06)) < 1e-9);
+  assert.ok(hop.scale > 0 && hop.scale < 1);
+  assert.equal(blobLay(10 + BLOB_FADE, 10).scale, 0);                       // high enough: gone
+  assert.equal(blobLay(100, 10).scale, 0);
+  assert.ok(blobLay(12, 10).scale > blobLay(16, 10).scale);                  // smaller the higher it is
+  assert.ok(blobLay(8, 10).dy > 0 && blobLay(8, 10).scale === 1);           // half buried: the blob stays on the ground
+  assert.equal(blobLay(10, 10, false).scale, 0);                             // open sky under it: no blob
 });
