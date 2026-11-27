@@ -87,10 +87,10 @@ export const PERKS = [
 //   upgrade   true (rank 2)
 export const VARIANT_PERKS = VARIANT_WEAPONS.flatMap((w) => [
   ...w.variants.map((v) => ({
-    id: `${w.id}:${v.id}`, tag: v.name.slice(0, 2), name: v.name, weapon: w.id, variant: v.id, style: v.style,
+    id: `${w.id}:${v.id}`, tag: v.name.split(' ')[0], name: v.name, weapon: w.id, variant: v.id, style: v.style,
     desc: `${w.name} becomes ${v.name}: ${v.desc}`,
   })),
-  { id: `${w.id}:up`, tag: `${w.name.slice(0, 2)}+`, name: w.upgrade.name, weapon: w.id, upgrade: true,
+  { id: `${w.id}:up`, tag: `${w.name.slice(0, 3)}+`, name: w.upgrade.name, weapon: w.id, upgrade: true,
     desc: `${w.name}: ${w.upgrade.desc}` },
 ]);
 

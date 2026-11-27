@@ -153,13 +153,21 @@ export function kitHtml(game, p) {
   if (p.pendingArmor > 0) chips.push(`<span class="ar-chip gear">+${p.pendingArmor} armor</span>`);
   if (p.pendingFuel > 0) chips.push(`<span class="ar-chip gear">+${p.pendingFuel} m fuel</span>`);
   const mods = MODS.filter((d) => game.modLevel(p, d.id) > 0).map((d) => `<span class="ar-chip mod">${esc(d.name)} L${game.modLevel(p, d.id)}</span>`);
-  const perks = [...new Set(p.perks || [])].map((id) => {
+  // A weapon variant reads as its full name ("Napalm · Flood", + once upgraded),
+  // not as a two-letter tag.
+  const variants = [...new Set((p.perks || []).map((id) => PERK_BY_ID[id]).filter((k) => k?.variant).map((k) => k.weapon))]
+    .map((wid) => {
+      const up = (p.perks || []).some((id) => PERK_BY_ID[id]?.upgrade && PERK_BY_ID[id].weapon === wid);
+      const name = game.weaponName ? game.weaponName(p, wid) : wid;
+      return `<span class="ar-chip var">${esc(name)}${up ? ' +' : ''}</span>`;
+    });
+  const perks = [...new Set(p.perks || [])].filter((id) => !PERK_BY_ID[id]?.weapon).map((id) => {
     const k = PERK_BY_ID[id];
     const n = (p.perks || []).filter((x) => x === id).length;
     return k ? `<span class="perk" title="${esc(k.name)}: ${esc(k.desc)}">${k.tag}${n > 1 ? `×${n}` : ''}</span>` : '';
   });
   const points = p.points > 0 ? `<span class="ar-chip pts">${p.points} skill point${p.points > 1 ? 's' : ''}</span>` : '';
-  return `<div class="ar-kit-row"><label>Your kit</label>${chips.join('')}${mods.join('')}${perks.join('')}${points}</div>`;
+  return `<div class="ar-kit-row"><label>Your kit</label>${chips.join('')}${mods.join('')}${variants.join('')}${perks.join('')}${points}</div>`;
 }
 
 // ---------------------------------------------------------------- the armory

@@ -700,7 +700,7 @@ second column beside the first. On a phone the players box sits top right.
   | Weapon | Careful | Bold | Rank 2 |
   | --- | --- | --- | --- |
   | Breacher (22 m, 70) | **Bunker Buster**: 18 m, 70, digs half again as deep; a tank that is buried, or lower than the blast, is hit by the distance across, so a buried or dug-in tank takes it all | **Splitter**: 16 m, 50, and three bomblets (9 m, 22) thrown out in a star | Wider Charge: blast 15% wider |
-  | Scatter (5 × 28) | **Line**: the five shells land in a row along the line of flight | **Ring**: five bigger shells (12 m, 30) in an even ring round the aim point, its middle missed | Sixth Shell |
+  | Scatter (5 × 28) | **Line**: the five shells land in a row along the line of flight | **Ring**: five bigger shells (12 m, 30) in an even ring round the aim point; none lands in the middle, so a tank dead centre takes only the edges of the five blasts | Sixth Shell |
   | Roller (14 m, 55) | **Seeker**: leans toward the nearest enemy tank within 50 m as it rolls; 12 m, 46 | **Hopper**: hops once over a bump (0.4 to 8 m high) in its path and rolls on; 14 m, 48 | Long Roll: rolls half as far again |
   | Napalm (56) | **Sticky**: thick, runs about half as far and lies deeper, burns 11 ticks (about 5 s) for up to 62 | **Flood**: more and thinner fuel that runs about half as far again and spreads wide, five ticks for up to 50 | Wet Burn: burns through rain and over water up to 1.5 m deep |
   | Thunderhead (30 m, 95) | **Deep Strike**: 25 m, 110, a deeper crater | **Airburst**: goes off 8 m over the ground (`ballistics.burstNow`), 30 m and 90 by the distance across, no crater, so it hits a tank under a Dirt Bomb's dome in full | Wider Charge: blast 15% wider |
