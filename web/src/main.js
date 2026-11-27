@@ -38,7 +38,10 @@ import { ModsUI } from './modsui.js';
 import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
-import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
+import { defaultMatch, customBoss, onlineBoss, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
+import { BossUI } from './bossui.js';
+import { BossMarkView } from './render/bossMark.js';
+import { bossMatch } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
@@ -148,7 +151,8 @@ let bannerHold = 0;             // a round banner keeps the turn banner waiting 
 let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
-const arenaView = new ArenaView(scene, { effects, sound, camDist });   // the Edges curtains and the Island's sea
+const arenaView = new ArenaView(scene, { effects, sound, camDist });
+const bossMark = new BossMarkView(scene);   // the boss's telegraph on the ground   // the Edges curtains and the Island's sea
 // Scratch objects for per-frame work. Nothing may keep one past the call that filled it
 // (except camGoal, which deliberately points at _killGoal / _menuGoal and only reads them).
 const _lblV = new THREE.Vector3();       // projecting labels and popups
@@ -233,6 +237,7 @@ function disposeMatch() {
   if (sceneryMesh) { scene.remove(sceneryMesh.group); sceneryMesh.dispose(); sceneryMesh = null; }
   cityView?.dispose(); cityView = null;
   arenaView.clear();
+  bossMark.clear();
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
@@ -279,6 +284,7 @@ function startMatch(config) {
   effects.groundAt = (x, z) => game.terrain.heightAt(x, z);
   tanks = game.players.map((p) => {
     const m = new TankMesh(p.color);
+    m.root.scale.setScalar(p.size || 1);   // the boss is bigger
     scene.add(m.root);
     return m;
   });
@@ -349,6 +355,7 @@ function handleEvents() {
   recentBlasts.length = 0;
   for (const e of game.drainEvents()) {
     strikeUi.event(e);
+    bossUi.event(e);
     modsUi.event(e);
     cityView?.event(e);
     napalmView.event(e);
@@ -1496,6 +1503,7 @@ if (touch) {
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
+const bossUi = new BossUI({ game: () => game, touch, banner });
 const modsUi = new ModsUI({ game: () => game, scene, camera, touch, banner, click: () => sound.click(), blocked: () => handoffOpen, seen: (p) => seen(p) });
 
 function toggleMute() {
@@ -1994,7 +2002,9 @@ $('play').onclick = () => {
   phoneFullscreen(touch);
   if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
-  startMatch({ ...defaultMatch(humanName(), matchConditions({}, testParams), testParams.lab), modifier: testParams.modifier || null, time: matchTime('random', testParams) });
+  const conditions = matchConditions({}, testParams);
+  const base = testParams.boss ? bossMatch(humanName(), { conditions, lab: testParams.lab }) : defaultMatch(humanName(), conditions, testParams.lab);
+  startMatch({ ...base, modifier: testParams.modifier || null, time: matchTime('random', testParams) });
 };
 
 $('start').onclick = () => {
@@ -2004,12 +2014,15 @@ $('start').onclick = () => {
     // The host starts the room's match; everyone's screen starts it when the message comes round.
     if (!session.isHost || session.game) return;
     if (lobbySeats().length + lobbyCpus().length < 2) { $('net-note').textContent = 'Add a CPU tank, or wait for someone to join.'; return; }
-    session.start(customOptions(), lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type })));
+    const cpus = lobbyCpus().map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type }));
+    if ($('opt-match').value === 'boss') { const { config, boss } = onlineBoss(customOptions()); session.start(config, [...cpus, boss]); }
+    else session.start(customOptions(), cpus);
     $('start').disabled = true;
     return;
   }
   if (humanName()) profile.setName(humanName());
   $('setup').classList.add('hidden');
+  if ($('opt-match').value === 'boss') { startMatch(customBoss(setupRows, customOptions(), $('opt-firing').value)); return; }
   startMatch({
     players: setupRows.map((r, i) => ({ name: r.name.trim() || `Tank ${i + 1}`, ai: r.type === 'human' ? null : r.type })),
     ...customOptions(),
@@ -2056,7 +2069,7 @@ function showRoundResult(kind) {
   const w = game.lastRoundResult.winner != null ? game.players[game.lastRoundResult.winner] : null;
   if (kind === 'matchOver') {
     const sorted = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
-    $('mo-title').textContent = `Match winner: ${sorted[0].name}`;
+    $('mo-title').textContent = bossUi.matchTitle() || `Match winner: ${sorted[0].name}`;
     $('mo-table').innerHTML = standingsTable(sorted);
     $('mo-stats').innerHTML = statsTable(sorted);
     $('mo-awards').innerHTML = awards(game.players);
@@ -2575,6 +2588,8 @@ function tick(dt, draw = true) {
     arenaView.update(game, elapsed, dt);
     updateHud();
     strikeUi.update();
+    bossUi.update();
+    bossMark.update(game, elapsed);
     modsUi.update(sdt, elapsed);
     updateLabels();
     updatePips();

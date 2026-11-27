@@ -159,7 +159,8 @@ export function bossMatch(name, { ally = null, conditions = {}, lab = null, firi
     hills, world: 'meadow', edges: 'wall',
     players: [
       { name: name || 'You', ai: null },
-      { name: ally?.name || 'Rook', ai: ally?.ai || 'normal' },
+      // The ally is a CPU unless `ally.ai` is null (a second human on this screen).
+      { name: ally?.name || 'Rook', ai: ally && ally.ai === null ? null : ally?.ai || 'normal' },
       { name: BOSS.name, ai: BOSS.ai },
     ],
     boss: true,

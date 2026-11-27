@@ -10,6 +10,7 @@
 import { canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { GROUPS, cleanOff, matchConditions } from './builder.js';
 import { PERKS } from './core/perks.js';
+import { bossMatch } from './core/boss.js';
 
 export const CUSTOM_KEY = 'craterfall.custom';
 export const NAME_KEY = 'craterfall.name';
@@ -29,6 +30,27 @@ export function defaultMatch(name, conditions = matchConditions(), lab = null) {
     weapons: null, perks: null, modifiers: null,   // all on
     lab: { satellite: 'perk', level: 1, labels: 'some', orbiter: 'perk', orbiterLevel: 1, ...(lab || {}) },
   };
+}
+
+// The Custom section's boss match (core/boss.js): the first human row is you,
+// the next row your ally (a CPU, or a second human on this screen), and the
+// Bulwark comes third. `options` is main.js's customOptions (wind, ground,
+// time, fog); the boss match keeps its own rules (one round, walled meadow,
+// everything on), since the boss needs its arsenal.
+export function customBoss(rows, options, firing = 'volley') {
+  const me = rows.find((r) => r.type === 'human') || rows[0];
+  const ally = rows.find((r) => r !== me);
+  return bossMatch(me?.name.trim() || 'You', {
+    ally: ally ? { name: ally.name.trim() || 'Rook', ai: ally.type === 'human' ? null : ally.type } : null,
+    conditions: options, lab: options.lab, firing, fog: options.fog,
+  });
+}
+
+// Online: the room's own players and CPUs are the boss's foes, and the Bulwark
+// joins as the last CPU. Returns the config for Session.start and the boss's entry.
+export function onlineBoss(options) {
+  const { players, ...config } = bossMatch('', { conditions: options, lab: options.lab, fog: options.fog });
+  return { config, boss: players[players.length - 1] };
 }
 
 // The saved Custom state's version.
