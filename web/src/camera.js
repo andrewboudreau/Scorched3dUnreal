@@ -45,11 +45,12 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 // The architecture review (issue #1) splits main.js one piece at a time; this
 // camera was the first. The next ones, each its own module with main.js as glue:
 //
-// 1. HUD and labels (hud.js): updateHud, the scoreboard, the marks over the
-//    tanks (updateLabels; labelMode is already here), the edge locators, pips,
-//    the range card and the inset view. They read rig.mode, rig.modes and the
-//    game, and write the DOM only through the setText/setStyle helpers. A pure
-//    part (what each mark says, where a locator sits) gets tests, as hudview.js has.
+// 1. Done: HUD and labels. hud.js (Hud: player card, players box, banners,
+//    steering hint, wind and round), labels.js (Labels: the marks over the
+//    tanks, fog ghosts, edge locators, pips, damage pops), rangecard.js and
+//    inset.js. Their words and rules are hudlogic.js (pure, tested); DOM writes
+//    go through domwrite.js. main.js hands them rig.labelMode / rig.mode /
+//    rig.modes each frame and calls them from the Game events.
 // 2. Input router (input.js): keys, the touch controls' synthetic keys, pointer
 //    steering and the held-key aim ramp, routed by mode: in 'sight' a drag aims,
 //    in 'kill' nothing but the camera keys, on a hand-off card only Space/Enter.
