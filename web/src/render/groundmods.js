@@ -23,10 +23,16 @@ export const hologramMaterial = (color) => new THREE.ShaderMaterial({
   uniforms: { color: { value: new THREE.Color(color).lerp(HOLO, 0.55) }, time: { value: 0 }, fade: { value: 1 } },
   vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
     void main() {
-      vec4 w = modelMatrix * vec4(position, 1.0);
+      vec4 w = vec4(position, 1.0);
+      vec3 n = normal;
+      #ifdef USE_INSTANCING
+        w = instanceMatrix * w;   // the tank's road wheels
+        n = mat3(instanceMatrix) * n;
+      #endif
+      w = modelMatrix * w;
       vY = w.y;
       vec4 mv = viewMatrix * w;
-      vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);
+      vN = normalize(normalMatrix * n); vV = normalize(-mv.xyz);
       gl_Position = projectionMatrix * mv;
     }`,
   fragmentShader: `uniform vec3 color; uniform float time; uniform float fade; varying vec3 vN; varying vec3 vV; varying float vY;

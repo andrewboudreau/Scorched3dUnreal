@@ -1783,6 +1783,7 @@ frame();
 // Exposed for debugging from the console.
 window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
   get tanks() { return tanks; }, get camGoal() { return rig.goal; }, rig, get cameraMode() { return rig.mode; },
+  get terrainMesh() { return terrainMesh; }, get sceneryMesh() { return sceneryMesh; }, get cityView() { return cityView; },   // for profiling
   lookAt(x, y, z, from) { rig.lookAt(x, y, z, from); },
   release() { rig.release(); },
   get killCam() { return rig.modes.kill; },

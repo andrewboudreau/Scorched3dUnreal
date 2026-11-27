@@ -490,8 +490,12 @@ export class SceneryMesh {
   writeStatic() {
     const a = assets();
     const sc = this.scenery;
+    // Only what stands is written, packed from instance 0, and each mesh draws
+    // just that many: a hidden instance would still cost its vertices twice a
+    // frame (the shadow map and the view), and most broken and ruined models are.
     const next = {};
     const put = (kind, matrix, tint) => {
+      if (matrix === HIDDEN) return;
       const mesh = this.meshes[kind];
       const i = next[kind] = (next[kind] ?? -1) + 1;
       mesh.setMatrixAt(i, matrix);
@@ -527,6 +531,8 @@ export class SceneryMesh {
     for (const kind of STATIC) {
       const mesh = this.meshes[kind];
       if (!mesh) continue;
+      mesh.count = (next[kind] ?? -1) + 1;
+      mesh.visible = mesh.count > 0;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }

@@ -90,7 +90,7 @@ export class Wreck {
     });
 
     // A few small parts flung wider and faster.
-    const trim = charred(tank.wheels[0].material, this.cache);
+    const trim = charred((tank.wheelSet || tank.wheels[0]).material, this.cache);
     const box = (w, h, d) => this.mine(new THREE.BoxGeometry(w, h, d));
     const smalls = [
       [this.mine(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 6)), 0.5],   // road wheels
@@ -230,6 +230,7 @@ export class Wreck {
 
   dispose() {
     this.scene.remove(this.group);
+    this.group.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });   // the copied road wheels' matrices
     this.own.forEach((g) => g.dispose());
     this.cache.forEach((m) => m.dispose());
   }
