@@ -290,6 +290,7 @@ modifier, the foes (one to three CPUs and how hard), and the reward.
 | **Elite** | A tougher CPU with a mod already up. A better reward |
 | **Cache** | No fight: pick one of three (a skill rank, a crate of ammo, money) |
 | **Depot** | No fight: the armory, and you may swap a variant |
+| **Event** | No fight: a short scene and two or three choices, each a trade (built, below) |
 | **Boss** | The last stop, two against one (below) |
 
 **What carries:** money, ammo, skill ranks and variants, and mods with their
@@ -398,8 +399,50 @@ accounts) so a run follows you to another device.
   button. The Leave button is sticky at the foot in landscape and portrait.
 - **Left for later:** a route-aware ground (the terrain could follow the
   actual match's map seed), a per-fight replay of the damage (a bar rather
-  than a number), sound on a reward, and showing the finished summary again
-  from the launch screen (it appears once, when the run ends).
+  than a number), and sound on a reward.
+
+**Stage 4 as built (the third pass: Events and Last run):**
+
+- **Event stops** (`core/run.js`, `runui.js`): a fifth kind, placed by the
+  seeded map generator in tiers 2, 3 and 5 (the pool gets an `event`; tier 4
+  keeps its Depot odds). Every tier still has its fight, and a route is
+  still seven stops. About 1.4 events a map, 87% of maps have one, and each
+  event is on a map at most once. The stop holds `{ id, crate, luck }`,
+  rolled from the stop's own rng: the crate that "salvage" and "buy a crate"
+  give and the wager's coin, so a reload cannot reroll a choice.
+- **The table is data** (`EVENTS`): each choice has a `label`, `gives` (money,
+  points, jets, armor, fuel, hulls, `crate`, a `wager`, and `next`) and
+  `needs`. `applyEvent(state, choice)` is pure and returns the new state and
+  the result lines; `eventCard(state)` gives the card with each choice's
+  effect lines and whether it can be taken. The UI words come from the same
+  `gives`, so the buttons cannot drift from the effects.
+- **Effects on the next fight** live in the state's `next` and are read in
+  two places only: `matchConfig` (the forced modifier, a wind floor, `pay`
+  the match's pay factor, foes' `pendingArmor`) and `applyFightResult` (the
+  stop's reward money times `pay`, plus a bonus). A calm round turns clear
+  when the wind is forced. The boss's match ignores `next`. Whatever is left
+  is cleared when a fight is settled.
+- **Old saves:** the map generator has a version. A save without `mapv`
+  loads as version 1, which is the generator from before events, so its stops
+  do not change under it; new runs are version 2. `next` is sanitised on
+  load (and absent in old saves).
+- **Last run:** when a run ends the finished state is also kept under
+  `craterfall.lastrun.v1`, and **Last run** on the launch screen opens its
+  summary (the same view, with a Back button; the run in progress is held
+  aside and untouched).
+- **Money check** (`tools/runsim.mjs`, `--legacy` for the maps before events,
+  `--events random|leave` for how the seat treats them): events add about $14
+  a run net when a random affordable choice is taken, and the stop rewards and
+  match pay per run do not move (40 runs, `--hulls 6`: match pay $736 before,
+  $733 after; stop rewards $517 and $514). Money in hand at the boss goes up
+  ($366 to $513, because an event stop replaces some caches and elites, which
+  spend or hold less) but it is not kept after the boss. With the default
+  hulls it is $134 before and $117 after, and `--legacy` reproduces the $134
+  exactly.
+- **Left for later:** events that read the build (a variant or a mod
+  changes the choices), an event that adds a foe, a way to see an event's
+  trade before walking to it (today the card is a surprise on the map), and
+  sound on the choice.
 
 ### The boss: two against one (built in the sandbox)
 

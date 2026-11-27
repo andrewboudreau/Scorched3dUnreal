@@ -15,6 +15,10 @@
 #run-continue { border-color: #5fd0bd; }
 .run-abandon { grid-column: 1 / -1; min-height: 36px !important; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; }
 .run-abandon:hover { color: #ff9a8a; border-color: #b6574c; background: none; }
+/* Last run: the finished run's summary again, a quiet button under the others. */
+.run-last { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-height: 44px; padding: 6px 12px; text-align: left;
+  font-size: 14px; font-weight: 700; color: var(--text); background: rgba(255, 255, 255, .04); border-color: var(--edge); }
+.run-last small { font-size: 11px; font-weight: 500; color: var(--muted); }
 
 /* ---------------------------------------------------------------- the screen */
 #run.screen { place-items: stretch; background: radial-gradient(120% 90% at 30% 20%, rgb(18, 34, 40), rgb(7, 10, 14)); backdrop-filter: none; }
@@ -107,6 +111,7 @@
 .run-node.k-elite { color: #ffcf6b; border-color: #6d5a2c; }
 .run-node.k-cache { color: #9ed9ff; }
 .run-node.k-depot { color: #b7e59a; }
+.run-node.k-event { color: #d2b4ff; border-color: #5a4580; }
 .run-node.k-boss { width: 60px; height: 60px; color: #ff8a6a; border-color: #7a3c30; background: #241817; }
 .run-node.k-boss svg { width: 38px; height: 38px; }
 svg .fort { stroke-width: .5; }
@@ -142,7 +147,7 @@ svg .gate { fill: #241817; stroke: none; }
 .run-ptitle small { color: var(--muted); }
 .run-ptitle h2 { margin: 0; }
 .run-ptitle.k-fight { color: #e0b9a0; } .run-ptitle.k-elite { color: #ffcf6b; } .run-ptitle.k-cache { color: #9ed9ff; }
-.run-ptitle.k-depot { color: #b7e59a; } .run-ptitle.k-boss { color: #ff8a6a; }
+.run-ptitle.k-depot { color: #b7e59a; } .run-ptitle.k-boss { color: #ff8a6a; } .run-ptitle.k-event { color: #d2b4ff; }
 .run-ptitle :is(h2, h3) { color: var(--text); }
 .run-x { flex: none; width: 40px; height: 40px; min-height: 0; padding: 0; background: none; border-color: transparent; color: var(--muted); font-size: 16px; }
 .run-kdesc { margin: 6px 0 8px; color: var(--muted); }
@@ -262,7 +267,7 @@ svg .gate { fill: #241817; stroke: none; }
 .run-route em.w { color: #9be36b; }
 .run-route em.l { color: #ff7a6a; }
 .run-route .k-fight { color: #e0b9a0; } .run-route .k-elite { color: #ffcf6b; } .run-route .k-cache { color: #9ed9ff; }
-.run-route .k-depot { color: #b7e59a; } .run-route .k-boss { color: #ff8a6a; }
+.run-route .k-depot { color: #b7e59a; } .run-route .k-boss { color: #ff8a6a; } .run-route .k-event { color: #d2b4ff; }
 .run-route li b { color: var(--text); }
 .run-summary .ar-kit-row { margin: 6px 0; }
 
@@ -283,6 +288,34 @@ svg .gate { fill: #241817; stroke: none; }
 .run-swap.used .run-swap-arrow { background: var(--muted); }
 .run-swap .si-foot button.buy { flex: none; }
 
+
+/* ---------------------------------------------------------------- events */
+/* An Event: a short scene, then two or three choices, each with what it does. */
+.g-armor { --g: #9ed9ff; } .g-jet { --g: #ffb547; } .g-fuel { --g: #b7e59a; } .g-hull { --g: #e0b9a0; } .g-next { --g: #d2b4ff; }
+.run-event .run-ptitle h2, .run-evres .run-ptitle h2 { margin: 0; }
+.run-evtext { margin: 10px 0 12px; font-size: 15px; line-height: 1.45; color: var(--text); }
+.run-choices { display: flex; flex-direction: column; gap: 8px; }
+.run-sheet .run-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 56px; padding: 10px 14px; text-align: left;
+  border-radius: var(--r); border: 1px solid rgba(210, 180, 255, .4); background: linear-gradient(180deg, rgba(210, 180, 255, .1), rgba(20, 28, 36, .9)); color: var(--text); }
+.run-sheet .run-choice:hover:not(:disabled) { border-color: #d2b4ff; background: linear-gradient(180deg, rgba(210, 180, 255, .2), rgba(20, 28, 36, .9)); }
+.run-choice > b { font-size: 16px; }
+.run-choice.off { opacity: .55; }
+.run-choice .why { color: #ff9a8a; font-size: 12px; }
+.run-fx { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.run-ln { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--g, var(--text)); }
+.run-ln i { display: inline-grid; place-items: center; width: 18px; height: 18px; }
+.run-ln svg { width: 18px; height: 18px; fill: none; stroke: var(--g, currentColor); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.run-ln.bad { color: #ff9a8a; --g: #ff9a8a; }
+.run-ln.none { color: var(--muted); }
+/* The result: a small card, not a whole screen. */
+.run-evcard { width: min(420px, 100%); margin: 8px auto 0; padding: 14px 16px 12px; border-radius: var(--r-lg); box-sizing: border-box;
+  border: 1px solid rgba(210, 180, 255, .45); background: rgba(24, 28, 40, .94); display: flex; flex-direction: column; gap: 10px; }
+.run-evcard .run-fx { flex-direction: column; gap: 6px; }
+.run-evcard .run-ln { font-size: 15px; }
+.run-evcard .primary { margin-top: 4px; min-height: 48px; }
+.run-note.run-left { color: var(--text); }
+.run-left .good { color: #9be36b; } .run-left .bad { color: #ff9a8a; }
+.run-mod.changed b { color: #d2b4ff; }
 
 /* ---------------------------------------------------------------- small screens */
 /* A short landscape phone: a slimmer header, smaller stops, a narrower panel. */

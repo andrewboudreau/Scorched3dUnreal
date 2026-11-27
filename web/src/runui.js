@@ -7,6 +7,8 @@
 //   skills   spend skill points: the skill tree of armory.js, on a kit game
 //   cache    three cards, take one
 //   depot    the armory of armory.js, and swap one variant
+//   event    an Event stop: a short scene and two or three choices, each a trade
+//   eventres a small card with what the choice did
 //   result   after a fight: won or lost, the reward, a hull lost
 //   summary  the end of the run: the route, the fights, the build
 //
@@ -16,9 +18,10 @@
 // here (and the usual match-over card is skipped).
 
 import {
-  RUN, KINDS, runMap, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, swapVariant,
+  RUN, KINDS, mapOf, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, swapVariant,
   leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, kitOf, fightWon, loadRun, saveRun, clearRun,
   runSummary, stopDetails, rewardWords, startFight, fightCutOff, runProgress, allyWords, bossWords, rewardItems, variantSwaps, fightStats,
+  applyEvent, eventCard, nextWords, rewardNow, saveLastRun, loadLastRun,
 } from './core/run.js';
 import { BOSS } from './core/boss.js';
 import { WEAPON_BY_ID } from './core/weapons.js';
@@ -33,6 +36,8 @@ const ICONS = {
   elite: '<path d="M12 2.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 15.9l-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z"/><circle cx="12" cy="11.6" r="1.6" class="f"/>',
   cache: '<rect x="4" y="7" width="16" height="12" rx="1"/><path d="M4 11h16M12 7v12M8 7l2-3h4l2 3"/>',
   depot: '<path d="M3.5 11L12 4.5l8.5 6.5V20h-17z"/><path d="M9.5 20v-5.5h5V20"/>',
+  // An Event: a signpost with a question mark, our own.
+  event: '<path d="M12 21V8M5.5 3.5h13v8h-13z"/><path d="M10.2 6.4a1.9 1.9 0 1 1 2.7 1.7c-.5.3-.9.6-.9 1.2"/><circle cx="12" cy="10.6" r=".5" class="f"/>',
   // The boss's mark is a small filled fort: two towers and a keep with a flag.
   boss: '<path class="f fort" d="M2 21V7.5h1.7V9h1.6V7.5H7V21zM17 21V7.5h1.7V9h1.6V7.5H22V21zM6.5 12h11v9h-11zM8.5 21V6h1.6v1.5h1.5V6h1.6v1.5h1.5V6h1.6v15z"/><path class="gate" d="M10.4 21v-3.6a1.6 1.6 0 0 1 3.2 0V21z"/><path d="M12.4 6V2.2"/><path class="f fort" d="M12.4 2.2l3.3 1.2-3.3 1.2z"/>',
 };
@@ -43,8 +48,16 @@ const GAIN = {
   money: '<circle cx="12" cy="12" r="8.5"/><path d="M12 6.5v11M14.8 9.3c-.6-.9-1.6-1.3-2.8-1.3-1.5 0-2.7.8-2.7 2s1.2 1.7 2.7 2c1.6.3 2.8.8 2.8 2s-1.3 2-2.8 2c-1.3 0-2.3-.5-2.9-1.4"/>',
   ammo: '<rect x="3" y="13.5" width="18" height="7" rx="1"/><path d="M5 13.5V9l1.5-3L8 9v4.5M10.5 13.5V9l1.5-3 1.5 3v4.5M16 13.5V9l1.5-3L19 9v4.5"/>',
   point: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  // What an Event can also give or take: armor, jump jets, fuel, a hull, and a mark for the next fight.
+  armor: '<path d="M12 3l7 2.5v6c0 4.2-2.8 7.2-7 9-4.2-1.8-7-4.8-7-9v-6z"/>',
+  jet: '<path d="M12 3c3 3 4 6 4 9l-4 3-4-3c0-3 1-6 4-9zM9.5 18.5c.3 1.5 1 2.4 2.5 3 1.5-.6 2.2-1.5 2.5-3"/>',
+  fuel: '<path d="M6 21V5a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 15 5v16M4.5 21h12M15 9h2.2a1.3 1.3 0 0 1 1.3 1.3V16a1.5 1.5 0 0 0 3 0V9l-2.5-2.5M8 7h5"/>',
+  hull: '<path d="M2 14h20l-3 5H5z"/><path d="M7 14V8h8v6M15 10.5h7"/>',
+  next: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/>',
 };
-const gainIcon = (kind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GAIN[kind]}</svg>`;
+const gainIcon = (kind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GAIN[kind] || GAIN.next}</svg>`;
+// An Event's lines: what a choice does (core/run.js effectLines), a mark each.
+const linesHtml = (lines) => lines.map((l) => `<span class="run-ln${l.bad ? ' bad' : ''} g-${l.kind}"><i>${gainIcon(l.kind)}</i>${esc(l.text)}</span>`).join('');
 
 // The tint of the ground behind a stop, by its world (an r,g,b triplet), and
 // the spacing of its contour lines.
@@ -81,6 +94,9 @@ export class RunUI {
       document.head.appendChild(Object.assign(document.createElement('link'), { id: 'run-css', rel: 'stylesheet', href: new URL('../css/run.css', import.meta.url).href }));
     }
     this.state = loadRun(localStorage);
+    this.finished = loadLastRun(localStorage);   // the last finished run, for Last run on the launch screen
+    if (this.state?.over) this.keepLast();
+    this.reviewing = false;   // the finished run's summary is open from the launch screen (this.held is the run kept aside)
     this.view = 'map';
     this.sel = null;          // the stop tapped on the map
     this.ally = 0;            // which of the ally choices
@@ -112,7 +128,8 @@ export class RunUI {
     row.innerHTML = `
       <button id="run-new" class="run-go" title="A short solo campaign: fights across a map, ending at the Bulwark">Run<small>fights on a map, then the boss</small></button>
       <button id="run-continue" class="run-go hidden">Continue run<small></small></button>
-      <button id="run-abandon" class="run-abandon hidden">Abandon</button>`;
+      <button id="run-abandon" class="run-abandon hidden">Abandon</button>
+      <button id="run-last" class="run-last hidden">Last run<small></small></button>`;
     const hint = top.querySelector('.launch-hint');
     (hint || top.lastElementChild).after(row);
     row.querySelector('#run-new').onclick = () => {
@@ -120,6 +137,7 @@ export class RunUI {
       this.newRun();
     };
     row.querySelector('#run-continue').onclick = () => { this.begin(); this.open(); };
+    row.querySelector('#run-last').onclick = () => this.showLast();
     row.querySelector('#run-abandon').onclick = () => {
       if (!this.confirmAbandon) { this.confirmAbandon = true; this.refreshLaunch(); setTimeout(() => { this.confirmAbandon = false; this.refreshLaunch(); }, 3000); return; }
       this.confirmAbandon = false;
@@ -153,6 +171,13 @@ export class RunUI {
     $('#run-new').innerHTML = live
       ? (this.confirmNew ? 'New run?<small>tap again: the run in progress ends</small>' : 'New run<small>start a fresh map</small>')
       : 'Run<small>fights on a map, then the boss</small>';
+    const last = this.finished;
+    $('#run-last').classList.toggle('hidden', !last);
+    if (last) {
+      const sum = runSummary(last);
+      const f = sum.fights.won + sum.fights.lost;
+      $('#run-last small').textContent = `${last.over === 'won' ? 'won' : `lost at stop ${runProgress(last).n}`} · ${sum.fights.won} of ${f} fight${f === 1 ? '' : 's'} won`;
+    }
     if (live) {
       const s = this.state;
       const pr = runProgress(s);
@@ -165,13 +190,33 @@ export class RunUI {
 
   // ---------------------------------------------------------------- the run's screen
 
-  save() { if (this.state) saveRun(localStorage, this.state); }
+  save() { if (this.state && !this.reviewing) saveRun(localStorage, this.state); }
+
+  // A run that has ended is kept to read again (the summary under Last run).
+  keepLast() {
+    saveLastRun(localStorage, this.state);
+    this.finished = this.state;
+  }
+
+  // The finished run's summary, from the launch screen; the run in progress is held aside.
+  showLast() {
+    if (!this.finished) return;
+    this.begin();
+    this.held = this.state;
+    this.state = this.finished;
+    this.reviewing = true;
+    document.getElementById('setup').classList.add('hidden');
+    this.el.classList.remove('hidden');
+    this.view = 'summary';
+    this.sel = null;
+    this.render();
+  }
 
   open(view = null) {
     document.getElementById('setup').classList.add('hidden');
     this.el.classList.remove('hidden');
     const stop = currentStop(this.state);
-    this.view = view || (this.state.over ? 'summary' : stop && !this.state.done && (stop.kind === 'cache' || stop.kind === 'depot') ? stop.kind : 'map');
+    this.view = view || (this.state.over ? 'summary' : stop && !this.state.done && ['cache', 'depot', 'event'].includes(stop.kind) ? stop.kind : 'map');
     this.sel = stop && !this.state.done ? stop.id : null;
     this.render();
   }
@@ -188,6 +233,7 @@ export class RunUI {
     this.renderHead();
     const v = this.view;
     this.body.innerHTML = v === 'skills' ? this.skillsHtml() : v === 'cache' ? this.cacheHtml() : v === 'depot' ? this.depotHtml()
+      : v === 'event' ? this.eventHtml() : v === 'eventres' ? this.eventResHtml()
       : v === 'result' ? this.resultHtml() : v === 'summary' ? this.summaryHtml() : this.mapHtml();
     this.body.scrollTop = 0;
   }
@@ -227,7 +273,7 @@ export class RunUI {
   // and what you did not visit is dim.
   fieldHtml({ portrait = false, mini = false } = {}) {
     const s = this.state;
-    const map = runMap(s.seed);
+    const map = mapOf(s);
     const cols = map.tiers.length + 1;
     const open = mini ? new Set() : new Set(reachable(s));
     const path = new Set(s.path);
@@ -286,12 +332,14 @@ export class RunUI {
   // The panel beside the map: the tapped stop, or where you are.
   panelHtml() {
     const s = this.state;
-    const map = runMap(s.seed);
+    const map = mapOf(s);
     const st = this.sel ? map.byId[this.sel] : null;
     if (!st) {
       const g = kitGame(s);
       const n = reachable(s).length;
+      const left = nextWords(s.next);
       return `<h3>${s.at ? 'Where next?' : 'Your run'}</h3>
+        ${left.length ? `<p class="run-note run-left">Waiting for your next fight: ${left.map((w) => `<span class="${w.bad ? 'bad' : 'good'}">${esc(w.text)}</span>`).join(' · ')}</p>` : ''}
         <p class="run-note">${n ? `Tap a lit stop to see what waits there. ${s.at ? '' : 'Every stop shows its world, its foes and its reward before you go.'}` : ''}</p>
         <p class="run-note">A run's fight pays ${Math.round(RUN.matchPay * 100)}% of a usual match's money, on top of the stop's reward: spend it well at a Depot.</p>
         ${s.kit.points > 0 ? `<p class="run-note hot">You have ${s.kit.points} skill point${s.kit.points > 1 ? 's' : ''}: spend ${s.kit.points > 1 ? 'them' : 'it'} under Skills.</p>` : ''}
@@ -303,15 +351,15 @@ export class RunUI {
     const of = `Stop ${st.tier + 1} of ${map.tiers.length}`;
     let body = '';
     if (st.match) {
-      const d = stopDetails(st);
+      const d = stopDetails(st, s.next);
       const foes = d.foes.map((f) => `<li><b>${esc(f.name)}</b> <span class="run-lvl">${esc(f.level)}</span>${f.extra ? `<small>${esc(f.extra)}</small>` : ''}</li>`).join('');
       body = `
         <div class="run-facts"><span>${esc(d.world)}</span><span>${esc(d.wind)}</span><span>${esc(d.edges)}</span><span>${esc(d.time)}</span></div>
-        <div class="run-mod"><b>${esc(d.modifier)}</b>${d.modifierDesc && st.match.modifier !== 'clear' ? ` · ${esc(d.modifierDesc)}` : ''}</div>
+        <div class="run-mod${d.changed ? ' changed' : ''}"><b>${esc(d.modifier)}</b>${d.modifierDesc && st.match.modifier !== 'clear' ? ` · ${esc(d.modifierDesc)}` : ''}</div>
         <div class="run-sub">${st.kind === 'boss' ? 'The boss' : d.foes.length > 1 ? 'Foes' : 'Foe'} · ${d.rounds} round${d.rounds > 1 ? 's' : ''}</div>
         <ul class="run-foes">${foes}</ul>`;
       if (st.kind === 'boss') body += `<ul class="run-bossfacts">${bossWords().lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${this.allyHtml()}`;
-      else body += `<div class="run-reward"><span>Reward</span><div class="run-gchips">${chipsHtml(rewardItems({ ...st.reward, points: (st.reward.points || 0) + RUN.winPoints }))}</div></div>`;
+      else body += `<div class="run-reward"><span>Reward</span><div class="run-gchips">${chipsHtml(rewardItems({ ...rewardNow(st, s.next), points: (st.reward.points || 0) + RUN.winPoints }))}</div></div>${this.leftHtml()}`;
     } else if (st.kind === 'cache') {
       body = `<p class="run-note">No fight. Take one of three:</p><ul class="run-foes">${st.offers.map((o) => `<li><b>${esc(o.name)}</b><div class="run-gchips">${chipsHtml(rewardItems(o))}</div></li>`).join('')}</ul>`;
     } else if (st.kind === 'depot') {
@@ -319,11 +367,17 @@ export class RunUI {
     }
     let go = '';
     if (cut) body += '<p class="run-note run-cut">This fight was left unfinished when the page closed. It starts over from the first shot, with the kit you brought to it.</p>';
-    if (here) go = `<button class="primary run-gobtn" data-act="enter">${st.match ? (cut ? 'Start the fight over' : s.log.some((l) => l.stop === st.id) ? 'Try again' : 'Fight') : st.kind === 'cache' ? 'Open the cache' : 'Enter the depot'}</button>`;
+    if (here) go = `<button class="primary run-gobtn" data-act="enter">${st.match ? (cut ? 'Start the fight over' : s.log.some((l) => l.stop === st.id) ? 'Try again' : 'Fight') : st.kind === 'cache' ? 'Open the cache' : st.kind === 'event' ? 'See what it is' : 'Enter the depot'}</button>`;
     else if (can) go = `<button class="primary run-gobtn" data-act="go" data-stop="${st.id}">Go</button>`;
     else go = `<p class="run-note">${s.path.includes(st.id) ? 'Been here.' : 'Not on your path from here.'}</p>`;
     return `<div class="run-ptitle k-${st.kind}">${icon(st.kind)}<div><h3>${esc(KINDS[st.kind].name)}</h3><small>${of}</small></div><button class="run-x" data-act="unsel" aria-label="Close">✕</button></div>
       <p class="run-kdesc">${esc(KINDS[st.kind].desc)}</p>${body}${go}`;
+  }
+
+  // What an Event left on the next fight, under a fight's card.
+  leftHtml() {
+    const left = nextWords(this.state.next);
+    return left.length ? `<p class="run-note run-left">From the road: ${left.map((w) => `<span class="${w.bad ? 'bad' : 'good'}">${esc(w.text)}</span>`).join(' · ')}</p>` : '';
   }
 
   allyHtml() {
@@ -366,6 +420,20 @@ export class RunUI {
         this.save();
         this.view = 'map'; this.sel = null; this.render();
         break;
+      case 'choose': {
+        const { state, outcome } = applyEvent(this.state, t.dataset.choice);
+        this.state = state;
+        this.lastEvent = outcome;
+        this.save();
+        this.view = 'eventres'; this.sel = null; this.render();
+        break;
+      }
+      case 'closelast':
+        this.state = this.held;
+        this.held = null;
+        this.reviewing = false;
+        this.close();
+        break;
       case 'swap':
         this.state = swapVariant(this.state, t.dataset.weapon);
         this.save();
@@ -391,7 +459,7 @@ export class RunUI {
   enter() {
     const st = currentStop(this.state);
     if (!st || this.state.done) return;
-    if (st.kind === 'cache' || st.kind === 'depot') { this.view = st.kind; this.render(); return; }
+    if (st.kind === 'cache' || st.kind === 'depot' || st.kind === 'event') { this.view = st.kind; this.render(); return; }
     const ally = st.kind === 'boss' ? allyChoices(this.state)[this.ally] : null;
     this.fighting = { stop: st.id, ally };
     this.state = startFight(this.state);   // so a page closed mid-fight is told it starts over
@@ -411,6 +479,7 @@ export class RunUI {
     this.fighting = false;
     this.state = state;
     this.save();
+    if (state.over) this.keepLast();
     this.toMenu();
     this.el.classList.remove('hidden');
     this.view = 'result';
@@ -496,11 +565,42 @@ export class RunUI {
     return html;
   }
 
+  // ---------------------------------------------------------------- events
+
+  eventHtml() {
+    const card = eventCard(this.state);
+    if (!card) { this.view = 'map'; return this.mapHtml(); }
+    const k = this.state.kit;
+    const choices = card.choices.map((c) => `
+      <button class="run-choice${c.can ? '' : ' off'}" data-act="choose" data-choice="${c.id}" ${c.can ? '' : 'disabled'}>
+        <b>${esc(c.label)}</b>
+        <span class="run-fx">${c.lines.length ? linesHtml(c.lines) : '<span class="run-ln none">Nothing changes.</span>'}</span>
+        ${c.can ? '' : `<small class="why">${esc(c.why)}</small>`}</button>`).join('');
+    return `<div class="run-sheet run-event">
+      <div class="run-ptitle k-event">${icon('event')}<div><h2>${esc(card.name)}</h2><small>Event · you have $${k.money}${k.points ? ` and ${k.points} skill point${k.points > 1 ? 's' : ''}` : ''}</small></div></div>
+      <p class="run-evtext">${esc(card.text)}</p>
+      <div class="run-choices">${choices}</div>
+    </div>`;
+  }
+
+  // The small card after a choice: what changed.
+  eventResHtml() {
+    const o = this.lastEvent;
+    if (!o) { this.view = 'map'; return this.mapHtml(); }
+    return `<div class="run-sheet run-evres">
+      <div class="run-evcard">
+        <div class="run-ptitle k-event">${icon('event')}<div><h2>${esc(o.label)}</h2><small>${esc(o.event)}</small></div></div>
+        <div class="run-fx">${o.lines.length ? linesHtml(o.lines) : '<span class="run-ln none">Nothing changed. You move on.</span>'}</div>
+        <button class="primary" data-act="map">Back to the map</button>
+      </div>
+    </div>`;
+  }
+
   // ---------------------------------------------------------------- after a fight, the end
 
   resultHtml() {
     const { stop, outcome, stats } = this.last || {};
-    const st = stop ? runMap(this.state.seed).byId[stop] : null;
+    const st = stop ? mapOf(this.state).byId[stop] : null;
     if (!st) { this.view = 'map'; return this.mapHtml(); }
     const d = stopDetails(st);
     const boss = st.kind === 'boss';
@@ -526,7 +626,7 @@ export class RunUI {
     // One row per stop walked: what it was, who was there, how it went.
     const route = sum.route.map((r) => {
       const mark = r.won == null ? '' : `<em class="${r.won ? 'w' : 'l'}">${r.won ? '✓' : '✗'}${r.tries > 1 ? ` ×${r.tries}` : ''}</em>`;
-      const sub = r.foes.length ? `${esc(r.where)} · vs ${esc(r.foes.join(', '))}` : r.took ? `Took ${esc(r.took)}` : '';
+      const sub = r.foes.length ? `${esc(r.where)} · vs ${esc(r.foes.join(', '))}` : r.detail ? esc(r.detail) : r.took ? `Took ${esc(r.took)}` : '';
       const dmg = r.dealt || r.taken ? `<span class="rt-dmg"><b>${r.dealt}</b> dealt · <b>${r.taken}</b> taken</span>` : '';
       return `<li class="k-${r.kind}">${icon(r.kind)}<div class="rt-main"><b>${esc(r.name)}</b>${sub ? `<small>${sub}</small>` : ''}</div>${dmg}${mark}</li>`;
     }).join('');
@@ -542,7 +642,7 @@ export class RunUI {
       <div class="shop-section">Final build</div>
       <div class="ar-kit-row">${chips(b.variants, 'var')}${chips(b.mods.map((m) => `${m.name} L${m.level}`), 'mod')}${chips(b.ranks)}${b.points ? chips([`${b.points} unspent point${b.points > 1 ? 's' : ''}`], 'pts') : ''}${!b.variants.length && !b.mods.length && !b.ranks.length && !b.points ? '<span class="run-note">No ranks taken.</span>' : ''}</div>
       <div class="ar-kit-row run-ammo">${chips([`$${b.money}`, ...b.ammo])}</div>
-      <div class="run-actions"><button class="primary" data-act="newrun">New run</button><button data-act="end">Menu</button></div>
+      <div class="run-actions">${this.reviewing ? '<button class="primary" data-act="closelast">Back</button>' : '<button class="primary" data-act="newrun">New run</button><button data-act="end">Menu</button>'}</div>
     </div>`;
   }
 }

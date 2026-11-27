@@ -816,6 +816,29 @@ second column beside the first. On a phone the players box sits top right.
     ($150 + $40 a tier).
   - **Depot:** the armory (the round-2 prices), and you may turn one weapon's
     variant the other way (its upgrade stays), once a depot.
+  - **Event** (a signpost icon; tiers 2, 3 and 5, about one and a
+    half a map): no fight. A short scene from the field and two or three
+    choices, each a trade with its effects listed on the button, then a
+    small card saying what changed. Seven events (`EVENTS` in `core/run.js`):
+    *Wrecked supply crawler* (salvage the cargo: the stop's crate, but the next
+    fight's CPUs start with +25 armor / strip its plating: +20 armor for you /
+    leave it), *A crew offers a trade* (pay $200 for a skill point / pay $80
+    for a crate / walk on), *Storm front* (the next fight is Rain and pays
+    double / wait it out), *Hull yard* (pay $300 to patch a spare hull /
+    sell a spare for $250 / move on), *Shell game* (stake $100 to win $250:
+    the stop's own luck decides, so reloading changes nothing / walk on),
+    *Fallen relay* (+2 jump jet charges / +40 m of fuel next fight / +1
+    skill point, and the next wind is at least a Gale) and *Bounty board*
+    (+$150 on the next win but a Gale at least / +$60 on the next win /
+    leave it). A choice you cannot afford is greyed with why. The crate and
+    the wager's luck are rolled with the map, so they are the same every time
+    the run is opened; each event comes at most once a map. What an event
+    leaves on the next fight (`next` in the run's state: a forced round
+    modifier, the pay factor, a wind floor, foes' armor, a win bonus) goes
+    through the match config the run already builds, shows on the stops'
+    cards and the map ("From the road: Rain, forced · Pays double") and is
+    used up by the next fight, won or lost. Armor and fuel for you go into
+    the kit's own `pendingArmor` / `pendingFuel`.
   - **Boss:** the boss match, you and an ally against the Bulwark. The ally is
     one of the tanks you beat: pick from two (the strongest, and the latest
     other) if you beat two or more; it keeps its ranks. Its card shows the
@@ -863,13 +886,17 @@ second column beside the first. On a phone the players box sits top right.
   at the foot of the screen.
 
   **The run's summary** (shown when it ends) has four tallies (fights won of
-  tried, damage dealt, damage taken over the run, spare hulls left), the
+  tried, damage dealt, damage taken over the run, spare hulls left; **Last
+  run** under Run on the launch screen opens it again, kept in
+  `craterfall.lastrun.v1`), the
   route as a small copy of the map with a tick or a cross on each fight, a row
   per stop (the world and the foes, the damage in that fight, or what a Cache
   gave), the final build (variants, mods, ranks, unspent points, money and
   ammo), and **New run** beside the way back to the menu. The damage totals
   are kept in the run's state (`stats`, plus `dealt` and `taken` on each
-  fight's log line); a save from before them loads with zeros.
+  fight's log line); a save from before them loads with zeros. A save from
+  before Events has no `mapv`: it keeps its old map (`mapv` 1, no Events), and
+  a new run is `mapv` 2.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (the wind ×1.8, at most 3.5, so a Gale round on Gale wind stays playable), Dead calm, Low gravity,
