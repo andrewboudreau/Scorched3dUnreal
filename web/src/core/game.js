@@ -80,6 +80,22 @@ export const AI_DEPLOY = { yaw: 1.0, power: 0.02, easy: 0.35 };
 export const AI_DECOY = { ranged: 60, easy: 0.5, warp: { min: 40, max: 120, tries: 14, edge: 40, clear: 50, far: 560 } };
 const HEAVY = ['breacher', 'guided'];
 
+// What tank `p` carries out of a match, as plain JSON for Game's `kit`
+// (giveKit): money, ammo (the Shell left out), jets, ranks, unspent points
+// and gear bought for a round that never came.
+export function kitOf(p) {
+  const inventory = {};
+  for (const w of WEAPONS) {
+    const c = p.inventory?.[w.id];
+    if (!w.infinite && !w.hidden && Number.isFinite(c) && c > 0) inventory[w.id] = c;
+  }
+  return {
+    money: Math.max(0, Math.floor(p.money || 0)), inventory, jets: Math.max(0, p.jets || 0),
+    perks: [...(p.perks || [])], points: Math.max(0, p.points || 0),
+    pendingArmor: p.pendingArmor || 0, pendingFuel: p.pendingFuel || 0,
+  };
+}
+
 export class Game {
   constructor({
     players,
@@ -185,6 +201,9 @@ export class Game {
       // bomblets) that hurt someone else; `longest` is the furthest such hit, in metres.
       stats: { shots: 0, hits: 0, damage: 0, taken: 0, kills: 0, longest: 0, probes: 0, lastHit: 0 },
     }));
+    // A carried kit (a run: core/run.js) replaces a tank's starting money,
+    // ammo, ranks and points before anything else hands out more.
+    players.forEach((q, i) => { if (q.kit) this.giveKit(this.players[i], q.kit); });
     if (boss) this.setUpBoss();
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
@@ -254,8 +273,36 @@ export class Game {
       for (const [id, n] of Object.entries(BOSS.allyKit)) if (this.weaponOn(id)) p.inventory[id] = (p.inventory[id] || 0) + n;
       p.jets += BOSS.allyJets;
       p.pendingArmor += BOSS.allyArmor;
-      if (this.weaponOn('thunderhead')) p.perks.push(...BOSS.allyPerks);
+      // The Airburst, unless the tank already took a side of that fork (a run's carried kit).
+      for (const id of BOSS.allyPerks) {
+        const b = BRANCHES.find((x) => x.weapon && x.options.includes(id));
+        if (this.weaponOn(PERK_BY_ID[id].weapon) && !(b && forkTaken(p, b))) p.perks.push(id);
+      }
     }
+  }
+
+  // Start tank `p` with a carried kit (`kitOf` reads one back out after a
+  // match): { money, inventory: { weapon id: count }, jets, perks, points,
+  // pendingArmor, pendingFuel, up }. Every field is optional; a missing one
+  // leaves the fresh tank's own. `inventory` replaces the starting kit (the
+  // Shell stays endless; a weapon that is off stays at 0). `up` lists mods put
+  // up at the start of the first round (a run's Elite: core/run.js). Health is
+  // never carried: every match starts whole.
+  giveKit(p, kit = {}) {
+    const n = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+    if (kit.money != null) p.money = n(kit.money);
+    if (kit.inventory && typeof kit.inventory === 'object') {
+      for (const w of WEAPONS) {
+        if (w.infinite || w.hidden) continue;
+        p.inventory[w.id] = this.weaponOn(w.id) && !(this.cfg.local && w.id === 'guided') ? n(kit.inventory[w.id]) : 0;
+      }
+    }
+    if (kit.jets != null) p.jets = n(kit.jets);
+    if (Array.isArray(kit.perks)) p.perks = kit.perks.filter((id) => PERK_BY_ID[id]);
+    if (kit.points != null) p.points = n(kit.points);
+    p.pendingArmor = n(kit.pendingArmor ?? p.pendingArmor);
+    p.pendingFuel = n(kit.pendingFuel ?? p.pendingFuel);
+    if (Array.isArray(kit.up)) p.upAtStart = kit.up.filter((id) => MOD_BY_ID[id]);
   }
 
   // ---------- what this match uses (cfg.weapons, cfg.perks, cfg.modifiers) ----------
@@ -359,6 +406,11 @@ export class Game {
       p.buried = false;
       fitMods(this.cfg.lab, p);   // an up mod carries on; the rest are fitted fresh
       anchorMod(p, 'satellite', (x, z) => this.groundAt(x, z));   // over its owner's new spot
+      if (this.round === 1 && p.upAtStart) {
+        for (const id of p.upAtStart) {
+          if (!MOD_BY_ID[id]?.aimed && deployMod(p, id, (x, z) => this.groundAt(x, z))) this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: id });
+        }
+      }
     }
     this.strike = null;
     this.blink = null;
