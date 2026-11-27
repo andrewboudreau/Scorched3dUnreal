@@ -510,7 +510,9 @@ export class City {
         // this one comes later in the list, so it still has the hit points
         // it had before the blast.
         if ((k + per >= n || cells[k + per] <= 0) && y >= BOX[3] - 1.5) dmg *= CITY.roofHit;
-        cells[k] -= dmg;
+        // Kept to the hundredth, as a snapshot carries it (state), so the
+        // host and the screens that took its state wear down alike.
+        cells[k] = Math.round((cells[k] - dmg) * 100) / 100;
         if (cells[k] <= 0) { cells[k] = 0; lost.push(k); }
       }
       // A worn neighbour may no longer carry what hangs off it, so a building
@@ -575,7 +577,9 @@ export class City {
     if (!Array.isArray(s) || s.length !== this.buildings.length) return;
     let changed = false;
     const mask = (b) => (b.collapsed ? '-' : b.cells.map((v) => (v > 0 ? 1 : 0)).join(''));
-    s.forEach(([hp, , down, cells], i) => {
+    // The hit points are summed again from the chunks (refresh), as the host
+    // summed them: the rounded total sent would drift from it.
+    s.forEach(([, , down, cells], i) => {
       const b = this.buildings[i];
       const was = mask(b);
       b.collapsed = !!down;
@@ -583,7 +587,6 @@ export class City {
       else if (Array.isArray(cells) && cells.length === b.cells.length) b.cells = cells.slice();
       else b.cells = b.cellMax.slice();
       this.refresh(b);
-      b.hp = hp;
       if (was !== mask(b)) changed = true;
     });
     if (!changed) return;
