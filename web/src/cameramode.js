@@ -2,6 +2,7 @@
 // what the game forced (the kill cam), and which one is driving this frame.
 // Pure: no three.js, no DOM, no clock of its own (callers pass `now`), so it is
 // testable (test/cameramode.test.js). src/camera.js moves the camera for each mode.
+// decidingShot() at the end, the kill cam's trigger, reads the game (src/core) only.
 //
 // The state is a handful of choices, each with its own enter and exit rules:
 //
@@ -37,6 +38,11 @@
 //
 // The HUD's view (src/hudview.js hudView) and the marks over the tanks
 // (labelMode below) read the mode, not the separate flags.
+
+import { TANK, hitSphere } from './core/tank.js';
+import { stepProjectile, groundContact, burstNow } from './core/ballistics.js';
+import { blastDamage, rollPart } from './core/weapons.js';
+import { perkSum } from './core/perks.js';
 
 export const MODES = ['menu', 'kill', 'overview', 'sight', 'hero', 'volley', 'follow', 'peek', 'plan', 'hold'];
 
@@ -169,4 +175,55 @@ export function killSide(from, to, cam) {
   let side = [-dz, dx];
   if ((cam[0] - to[0]) * side[0] + (cam[1] - to[1]) * side[1] < 0) side = [dz, -dx];
   return { side, dir: [dx, dz] };
+}
+
+// Where a projectile comes down within `horizon` seconds if nothing changes.
+// `burst`: the Airburst's height, where it goes off over the ground (ballistics.burstNow).
+function forecast(game, pr, horizon, burst = 0) {
+  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag, edge: pr.edge };
+  const t = game.terrain;
+  const step = 1 / 30;
+  for (let s = step; s <= horizon; s += step) {
+    stepProjectile(c, game.wind, step);
+    if (c.crossed?.kind === 'wall') return { t: s, pos: c.crossed.point, direct: null };
+    if (!t.inBounds(c.pos[0], c.pos[2])) return null;
+    if (burst && burstNow(c, t, burst)) return { t: s, pos: [...c.pos], direct: null };
+    for (const p of game.players) {
+      if (!p.alive || (p.id === pr.owner && pr.time + s < 0.5)) continue;   // the shooter's grace, as in the game
+      const h = hitSphere(p);
+      if ((c.pos[0] - h.x) ** 2 + (c.pos[1] - h.y) ** 2 + (c.pos[2] - h.z) ** 2 <= h.r * h.r) return { t: s, pos: [...c.pos], direct: p };
+    }
+    const g = groundContact(c, t);
+    if (g) return g.sea ? null : { t: s, pos: g, direct: null };
+  }
+  return null;
+}
+
+// The shell that will decide the round, if one is about to: its blast, within
+// KILLCAM.lead seconds, would leave at most one tank standing.
+// Returns { id, victim, t, from } or null.
+export function decidingShot(game) {
+  const alive = game.players.filter((p) => p.alive);
+  if (alive.length < 2) return null;
+  const dying = new Set();
+  let pick = null;
+  for (const pr of game.projectiles) {
+    if (pr.dead || pr.probe || pr.roller) continue;
+    const w = game.weaponOf(pr.owner, pr.weapon);
+    const blast = w.impact?.find((i) => i.type === 'blast');
+    if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split' || f.type === 'airburst'))) continue;
+    const hit = forecast(game, pr, KILLCAM.lead, game.burstHeight(pr.owner, pr.weapon));
+    if (!hit) continue;
+    const o = game.players[pr.owner];
+    const radius = blast.radius * (1 + perkSum(o, 'blastRadius'));
+    const damage = blast.damage * (1 + perkSum(o, 'blastDamage'));
+    for (const p of alive) {
+      const h = hitSphere(p);
+      const d = p === hit.direct ? 0 : Math.max(0, Math.hypot(h.x - hit.pos[0], blast.flat ? 0 : h.y - hit.pos[1], h.z - hit.pos[2]) - TANK.hitRadius * 0.5);
+      if (blastDamage(d, radius, damage) < p.hp + p.armor) continue;
+      dying.add(p.id);
+      if (!pick || hit.t < pick.t) pick = { id: pr.id, victim: p.id, t: hit.t, from: pr.owner };
+    }
+  }
+  return pick && alive.length - dying.size <= 1 ? pick : null;
 }
