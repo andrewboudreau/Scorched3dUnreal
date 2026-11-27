@@ -41,28 +41,8 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 //   floorY()      the desert floor's height
 //   gunner        the sight (gunner.js Gunner)
 //
-// ---------------------------------------------------------------- next extractions
-//
-// The architecture review (issue #1) splits main.js one piece at a time; this
-// camera was the first. The next ones, each its own module with main.js as glue:
-//
-// 1. Done: HUD and labels. hud.js (Hud: player card, players box, banners,
-//    steering hint, wind and round), labels.js (Labels: the marks over the
-//    tanks, fog ghosts, edge locators, pips, damage pops), rangecard.js and
-//    inset.js. Their words and rules are hudlogic.js (pure, tested); DOM writes
-//    go through domwrite.js. main.js hands them rig.labelMode / rig.mode /
-//    rig.modes each frame and calls them from the Game events.
-// 2. Done: input router. input.js (Input: keys, the touch controls' synthetic
-//    keys, the steering fingers, the held-key aim ramp, the sight's drag, pinch
-//    and wheel, the drag that takes the camera over, X and B) routes each input
-//    through inputmap.js (pure, tested: key + state -> action, and which pointer
-//    route is live in which mode). It is a pure move: every binding does what it
-//    did before, in the same states (no key is shut off by mode yet).
-// 3. Match glue (match.js): startMatch / disposeMatch / toMenuScene and the
-//    Game event switch (handleEvents), which today call into the camera, the
-//    HUD, sound and effects. Split the switch into per-concern handlers
-//    (camera.event(e), hud.event(e), ...) as strikeUi/bossUi/modsUi already do.
-// What stays in main.js: building the scene, the frame loop and window.craterfall.
+// The camera was the first piece split out of main.js (issue #1); the rest of
+// that plan, now done, is docs/architecture.md.
 
 const DEG = Math.PI / 180;
 

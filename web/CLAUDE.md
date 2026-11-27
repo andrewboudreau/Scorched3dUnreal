@@ -15,17 +15,19 @@ render layout, `docs/design-guide.md` for where the design is going, and
   - `ai.js` is the CPUs.
   - The data lives in `weapons.js`, `perks.js` and `mods.js`.
 - `src/render/`: three.js meshes and effects, one file per thing.
-- `src/main.js`: the glue (online, the match's events). It's large, and several
-  agents edit it, so keep changes there small and put new UI in its own module
-  (as `modsui.js`, `guide.js` and `launch.js` do).
+- `src/main.js`: the wiring. It builds the scene and the modules, runs the
+  frame loop and exposes `window.craterfall`. Several agents edit it, so keep
+  changes there small and put new UI in its own module (as `modsui.js`,
+  `guide.js` and `launch.js` do).
 - `src/guide.js`: the in-game guide (Settings > Guide). It builds its lists
   from the data modules, so new weapons, perks and mods show up there on their own.
 - `vendor/three/`: three.js r187, vendored. Don't upgrade it in passing.
 
 ## Architecture
 
-`main.js` is being split one piece at a time (issue #1); each piece is its own
-module, with main.js as glue.
+`main.js` was split one piece at a time (issue #1; the summary is
+`docs/architecture.md`). Each piece is its own module, with its rules in a pure
+file tested by `node --test`, and main.js as the wiring.
 
 - **Camera** (`src/camera.js`, `src/cameramode.js`). `CameraRig` owns the
   camera, the orbit controls and everything that moves them. `CameraModes`
@@ -62,8 +64,29 @@ module, with main.js as glue.
   the binding table. The touch controls (`touch.js`) press the same keys with
   synthetic events. Add a key there and its action in `Input.act`, not a new
   listener in main.js or a UI module.
-- **Next**: the match glue (start, events, back to the menu). The plan is in
-  the header of `camera.js`.
+- **The match** (`src/match.js`, `src/matchlogic.js`). `Match` owns the Game
+  being played (`match.game`, null on the menu; main.js keeps a `game` mirror
+  through `onGame`) and what is built for it in the scene. It has `start(config)`
+  (Play, the Custom match, a room's start, a run's fight), `dispose()`,
+  `toMenu()` and `again()`, and it runs the cards between rounds: round over,
+  each local human's skills and armory in turn (the hot seat), the volley
+  hand-off, then a run's result (runui.js) or the match-over card. What the
+  cards say and how they order the tanks is `matchlogic.js` (tested).
+- **Game events** (`src/events.js`, `src/eventlogic.js`). `MatchEvents.handle()`
+  drains the Game's events each frame. Each one goes first to the modules that
+  keep their own (strike, boss, mods, sounds), then to the switch, which turns
+  it into effects, sounds, banners, marks and camera calls. It also keeps what
+  events leave behind: shells and trails, wrecks, hops, scout pulses, `ranges`,
+  `lastLand` and the volley's `heroId`. Which events say what, and who reacts,
+  is `eventlogic.js` (tested). Add a reaction there, or in the module that
+  shows it, not in main.js.
+- **Setup and online** (`src/setup.js`, `src/online.js`, `src/netlogic.js`).
+  `Setup` owns the setup card's tank rows and its Play and Start buttons.
+  `Online` owns the room (`online.link`, net.js) and the session
+  (`online.session`, core/netplay.js); both are null offline. It also runs the
+  lobby, chat, the room list, the online clock, the host's `result()` and
+  `ended()` when a room stops. The clock and the lobby and room-list texts are
+  `netlogic.js` (tested).
 
 ## Checking work
 
