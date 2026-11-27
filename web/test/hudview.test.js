@@ -66,13 +66,13 @@ test('the phone-first calls the issue asked for', () => {
 });
 
 test('every selector names something that is in the page or the touch controls', () => {
-  const source = ['index.html', 'src/touch.js', 'src/bossui.js', 'src/settings.js', 'src/strike.js', 'src/main.js', 'src/sideview.js', 'src/render/sidepanel.js'].map(read).join('\n');
+  const source = ['index.html', 'src/touch.js', 'src/bossui.js', 'src/settings.js', 'src/strike.js', 'src/main.js', 'src/hud.js', 'src/labels.js', 'src/sideview.js', 'src/render/sidepanel.js'].map(read).join('\n');
   for (const row of HUD) {
     if (!row.sel) continue;
     const bare = row.sel.replace(/:(has|not)\([^)]*\)/g, '');
     for (const m of bare.matchAll(/([#.])([\w-]+)/g)) {
       const [, kind, name] = m;
-      // `none` is a class main.js adds to the jets readout; the rest are in the markup or built by the modules.
+      // `none` is a class hud.js adds to the jets readout; the rest are in the markup or built by the modules.
       assert.ok(source.includes(name), `${row.id}: ${kind}${name} is not in the page`);
     }
   }

@@ -15,7 +15,7 @@ render layout, `docs/design-guide.md` for where the design is going, and
   - `ai.js` is the CPUs.
   - The data lives in `weapons.js`, `perks.js` and `mods.js`.
 - `src/render/`: three.js meshes and effects, one file per thing.
-- `src/main.js`: the glue (HUD, input, online). It's large, and several
+- `src/main.js`: the glue (input, online, the match's events). It's large, and several
   agents edit it, so keep changes there small and put new UI in its own module
   (as `modsui.js`, `guide.js` and `launch.js` do).
 - `src/guide.js`: the in-game guide (Settings > Guide). It builds its lists
@@ -39,8 +39,19 @@ module, with main.js as glue.
   `camera.js`) and calls it from events (`turn`, `volley`, `cutKill`, `shake`),
   keys (`toggleOverview`, `toggleSight`, `toggleFollow`, `peekNext`) and the
   frame (`updateKill` before the game steps, `update` after).
-- **Next**: HUD and labels, an input router keyed by mode, and the match glue
-  (start, events, back to the menu). The plan is in the header of `camera.js`.
+- **HUD and labels** (`src/hud.js`, `src/labels.js`, `src/rangecard.js`,
+  `src/inset.js`, `src/hudlogic.js`, `src/domwrite.js`). `Hud` owns the player
+  card, the players box, banners (`banner`, `roundStart`, `turn`, `note`), the
+  steering hint and the weapon bar; `Labels` owns everything in `#labels`: the
+  marks over the tanks (JAM badge, fog ghosts), edge locators, pips and damage
+  pops; `RangeCard` and `Inset` are the rangefinder card and the corner view.
+  What they say and when they show is `hudlogic.js` (no three.js, no DOM,
+  tested in `test/hudlogic.test.js`); per-frame DOM writes go through
+  `domwrite.js`, which skips unchanged values. main.js calls `hud.update(game)`
+  and `marks.update(game, { mode, sight, overview, handoff })` each frame and
+  keeps a `banner()` wrapper that other modules receive.
+- **Next**: an input router keyed by mode, and the match glue (start, events,
+  back to the menu). The plan is in the header of `camera.js`.
 
 ## Checking work
 

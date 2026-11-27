@@ -6,9 +6,8 @@ import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
-import { PERK_BY_ID, perkSum } from './core/perks.js';
+import { perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
-import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { CityView } from './render/cityMesh.js';
@@ -37,7 +36,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
-import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
+import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml } from './armory.js';
 import { MOD_BY_ID, modPos } from './core/mods.js';
 import { cuesFor } from './sfxmap.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
@@ -46,14 +45,18 @@ import { BossUI } from './bossui.js';
 import { BossMarkView } from './render/bossMark.js';
 import { bossMatch, fortSpots, ARENA } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
-import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
+import { MatchBuilder, matchConditions, matchTime, parseTestParams } from './builder.js';
 import { CameraRig } from './camera.js';
 import { RunUI } from './runui.js';
 import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
+import { Hud } from './hud.js';
+import { Labels } from './labels.js';
+import { RangeCard } from './rangecard.js';
+import { Inset } from './inset.js';
+import { escapeHtml, whose, ownedWeapons, rangeOwner } from './hudlogic.js';
 
 const $ = (id) => document.getElementById(id);
-const DEG = Math.PI / 180;
 
 // ---------------------------------------------------------------- renderer
 
@@ -97,6 +100,8 @@ const rig = new CameraRig(renderer, {
 });
 const { camera, controls } = rig;
 const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
+// The marks over the tanks, the fog's ghosts, the edge arrows and the pips (labels.js).
+const marks = new Labels({ root: $('labels'), camera, scene, seen: (p) => seen(p), believed: (p) => believed(p), peekAt: (p) => rig.peekAt(p) });
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
 const sound = new Sound();
 const music = new Music(sound);
@@ -116,8 +121,7 @@ let sceneryMesh = null;
 let cityView = null;            // the City world's buildings and traffic (render/cityMesh.js)
 let tanks = [];
 let smoke = [];                 // per tank: seconds until its next puff
-let labels = [];
-let ghosts = [];                // fog: per tank, a ring and a label where this screen last placed it
+let ghosts = [];                // fog: per tank, a ring where this screen last placed it (its label: labels.js)
 let pulses = [];                // fog: scout bursts spreading out
 let fogFor = null;              // fog: the tanks this screen sees for, this frame (null: sees everything)
 let wrecks = [];
@@ -125,51 +129,21 @@ const shells = new Map();       // projectile id -> ShellVisual
 const fadingTrails = [];        // finished shells' trails, fading out
 let handoffOpen = false;        // volley planning: waiting for the next human to sit down
 // A volley with one human in it: the camera rides that human's shell and every
-// other tank's landing gets a pip (see addPip). Null when several humans share
+// other tank's landing gets a pip (labels.js addPip). Null when several humans share
 // the screen; then the camera stands back to frame every shell instead.
 let heroId = null;
-const pips = [];
 const hops = new Map();         // tank id -> the jump jet hop being drawn: { from, to, t, dur, puff }
 const ranges = new Map();       // tank id -> its last rangefinder shot: { probes, elev, at, wind }
-let locators = [];              // per tank: edge arrow pointing at it when off screen
 let shopQueue = [];
 let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
 let dayLock = null;             // debug: hold the sun still at this time of day
 let fortView = null;
 let hintGame = null;            // the game whose first-turn hints have been decided
-let bannerHold = 0;            // a round banner keeps the turn banner waiting until then
-let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
 const arenaView = new ArenaView(scene, { effects, sound, camDist });
 const bossMark = new BossMarkView(scene);   // the boss's telegraph on the ground   // the Edges curtains and the Island's sea
-// Scratch objects for per-frame work. Nothing may keep one past the call that filled it.
-const _lblV = new THREE.Vector3();       // projecting labels and popups
-
-// ---- DOM write helpers: touching the DOM with the value it already has still costs
-// style work, so every per-frame write goes through one of these.
-function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
-// An inline style property, remembered on the element so we never read it back.
-function setStyle(el, prop, v) {
-  const c = el._st || (el._st = {});
-  if (c[prop] !== v) { c[prop] = v; el.style[prop] = v; }
-}
-function setDisplay(el, v) { if (el._disp !== v) { el._disp = v; el.style.display = v; } }
-// Move an absolutely placed element (left/top 0 in CSS) by transform, which needs no layout.
-// `anchor` is the element's own centring translate from style.css.
-function moveTo(el, x, y, anchor) {
-  const tf = `translate(${Math.round(x * 2) / 2}px, ${Math.round(y * 2) / 2}px) ${anchor}`;
-  if (el._tf !== tf) { el._tf = tf; el.style.transform = tf; }
-}
-const CENTRE = 'translate(-50%, -50%)', ABOVE = 'translate(-50%, -100%)';
-// Where the HUD panels sit, read once at the start of each frame (before that frame's
-// DOM writes) so screenSpot never forces a layout per marker.
-const HUD_PANELS = ['player-card', 'range-card', 'scoreboard'];
-let hudBoxes = [];
-function readHudBoxes() {
-  hudBoxes = HUD_PANELS.map((id) => { const b = $(id).getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; });
-}
 
 // A short line showing where the shot starts out, for tanks with Tracer Rounds.
 const tracer = new THREE.Line(
@@ -225,7 +199,7 @@ function disposeMatch() {
   bossMark.clear();
   if (fortView) { scene.remove(fortView.group); fortView.dispose(); fortView = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
-  ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
+  ghosts.forEach((ring) => { scene.remove(ring); ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
   ghosts = []; pulses = []; fogFor = null;
   groundShade.fogOn.value = 0;
@@ -237,11 +211,9 @@ function disposeMatch() {
   effects.clear();
   napalmView.clear();
   hops.clear();
-  tanks = []; wrecks = []; labels = [];
-  pips.forEach(dropPip);      // takes a rangefinder pip's beam out of the scene too
-  pips.length = 0;
+  tanks = []; wrecks = [];
+  marks.clear();      // the marks, ghosts, edge arrows and pips (labels.js)
   heroId = null;
-  $('labels').innerHTML = '';
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
@@ -277,45 +249,23 @@ function startMatch(config) {
   });
   smoke = game.players.map(() => 0);
   sky.fit(game.terrain.half);
-  labels = game.players.map((p) => {
-    const el = document.createElement('div');
-    el.className = 'tank-label';
-    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}<span class="tl-jam" title="Jammed">JAM</span></div><div class="bar"><div class="fill hp"></div></div>`;
-    $('labels').appendChild(el);
-    return el;
-  });
+  marks.start(game);   // each tank's mark, fog ghost and edge arrow (labels.js)
   ghosts = game.players.map((p) => {
     const ring = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2;
     ring.renderOrder = 5;
     ring.visible = false;
     scene.add(ring);
-    const el = document.createElement('div');
-    el.className = 'tank-label ghost';
-    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}?</div><small></small>`;
-    el.style.display = 'none';
-    $('labels').appendChild(el);
-    return { ring, el };
-  });
-  locators = game.players.map((p) => {
-    const el = document.createElement('div');
-    el.className = 'locator';
-    el.style.setProperty('--c', p.color);
-    el.innerHTML = `<i></i><b>${escapeHtml(p.name)}</b><small></small>`;
-    el.style.display = 'none';
-    el.addEventListener('click', () => rig.peekAt(p));
-    $('labels').appendChild(el);
-    return el;
+    return ring;
   });
   rig.modes.endLook();
-  buildScoreboard();
-  $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
+  hud.start(game);
   // The boss's fort: coloured ground (before the round builds) and rim props, drawn only.
   if (game.cfg.boss) terrainMesh.setFort(fortSpots(ARENA.boss[0] * game.terrain.half, ARENA.boss[1] * game.terrain.half), ARENA.fort.skirt);
   game.start();
   handleEvents();      // builds the round (terrain, scenery, water) so the warm-up sees it
   if (game.fort) scene.add((fortView = new FortView(game)).group);
-  showHud(true);
+  hud.show(true);
   warmShaders();
 }
 
@@ -327,13 +277,8 @@ function warmShaders() {
 
 // ---------------------------------------------------------------- events
 
-function banner(text, sub = '', ms = 1600) {
-  const b = $('banner');
-  b.innerHTML = `${escapeHtml(text)}${sub ? `<small>${escapeHtml(sub)}</small>` : ''}`;
-  b.classList.add('show');
-  clearTimeout(banner.t);
-  banner.t = setTimeout(() => b.classList.remove('show'), ms);
-}
+// The big line in the middle (hud.js).
+function banner(text, sub, ms) { hud.banner(text, sub, ms); }
 
 function addShake(pos, power) {
   rig.shake(pos, power);
@@ -363,8 +308,7 @@ function handleEvents() {
         wrecks.forEach(dropWreck);
         wrecks = [];
         clearTrails();
-        pips.forEach(dropPip);
-        pips.length = 0;
+        marks.clearPips();
         ranges.clear();
         hops.clear();
         rig.cutKill();
@@ -372,12 +316,7 @@ function handleEvents() {
         napalmView.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
-        if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
-        else if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)}`, 1800);
-        else {
-          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}` : [game.modifier.desc, edgeLabel(game.edge)].filter(Boolean).join(' · '), e.round === 1 ? 3600 : 3000);
-          bannerHold = performance.now() + 2800;
-        }
+        hud.roundStart(game, e.round);
         break;
       case 'terrain':
         if (e.full) {
@@ -401,18 +340,15 @@ function handleEvents() {
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         // On a phone the "tap Lock in" line is taught the first few turns, then the banner is just the title (hints.js).
         const coach = !(touch && e.plan && !p.ai) || useHint('lockin', 6);
-        const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
-          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), touch ? (coach ? 'Plan it, then tap Lock in' : '') : 'Plan it, then Space to lock it in'];
         if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
-        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? (coach ? 1700 : 1000) : 1100); },
-          Math.max(50, bannerHold - performance.now()));
+        hud.turn(p, { plan: e.plan, coach });   // once the round's banner has been read
         // The first turn of a match: the pad's "drag" line and the SIGHT note show only the first few matches (hints.js).
         if (touch && !p.ai && !p.shots.length && game.round === 1 && hintGame !== game) {
           hintGame = game;
           touch.setPadHelp(useHint('pad', 5));
           if (useHint('sight', 3)) {
             setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('SIGHT looks down your barrel; drag there to aim', 4500); },
-              Math.max(50, bannerHold - performance.now()) + 1800);
+              hud.holdLeft() + 1800);
           }
         }
         break;
@@ -430,7 +366,7 @@ function handleEvents() {
         break;
       }
       case 'aimReset':
-        if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
+        if (game.current?.id === e.player) hud.note('Moved: last aim cleared', 1800);
         break;
       case 'jump':
         startHop(e);
@@ -448,7 +384,7 @@ function handleEvents() {
       case 'fire': {
         hops.delete(e.player);   // it shoots from where it stands, so a hop in the air is over
         // Its next shot retires a tank's rangefinder marks.
-        pips.forEach((q) => { if (q.sticky && q.owner === e.player) { q.sticky = false; q.until = performance.now() + 600; } });
+        marks.retireProbes(e.player);
         if (e.weapon === 'ranger') {
           const p = game.players[e.player];
           ranges.set(e.player, { probes: {}, elev: p.elev, at: [p.x, p.z], wind: [...game.wind] });
@@ -491,12 +427,12 @@ function handleEvents() {
         const owner = v?.owner;
         if (v?.probe) {
           if (e.type === 'impact') {
-            addProbePip(owner, e.pos, v.probe);
+            marks.addProbePip(game, owner, e.pos, v.probe);
             sound.ping(camDist(e.pos));
             const r = ranges.get(owner);
             if (r) r.probes[v.probe.key] = { ...v.probe, pos: [...e.pos] };
           }
-        } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
+        } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) marks.addPip(game, owner, e.pos);
         if (!v?.probe && owner != null) noteLanding(owner, v?.shot, e.type === 'impact' ? e.pos : null);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
         if ((e.type === 'lost' || e.splash) && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(e.splash ? 'In the sea' : game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
@@ -533,12 +469,11 @@ function handleEvents() {
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage': {
-        if (seen(game.players[e.player])) popDamage(e.player, e.amount);
+        if (seen(game.players[e.player])) marks.popDamage(game.players[e.player], e.amount);
         { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); if (seen(v)) effects.ignite(`tank${e.player}`, 4 + Math.min(5, e.amount * 0.06)); }
-        if (insetFor === e.player) flashInset(e.amount);
+        if (inset.for === e.player) inset.flash(e.amount);
         // Name the victim on the shooter's pip.
-        const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
-        if (pip) pip.el.querySelector('span').textContent = `${game.players[e.by].name} hit ${e.player === heroId ? 'you' : game.players[e.player].name}`;
+        marks.pipHit(game, e.by, e.player, heroId);
         break;
       }
       case 'void': {
@@ -613,7 +548,7 @@ function doJump() {
   if (!p || p.ai || game.phase !== 'aim' || hops.has(p.id)) return;
   const r = game.jump();
   const why = r === 'edge' && game.isles ? 'No ground to land on' : JUMP_NOTES[r];
-  if (why) driveNote = { text: why, until: performance.now() + 1400 };
+  if (why) hud.note(why, 1400);
 }
 
 function startHop(e) {
@@ -682,293 +617,6 @@ function closeHandoff() {
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 $('gunner-btn').onclick = (e) => { e.currentTarget.blur(); sound.click(); toggleGunner(); };   // blur: Space must fire, not press it again
 
-// ---------------------------------------------------------------- pips and locators
-
-// A small dot where a shell came down, pinned to the screen edge (with an
-// arrow) when that spot is off camera. In a volley, other tanks' landings get
-// one in the shooter's colour, lasting a few seconds into the next planning
-// phase. A rangefinder's probes get `sticky` ones, kept until that tank fires
-// again and shown only to it while it plans.
-function addPip(owner, pos, { label, color, sticky = false } = {}) {
-  const now = performance.now();
-  // A cluster's bomblets land together: one pip covers them.
-  if (!sticky && pips.some((q) => q.owner === owner && !q.sticky && now - q.born < 2500 && Math.hypot(q.pos[0] - pos[0], q.pos[2] - pos[2]) < 40)) return;
-  const p = game.players[owner];
-  const el = document.createElement('div');
-  el.className = sticky ? 'pip probe' : 'pip';
-  el.style.setProperty('--c', color || p.color);
-  el.innerHTML = `<i></i><span>${escapeHtml(label || p.name)}</span>`;
-  $('labels').appendChild(el);
-  const q = { owner, pos: [...pos], el, born: now, until: 0, sticky };
-  pips.push(q);
-  return q;
-}
-
-function dropPip(q) {
-  q.el.remove();
-  if (q.beam) { scene.remove(q.beam); q.beam.material.dispose(); }
-}
-
-// Rangefinder colours: the aimed probe white, turret pair amber, power pair cyan.
-const PROBE_COLORS = { aim: '#ffffff', turn: '#ffc35a', power: '#6fe3ff' };
-const probeColor = (key) => PROBE_COLORS[key.replace(/[+-]$/, '')];
-const BEAM_GEO = new THREE.CylinderGeometry(0.8, 0.8, 50, 8, 1, true).translate(0, 25, 0);
-
-function addProbePip(owner, pos, pb) {
-  const label = pb.key === 'aim' ? 'as aimed'
-    : pb.key.startsWith('turn') ? `turret ${pb.yaw.toFixed(1)}°` : `power ${pb.power.toFixed(1)}`;
-  const color = probeColor(pb.key);
-  const q = addPip(owner, pos, { label, color, sticky: true });
-  // A tall thin beam, so the spread reads from across the map.
-  q.beam = new THREE.Mesh(BEAM_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }));
-  q.beam.position.set(pos[0], pos[1], pos[2]);
-  scene.add(q.beam);
-}
-
-// Where a world point sits on screen. One that is off screen (or behind the
-// camera) is pulled onto an edge, in far enough for a name to fit and clear of
-// the HUD panels; `angle` then points from there toward it.
-const _pipV = new THREE.Vector3();
-function screenSpot(x, y, z) {
-  const W = window.innerWidth, H = window.innerHeight;
-  const v = _pipV.set(x, y, z).project(camera);
-  let nx = v.x, ny = v.y;
-  const behind = v.z > 1;
-  if (behind) { nx = -nx; ny = -ny; }
-  const off = behind || Math.abs(nx) > 1 || Math.abs(ny) > 1;
-  if (off) { const m = Math.max(Math.abs(nx), Math.abs(ny)) || 1; nx /= m; ny /= m; }
-  const [l, r, t, b] = off ? [80, W - 80, 60, H - 125] : [10, W - 10, 10, H - 10];
-  const sx = Math.min(r, Math.max(l, (nx * 0.5 + 0.5) * W));
-  let sy = Math.min(b, Math.max(t, (-ny * 0.5 + 0.5) * H));
-  if (off) {
-    // Keep clear of the HUD panels: slide down below any that it lands on.
-    for (const box of hudBoxes) {
-      if (box.width && sx > box.left - 30 && sx < box.right + 30 && sy > box.top - 30 && sy < box.bottom + 25) sy = Math.min(b, box.bottom + 25);
-    }
-  }
-  return { sx, sy, off, angle: Math.atan2(-ny, nx), l, r, t, b };
-}
-
-// Slide an edge marker along its edge until it clears the ones already placed.
-function unstack(s, placed) {
-  const alongY = s.sx === s.l || s.sx === s.r;
-  for (let tries = 0; tries < 6 && placed.some(([px, py]) => Math.hypot(px - s.sx, py - s.sy) < 34); tries++) {
-    if (alongY) s.sy = Math.min(s.b, Math.max(s.t, s.sy + 36)); else s.sx = Math.min(s.r, Math.max(s.l, s.sx + 90));
-  }
-  placed.push([s.sx, s.sy]);
-}
-
-function place(el, s) {
-  if (el._edge !== s.off) { el._edge = s.off; el.classList.toggle('edge', s.off); }
-  moveTo(el, s.sx, s.sy, CENTRE);
-  if (s.off) {
-    const a = `${s.angle}rad`;
-    if (el._a !== a) { el._a = a; el.style.setProperty('--a', a); }
-  }
-}
-
-function updatePips() {
-  const now = performance.now();
-  const placed = [];
-  const labels = [];            // label boxes already placed, so close-together marks stay readable
-  for (let i = pips.length - 1; i >= 0; i--) {
-    const q = pips[i];
-    if (!q.until && !q.sticky && game.phase === 'aim') q.until = now + 4000;
-    const left = q.until ? (q.until - now) / 1000 : Infinity;
-    if (left <= 0) { dropPip(q); pips.splice(i, 1); continue; }
-    const hide = handoffOpen || (q.sticky && game.phase === 'aim' && game.current && game.current.id !== q.owner);
-    setDisplay(q.el, hide ? 'none' : '');
-    if (q.beam) {
-      // Fade a beam the camera is right beside: up close it is a wall, not a marker.
-      const near = Math.min(1, Math.max(0.12, (Math.hypot(camera.position.x - q.pos[0], camera.position.z - q.pos[2]) - 25) / 90));
-      q.beam.visible = !hide;
-      q.beam.material.opacity = 0.5 * near * Math.min(1, left / 1.2);
-    }
-    if (hide) continue;
-    setStyle(q.el, 'opacity', Math.min(1, left / 1.2));
-    const s = screenSpot(q.pos[0], q.pos[1] + 1, q.pos[2]);
-    if (s.off) unstack(s, placed);
-    place(q.el, s);
-    // Marks that land close together (a rangefinder's always do from afar):
-    // the dots stay put and their names stack downward.
-    const span = q.el.lastElementChild;
-    const w = (q.w ||= span.offsetWidth || 60) / 2 + 4;
-    let top = 14;
-    while (top < 100 && labels.some(([x, y, hw]) => Math.abs(x - s.sx) < hw + w && Math.abs(y - (s.sy + top)) < 13)) top += 13;
-    setStyle(span, 'top', `${top}px`);
-    labels.push([s.sx, s.sy + top, w]);
-  }
-}
-
-// While you plan, every opponent that is off screen gets an arrow on the
-// screen edge with its name and range. Click one, or press F, to look.
-function updateLocators() {
-  const me = game.phase === 'aim' && !handoffOpen && !rig.modes.overview && rig.mode !== 'sight' && game.current && !game.current.ai ? game.current : null;   // the sight draws its own markers
-  const placed = [];
-  game.players.forEach((p, i) => {
-    const el = locators[i];
-    const b = me && p !== me && p.alive ? believed(p) : null;
-    const s = b ? screenSpot(b.x, b.y + 4, b.z) : null;
-    if (!s || !s.off) { setDisplay(el, 'none'); return; }
-    setDisplay(el, '');
-    unstack(s, placed);
-    place(el, s);
-    setText(el._small || (el._small = el.querySelector('small')), `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`);
-  });
-}
-
-// ---------------------------------------------------------------- rangefinder card
-
-// A top-down plot of your last rangefinder shot, turned so downrange is up:
-// the five landings, the enemy nearest them with the blast circle of your
-// weapon around it, how far off the aimed probe was, and the turret and
-// power the probes say would land on it.
-
-// Whose card to show: the planner's while planning, your own while shells fly.
-function rangeOwner() {
-  if (!game || handoffOpen) return null;
-  if (game.phase === 'aim') return game.current && !game.current.ai ? game.current : null;
-  if (heroId != null) return game.players[heroId];
-  return game.localHumans.length === 1 ? game.localHumans[0] : null;
-}
-
-let rcSpot = null;              // where a click on the card looks
-$('range-card').addEventListener('click', () => rcSpot && rig.peekSpot(rcSpot));
-
-const signed = (v, digits = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
-
-// The card only changes when something it shows does, so it remembers what it last
-// drew (rcKey) and skips the canvas and the text until that differs.
-let rcKey = '';
-let rcDims = null;              // the plot canvas's CSS size; null until read, and after a resize
-window.addEventListener('resize', () => { rcDims = null; });
-
-function updateRangeCard() {
-  const me = rangeOwner();
-  const r = me && ranges.get(me.id);
-  const a = r?.probes.aim;
-  const card = $('range-card');
-  card.classList.toggle('hidden', !a);
-  if (!a) { rcSpot = null; rcKey = ''; rcDims = null; return; }
-  rcSpot = a.pos;
-
-  const cv = $('rc-plot');
-  const dpr = window.devicePixelRatio || 1;
-  if (!rcDims || !rcDims[0]) rcDims = [cv.clientWidth, cv.clientHeight];   // a layout read, so only when needed
-  const [W, H] = rcDims;
-  const foe = game.players.filter((p) => p.alive && p !== me).map(believed).filter(Boolean)
-    .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
-  // The three reasons the estimate is "rough" are thresholds, so the key holds the verdicts, not the raw numbers.
-  const moved = Math.hypot(me.x - r.at[0], me.z - r.at[1]) > 4;
-  const elevOff = Math.abs(me.elev - r.elev) > 0.05;
-  const windOff = Math.hypot(game.wind[0] - r.wind[0], game.wind[1] - r.wind[1]) > 0.6;
-  let key = `${me.id}|${me.weapon}|${W}x${H}@${dpr}|${r.at[0]},${r.at[1]}|${r.elev}|${moved}${elevOff}${windOff}|${foe ? `${foe.x},${foe.y},${foe.z}` : '-'}`;
-  for (const k in r.probes) { const pb = r.probes[k]; key += `|${k}:${pb.pos[0]},${pb.pos[1]},${pb.pos[2]},${pb.yaw},${pb.power}`; }
-  if (key === rcKey) return;
-  rcKey = key;
-
-  const ax = rangeAxes(a.yaw);
-  const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
-  const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
-  const w = game.weaponOf(me, me.weapon);
-  const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
-
-  // ---- plot
-  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-  const g2 = cv.getContext('2d');
-  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g2.clearRect(0, 0, W, H);
-  // Fit the probes; take in the enemy too unless it is far off, then pin it to the edge.
-  const spread = Math.max(...pts.map((q) => Math.hypot(q.side, q.along)), 0);
-  const base = Math.max(20, spread * 1.35);
-  const tDist = t ? Math.hypot(t.side, t.along) : 0;
-  const ext = Math.min(base * 3, Math.max(base, tDist * 1.2 + blast * 0.5));
-  const k = (Math.min(W, H) / 2 - 12) / ext;
-  const cx = W / 2, cy = H / 2;
-  const X = (side) => cx + side * k, Y = (along) => cy - along * k;
-
-  // Range rings round the aimed landing, a sensible step apart.
-  const step = [5, 10, 25, 50, 100, 200, 500].find((s) => ext / s <= 3.2) || 1000;
-  g2.strokeStyle = 'rgba(255,255,255,0.10)';
-  g2.lineWidth = 1;
-  g2.beginPath(); g2.moveTo(0, cy); g2.lineTo(W, cy); g2.moveTo(cx, 0); g2.lineTo(cx, H); g2.stroke();
-  for (let d = step; d <= ext * 1.5; d += step) { g2.beginPath(); g2.arc(cx, cy, d * k, 0, Math.PI * 2); g2.stroke(); }
-  g2.font = '10px system-ui, sans-serif';
-  g2.fillStyle = 'rgba(255,255,255,0.4)';
-  g2.textAlign = 'left';
-  g2.fillText(`${step} m`, cx + step * k * 0.71 + 2, cy - step * k * 0.71 - 2);
-  g2.fillText('▲ downrange', 2, 11);
-  g2.textAlign = 'center';
-  g2.fillText('you', cx, H - 3);
-
-  // The enemy, its blast circle, and a line from the aimed landing to it.
-  if (t) {
-    const edge = tDist * k > Math.min(W, H) / 2 - 12;
-    const s = edge ? (Math.min(W, H) / 2 - 12) / (tDist * k) : 1;
-    const ex = X(t.side * s), ey = Y(t.along * s);
-    g2.setLineDash([3, 3]);
-    g2.strokeStyle = 'rgba(255,255,255,0.35)';
-    g2.beginPath(); g2.moveTo(cx, cy); g2.lineTo(ex, ey); g2.stroke();
-    g2.setLineDash([]);
-    if (!edge) {
-      g2.fillStyle = 'rgba(255,90,70,0.12)';
-      g2.strokeStyle = 'rgba(255,110,90,0.55)';
-      g2.beginPath(); g2.arc(ex, ey, blast * k, 0, Math.PI * 2); g2.fill(); g2.stroke();
-    }
-    g2.fillStyle = foe.color;
-    g2.strokeStyle = '#000';
-    if (edge) {
-      // A triangle on the rim, pointing out toward it.
-      const ang = Math.atan2(ey - cy, ex - cx);
-      g2.beginPath();
-      g2.moveTo(ex + Math.cos(ang) * 7, ey + Math.sin(ang) * 7);
-      g2.lineTo(ex + Math.cos(ang + 2.4) * 6, ey + Math.sin(ang + 2.4) * 6);
-      g2.lineTo(ex + Math.cos(ang - 2.4) * 6, ey + Math.sin(ang - 2.4) * 6);
-      g2.closePath(); g2.fill(); g2.stroke();
-    } else { g2.fillRect(ex - 5, ey - 4, 10, 8); g2.strokeRect(ex - 5, ey - 4, 10, 8); }
-    g2.font = 'bold 11px system-ui, sans-serif';
-    g2.textAlign = ex > W - 50 ? 'right' : ex < 50 ? 'left' : 'center';
-    g2.fillText(edge ? `${foe.name} ${Math.round(tDist)} m` : foe.name, ex, ey > 24 ? ey - 9 : ey + 18);
-  }
-
-  // The probes, labelled with how each differs from the aim.
-  g2.font = '10px system-ui, sans-serif';
-  for (const q of pts) {
-    const x = X(q.side), y = Y(q.along);
-    g2.fillStyle = probeColor(q.key);
-    g2.beginPath(); g2.arc(x, y, q.key === 'aim' ? 4.5 : 3.5, 0, Math.PI * 2); g2.fill();
-    // Aim above its dot, the turret pair outward to either side, power to the right.
-    if (q.key === 'aim') { g2.textAlign = 'center'; g2.fillText('aim', x, y - 8); }
-    else if (q.key.startsWith('turn')) {
-      g2.textAlign = q.side < 0 ? 'right' : 'left';
-      g2.fillText(`${signed(((q.pb.yaw - a.yaw + 540) % 360) - 180, 0)}°`, x + (q.side < 0 ? -7 : 7), y + 4);
-    } else { g2.textAlign = 'left'; g2.fillText(signed(q.pb.power - a.power, 0), x + 7, y + 4); }
-  }
-
-  // ---- words
-  if (!t) { setText($('rc-read'), 'No enemy left to range on.'); $('rc-est').textContent = ''; $('rc-est')._html = null; return; }
-  const off = Math.hypot(t.side, t.along);
-  setText($('rc-read'), off <= blast * 0.8 ? `As aimed: on ${foe.name}`
-    : `As aimed: ${Math.round(Math.abs(t.along))} m ${t.along > 0 ? 'short' : 'long'}, ${Math.round(Math.abs(t.side))} m ${t.side > 0 ? 'left' : 'right'} of ${foe.name}`);
-  const est = solveAim(r.probes, [foe.x, foe.y, foe.z]);
-  const notes = [];
-  if (moved) notes.push('you have moved');
-  if (elevOff) notes.push(`probed at ${r.elev.toFixed(1)}° elevation`);
-  if (windOff) notes.push('the wind has shifted');
-  const note = notes.length ? `<small>Rough: ${notes.join(', ')}.</small>` : '';
-  let html;
-  if (!est || Math.abs(est.dYaw) > 25 || Math.abs(est.dPower) > 35) {
-    html = `Too far off to estimate: aim again and probe.${note}`;
-  } else if (est.power > TANK.maxPower || est.power < TANK.minPower) {
-    html = `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
-  } else {
-    html = `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
-  }
-  const estEl = $('rc-est');
-  if (estEl._html !== html) { estEl._html = html; estEl.innerHTML = html; }
-}
-
-
 // ---------------------------------------------------------------- steering
 
 // A / D (or the side arrows) turn every human's guided missile while it flies;
@@ -976,10 +624,8 @@ function updateRangeCard() {
 // On a shared screen they all answer the same keys; with one human, only yours.
 let steerFuel = -1;                 // the most guidance fuel left on a local guided missile, -1 for none
 const steerTouch = new Map();       // pointer id -> -1 | 1, fingers steering
-let steerTipUntil = 0;
 function applySteering() {
-  const hint = $('steer-hint');
-  if (!game || game.phase !== 'flight') { hint.classList.add('hidden'); steerFuel = -1; steerTouch.clear(); return; }
+  if (!game || game.phase !== 'flight') { hud.steer(null); steerFuel = -1; steerTouch.clear(); return; }
   let finger = 0;
   for (const d of steerTouch.values()) finger += d;
   const dir = Math.sign((held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0) + finger);
@@ -988,17 +634,8 @@ function applySteering() {
     game.steer(p.id, dir);
     for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) { fuel = Math.max(fuel, pr.steer.fuel); jam ||= !!pr.steer.jammed; }
   }
-  if (jam !== hint.classList.contains('jammed')) { hint.classList.toggle('jammed', jam); hint.querySelector('.sh-title').textContent = jam ? 'Jammed' : 'Guidance'; }
-  if (fuel >= 0 && steerFuel < 0) steerTipUntil = performance.now() + 1800;   // a new missile: say how, briefly
   steerFuel = fuel;
-  hint.classList.toggle('hidden', fuel < 0);
-  if (fuel >= 0) {
-    $('steer-fuel').style.width = `${(fuel / WEAPON_BY_ID.guided.flight[0].fuel) * 100}%`;
-    hint.classList.toggle('empty', fuel <= 0);
-    hint.classList.toggle('tip', performance.now() < steerTipUntil);
-    hint.classList.toggle('l', fuel > 0 && dir < 0);
-    hint.classList.toggle('r', fuel > 0 && dir > 0);
-  }
+  hud.steer({ fuel, jam, dir });   // the hint (hud.js)
 }
 // Caught before the camera's own handlers, so a steering finger does not also orbit.
 window.addEventListener('pointerdown', (e) => {
@@ -1010,77 +647,6 @@ window.addEventListener('pointerdown', (e) => {
 for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => steerTouch.delete(e.pointerId), { capture: true });
 
 let lastDt = 0;                 // the last frame's dt (the aim aids ease by it)
-
-// ---------------------------------------------------------------- inset
-
-// While shells fly and the camera is away from your tank, a small view in
-// the corner keeps it in sight, so you can see what is coming at you.
-// Only with one human: on a shared screen there is no single "your tank".
-const insetCam = new THREE.PerspectiveCamera(46, 1.6, 0.5, 4000);
-let insetFor = null;            // player id shown in the inset this frame
-const _back = new THREE.Vector3();
-
-function insetPlayer() {
-  if (!game || !rig.modes.insetAllowed()) return null;
-  if (game.phase !== 'flight' && game.phase !== 'settle') return null;
-  const hs = game.localHumans;
-  if (hs.length !== 1) return null;
-  const p = hs[0];
-  if (!p.alive && insetFor !== p.id) return null;       // keep it on a tank knocked out mid-volley
-  if (controls.target.distanceTo(_v.set(p.x, p.y, p.z)) < 110) return null;   // already in the main view
-  return p;
-}
-
-function renderInset() {
-  const p = insetPlayer();
-  insetFor = p ? p.id : null;
-  $('inset').classList.toggle('hidden', !p);
-  if (!p) return;
-  const W = window.innerWidth;
-  const w = Math.round(Math.min(360, Math.max(220, W * 0.24)));
-  const h = Math.round(w * 0.6);
-  const x = W - w - 16, y = 54;                          // from the bottom-left, as GL counts
-  const box = $('inset');
-  box.style.width = `${w}px`;
-  box.style.height = `${h}px`;
-  box.style.setProperty('--c', p.color);
-  $('inset-name').textContent = whose(p, 'tank');
-  _back.set(-Math.cos(p.yaw * DEG), 0, -Math.sin(p.yaw * DEG));
-  insetCam.position.set(p.x + _back.x * 40, p.y + 22, p.z + _back.z * 40);
-  const t = game.terrain;
-  if (t.inBounds(insetCam.position.x, insetCam.position.z)) insetCam.position.y = Math.max(insetCam.position.y, t.heightAt(insetCam.position.x, insetCam.position.z) + 6);
-  insetCam.lookAt(p.x, p.y + 2, p.z);
-  insetCam.aspect = w / h;
-  insetCam.updateProjectionMatrix();
-  renderer.setScissorTest(true);
-  renderer.setScissor(x, y, w, h);
-  renderer.setViewport(x, y, w, h);
-  renderer.render(scene, insetCam);
-  renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, W, window.innerHeight);
-}
-
-function flashInset(amount) {
-  const box = $('inset');
-  $('inset-dmg').textContent = `-${Math.round(amount)}`;
-  box.classList.remove('hit');
-  void box.offsetWidth;                                  // restart the animation
-  box.classList.add('hit');
-  touch?.buzz([40, 30, 70]);
-}
-
-function popDamage(pid, amount) {
-  const p = game.players[pid];
-  const v = _lblV.set(p.x, p.y + 6, p.z).project(camera);
-  if (v.z > 1) return;
-  const el = document.createElement('div');
-  el.className = 'dmg-pop';
-  el.textContent = `-${Math.round(amount)}`;
-  el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
-  el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
-  $('labels').appendChild(el);
-  setTimeout(() => el.remove(), 1300);
-}
 
 // ---------------------------------------------------------------- the sight
 
@@ -1196,12 +762,14 @@ window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
 const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), weaponBar: $('weapon-bar'), online: () => !!session }) : null;
 if (touch) {
-  // The left column is full on a phone, so the players box sits top right.
-  $('hud').appendChild($('scoreboard'));
   // No keyboard here: the hints say what to tap instead.
-  $('steer-hint').querySelector('.sh-tip').textContent = 'hold left or right to steer';
   $('chat-input').placeholder = 'Say something';
 }
+// The player card, the players box, the banner and the steering hint (src/hud.js).
+const hud = new Hud({ game: () => game, touch, peekAt: (p) => rig.peekAt(p) });
+// The rangefinder card (src/rangecard.js) and the corner view of your tank while shells fly (src/inset.js).
+const rangeCard = new RangeCard({ ranges, believed: (p) => believed(p), peekSpot: (pos) => rig.peekSpot(pos) });
+const inset = new Inset({ renderer, scene, touch });
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
@@ -1250,28 +818,14 @@ settings.toggle({ id: 'sideview', group: 'look', label: 'Side view', hint: 'the 
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
-const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
-const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
 
 function selectWeaponSlot(i) {
   const p = game.current;
   if (!p || p.ai || game.phase !== 'aim' || handoffOpen) return;
-  const list = ownedWeapons(p);
+  const list = ownedWeapons(game, p);
   if (list[i]) { p.weapon = list[i].id; sound.click(); }
 }
 
-// The row of weapons the current tank carries. Rebuilt only when it changes.
-let weaponBarKey = '';
-function updateWeaponBar(p) {
-  const list = ownedWeapons(p);
-  const key = `${p.id}|${p.weapon}|${p.perks.length}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${game.ammoLeft(p, w.id)}`).join(',')}`;
-  if (key === weaponBarKey) return;
-  weaponBarKey = key;
-  $('weapon-bar').innerHTML = list.map((w, i) => `
-    <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(game.weaponOf(p, w.id).desc)}" ${p.ai ? 'disabled' : ''}>
-      <span class="wb-key">${i + 1}</span>${escapeHtml(game.weaponName(p, w.id))}<span class="wb-n">${ammoText(game.ammoLeft(p, w.id))}</span>
-    </button>`).join('');
-}
 $('weapon-bar').addEventListener('click', (e) => {
   const b = e.target.closest('.wb-item');
   if (b && game) selectWeaponSlot(Number(b.dataset.i));
@@ -1303,7 +857,7 @@ function applyHeldKeys(dt) {
     rig.driveBack(game.current);   // driving with the camera far away (or zoomed right out) brings it back
     const r = game.drive(go, turn, dt);
     const why = r === 'edge' && game.isles ? 'Edge of the isle' : DRIVE_NOTES[r];
-    if (why) driveNote = { text: why, until: performance.now() + 1200 };
+    if (why) hud.note(why, 1200);
   }
 }
 
@@ -1387,140 +941,11 @@ function soundScape(dt) {
 
 // ---------------------------------------------------------------- HUD
 
-function showHud(on) { $('hud').classList.toggle('hidden', !on); }
-
-const sbRows = new Map();       // player id -> the scoreboard row and the bits of it that change
-function buildScoreboard() {
-  $('scoreboard').innerHTML = game.players.map((p) => `
-    <div class="sb-row" id="sb-${p.id}" data-id="${p.id}" title="Click to look at ${escapeHtml(p.name)}">
-      <span class="swatch" style="background:${p.color}"></span>
-      <span style="width:74px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(p.name)}</span>
-      <div class="bar"><div class="fill hp"></div></div>
-      <span class="wins"></span>
-      <div class="sb-perks"></div>
-    </div>`).join('');
-  sbRows.clear();
-  $('scoreboard').querySelectorAll('.sb-row').forEach((row) => {
-    row.onclick = () => game && rig.peekAt(game.players[Number(row.dataset.id)]);
-    sbRows.set(Number(row.dataset.id), { row, fill: row.querySelector('.fill'), wins: row.querySelector('.wins'), perks: row.querySelector('.sb-perks') });
-  });
-}
-
-const perkChip = (id, long) => `<span class="perk" title="${escapeHtml(PERK_BY_ID[id].desc)}">${long ? PERK_BY_ID[id].name : PERK_BY_ID[id].tag}</span>`;
-function setPerks(el, p, long) {
-  const key = p.id + p.perks.join();
-  if (el.dataset.key === key) return;
-  el.dataset.key = key;
-  el.innerHTML = [...new Set(p.perks)].map((id) => perkChip(id, long)).join('');   // a stacked perk shows once
-}
-
-// The HUD's fixed elements, looked up once.
-let hudEls = null;
-const HUD_IDS = ['pc-swatch', 'pc-name', 'pc-tag', 'pc-hp', 'pc-armor', 'pc-money', 'pc-fuel', 'ro-fuel', 'pc-note', 'pc-perks', 'ro-yaw', 'ro-elev',
-  'ro-power', 'ro-jets', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label', 'round-mod', 'round-desc'];
-
-function updateHud() {
-  if (!hudEls) { hudEls = {}; for (const id of HUD_IDS) hudEls[id] = $(id); }
-  const E = hudEls;
-  const p = game.current || game.players[game.lastShooter ?? 0];
-  if (game.current) game.lastShooter = game.current.id;
-  if (p) {
-    setStyle(E['pc-swatch'], 'background', p.color);
-    setText(E['pc-name'], p.name);
-    setText(E['pc-tag'], p.ai ? `CPU ${p.ai}` : 'Human');
-    setStyle(E['pc-hp'], 'width', `${(p.hp / p.maxHp) * 100}%`);
-    setStyle(E['pc-armor'], 'width', `${Math.min(100, p.armor * 3.3)}%`);
-    setText(E['pc-money'], String(p.money));
-    setStyle(E['pc-fuel'], 'width', `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`);
-    setText(E['ro-fuel'], `${Math.floor(p.fuel + 0.05)} m`);
-    setText(E['ro-jets'], `${p.jets > 0 ? 'J ' : ''}×${p.jets}`);
-    if (E['ro-jets'].classList.contains('none') !== !(p.jets > 0)) E['ro-jets'].classList.toggle('none', !(p.jets > 0));
-    const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
-    setText(E['pc-note'], noting ? driveNote.text : p.buried && !p.ai ? 'Buried: your next shot digs you out' : '');
-    setPerks(E['pc-perks'], p, true);
-    setText(E['ro-yaw'], `${p.yaw.toFixed(1)}°`);
-    setText(E['ro-elev'], `${p.elev.toFixed(1)}°`);
-    setText(E['ro-power'], p.power.toFixed(1));
-    setStyle(E['pc-power'], 'width', `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`);
-    // Under each: what the last shot used, and how far the aim is from it now.
-    const last = p.ai ? null : p.shots[p.shots.length - 1];
-    const was = (el, then, now, unit, wrap) => {
-      let text = p.ai ? '' : '—';
-      if (last) {
-        const d = wrap ? ((now - then + 540) % 360) - 180 : now - then;
-        const delta = Math.abs(d) < 0.05 ? 'same' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`;
-        text = `last ${then.toFixed(1)}${unit}<b>${delta}</b>`;
-      }
-      if (el.dataset.t !== text) { el.dataset.t = text; el.innerHTML = text; }
-    };
-    was(E['last-yaw'], last?.yaw, p.yaw, '°', true);
-    was(E['last-elev'], last?.elev, p.elev, '°', false);
-    was(E['last-power'], last?.power, p.power, '', false);
-    const w = WEAPON_BY_ID[p.weapon];
-    setText(E['ro-weapon'], game.weaponName(p, w.id));
-    setText(E['ro-ammo'], ammoText(p.inventory[w.id]));
-    updateWeaponBar(p);
-  }
-  // Wind, drawn from behind the turret of the tank on the card (up is the way
-  // it aims, so the arrow holds still while the camera orbits), and split into
-  // what it does to that shot: sideways, and longer or shorter.
-  const [wx, wz] = game.wind;
-  const mag = Math.hypot(wx, wz);
-  const wp = game.current || game.localHumans?.[0] || game.players[0];
-  const yaw = (wp ? wp.yaw : 0) * DEG;
-  const along = (wx * Math.cos(yaw) + wz * Math.sin(yaw)) * 10;
-  const side = (-wx * Math.sin(yaw) + wz * Math.cos(yaw)) * 10;
-  const rel = Math.atan2(side, along);
-  const arrow = `rotate(${Math.round((rel / DEG - 90) * 2) / 2}deg)`;
-  setStyle(E['wind-arrow'], 'transform', arrow);
-  setStyle(E['wind-arrow'], 'opacity', mag < 0.05 ? 0.2 : 1);
-  setText(E['wind-speed'], mag < 0.05 ? 'calm' : (mag * 10).toFixed(0));
-  const parts = [];
-  if (Math.abs(side) >= 0.5) parts.push(`${Math.abs(side).toFixed(0)} ${side > 0 ? 'right' : 'left'}`);
-  if (Math.abs(along) >= 0.5) parts.push(`${Math.abs(along).toFixed(0)} ${along > 0 ? 'longer' : 'shorter'}`);
-  const aimText = mag < 0.05 ? '' : parts.join(' · ');
-  setText(E['wind-aim'], aimText);
-  for (const q of game.players) {
-    const ref = sbRows.get(q.id);
-    if (!ref) continue;
-    const alive = q.alive, active = game.current === q;
-    if (ref.alive !== alive) { ref.alive = alive; ref.row.classList.toggle('dead', !alive); }
-    if (ref.active !== active) { ref.active = active; ref.row.classList.toggle('active', active); }
-    setStyle(ref.fill, 'width', `${(q.hp / q.maxHp) * 100}%`);
-    setText(ref.wins, '★'.repeat(Math.min(q.wins, 3)) + (q.wins > 3 ? q.wins : ''));
-    setPerks(ref.perks, q, false);
-  }
-  const mod = game.modifier;
-  // The round and its modifier head the card.
-  setText(E['round-label'], `Round ${game.round} / ${game.cfg.rounds}`);
-  setText(E['round-mod'], mod.id === 'clear' ? '' : mod.name);
-  setText(E['round-desc'], mod.id === 'clear' ? '' : mod.desc);
-}
-
-let labelModeWas = '';
 let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
 function syncFind() {
   const finding = rig.finding();
   if (finding !== findingWas) { document.querySelector('#touch [data-key="f"]')?.classList.toggle('on', finding); findingWas = finding; }
 }
-function updateLabels() {
-  const mode = rig.labelMode(game.phase);   // how much the marks say, by view (cameramode.js labelMode)
-  if (mode !== labelModeWas) { $('labels').className = `lb-${mode}`; labelModeWas = mode; }
-  syncFind();
-  game.players.forEach((p, i) => {
-    const el = labels[i];
-    const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
-    const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1
-      && !(rig.mode === 'sight' && p === game.current);   // in the sight your own label would sit on the turret line
-    setDisplay(el, visible ? 'block' : 'none');
-    if (!visible) return;
-    moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
-    setStyle(el._fill || (el._fill = el.querySelector('.fill')), 'width', `${(p.hp / p.maxHp) * 100}%`);
-    const jam = game.jammed(p) > 0;   // a Jammer Drone over it (core/mods.js JAM)
-    if (el._jam !== jam) { el._jam = jam; el.classList.toggle('jammed', jam); }
-  });
-}
-
 // ---------------------------------------------------------------- fog of war
 
 const RING = new THREE.RingGeometry(0.92, 1, 56);
@@ -1575,22 +1000,14 @@ function updateFog(dt) {
   game.players.forEach((p, i) => {
     const show = seen(p);
     if (!show) tanks[i].root.visible = false;
-    const g = ghosts[i];
+    const ring = ghosts[i];
     const b = !show ? believed(p) : null;
-    g.ring.visible = !!b;
-    if (!b) { setDisplay(g.el, 'none'); return; }
-    g.ring.position.set(b.x, b.y + 1.5, b.z);
-    g.ring.scale.setScalar(Math.max(8, b.r));
-    g.ring.material.opacity = b.r ? 0.4 : 0.6;
-    const v = _v.set(b.x, b.y + 7, b.z).project(camera);
-    const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
-    setDisplay(g.el, on ? 'block' : 'none');
-    if (!on) return;
-    moveTo(g.el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
-    const ago = game.turnsThisRound - b.at;
-    const unit = game.volleyMode ? 'volley' : 'turn';
-    const text = (b.r ? 'roughly here' : 'last seen here') + (ago > 0 ? `, ${ago} ${unit}${ago > 1 ? 's' : ''} ago` : '');
-    setText(g.small || (g.small = g.el.querySelector('small')), text);
+    ring.visible = !!b;
+    marks.ghost(i, b, game);   // its name and how old the sighting is (labels.js)
+    if (!b) return;
+    ring.position.set(b.x, b.y + 1.5, b.z);
+    ring.scale.setScalar(Math.max(8, b.r));
+    ring.material.opacity = b.r ? 0.4 : 0.6;
   });
   for (let i = pulses.length - 1; i >= 0; i--) {
     const q = pulses[i];
@@ -1619,10 +1036,6 @@ function scoutPulse(e) {
 }
 
 // ---------------------------------------------------------------- screens
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 const setupRows = [
   { name: profile.name || 'You', type: 'human' },
@@ -1789,7 +1202,6 @@ $('ro-continue').onclick = () => {
   if (game.phase === 'shop') nextShopper();
 };
 
-const whose = (p, thing) => (/^you$/i.test(p.name.trim()) ? `Your ${thing}` : `${p.name}'s ${thing}`);
 const hotseatStep = (p, doing) => {
   const humans = game.localHumans;
   return humans.length > 1 ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · ${doing}` : doing;
@@ -1889,7 +1301,7 @@ function openShopFor(pid) {
 function toMenuScene() {
   leaveRoom();
   closeHandoff();
-  showHud(false);
+  hud.show(false);
   disposeMatch();
   game = null;
   rig.cutKill();
@@ -2258,7 +1670,7 @@ function tick(dt, draw = true) {
   elapsed += dt;
   // The HUD panels' boxes, read before this frame writes anything so the layout is clean
   // (a hidden tab's draw-less ticks have no one looking, so they keep the last boxes).
-  if (game && draw) readHudBoxes();
+  if (game && draw) marks.readBoxes();
   let dayGoal = 0.12;
   if (session) {
     session.pump();
@@ -2295,16 +1707,15 @@ function tick(dt, draw = true) {
     cityView?.update(sdt);
     napalmView.update(sdt, game);
     arenaView.update(game, elapsed, dt);
-    updateHud();
+    hud.update(game);
     strikeUi.update();
     bossUi.update();
     bossMark.update(game, elapsed);
     fortView?.update(elapsed);
     modsUi.update(sdt, elapsed);
-    updateLabels();
-    updatePips();
-    updateLocators();
-    updateRangeCard();
+    syncFind();
+    marks.update(game, { mode: rig.labelMode(game.phase), sight: rig.mode === 'sight', overview: rig.modes.overview, handoff: handoffOpen });
+    rangeCard.update(game, rangeOwner(game, { handoff: handoffOpen, heroId }));
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;
@@ -2336,7 +1747,7 @@ function tick(dt, draw = true) {
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   if (!draw) return;
   renderer.render(scene, camera);
-  renderInset();
+  inset.render(game, { allowed: rig.modes.insetAllowed(), target: controls.target });
 }
 
 // A hidden tab gets no animation frames. Online that would hold up the whole
