@@ -22,6 +22,33 @@
 //                                       pools, burning tanks in it (core/napalm.js)
 //   bury   { radius, height }           heap a dome of earth that buries any tank
 //                                       under it (core/napalm.js BURY)
+//   throw  { count, speed, up, child }  on impact, lob `count` child shells outward
+//                                       in a star (the Splitter): `speed` m/s
+//                                       across, `up` m/s up
+//   burst  { height }                   (flight) go off `height` m over the ground
+//                                       on the way down, not on it (the Airburst;
+//                                       ballistics.burstNow)
+//
+// More fields on a part, for the variants:
+//   blast.pierce   a tank under a Dirt Bomb dome or down in a hole below the
+//                  blast is hit by the distance across only, as if level with it
+//   blast.flat     every tank is hit by the distance across only (a blast in the
+//                  air over the ground; it reaches under a dome too)
+//   split.share    the share of the shells that land on one tank, for the
+//                  price yardstick (shotValue): 0.6 when missing
+//   roll.seek      { accel, range }: lean toward the nearest enemy tank in range
+//                  (ballistics.seekNudge)
+//   roll.hop       hops it has: hop over a bump instead of stopping (ballistics.hopOver)
+//   roll.reach     the roll goes this many times as far (less grip, longer road)
+//   napalm.params  changes to core/napalm.js NAPALM for this spill
+//
+// Variants (docs/design-guide.md, "Weapon variants"): a weapon with `variants`
+// grows two ways in the skill tree. Each variant is { id, name, desc, style,
+// patch }: `patch` replaces the weapon's fields it names (flight, impact);
+// `style` ('bold' or 'careful') is which CPUs lean to it. `upgrade` is the
+// family's rank 2, on top of either variant: { name, desc, and any of radius
+// (times every blast radius), reach (times the roll), count (more shells in a
+// split), napalm (more NAPALM changes) }. resolveWeapon puts them together.
 //
 // Every weapon a player can hold also says how it is got (docs/design-guide.md,
 // "How you get things"):
@@ -49,16 +76,42 @@ export const WEAPONS = [
     id: 'breacher', name: 'Breacher', price: 180, bundle: 3, role: 'Damage', tier: 'standard', start: 1,
     desc: 'Heavy round. Wide crater, heavy damage.',
     impact: [{ type: 'blast', radius: 22, damage: 70, depth: 0.7 }],
+    variants: [
+      { id: 'bunker', name: 'Bunker Buster', style: 'careful',
+        desc: 'A narrower blast (18 m) that digs half as deep again and hits a buried or dug-in tank in full.',
+        patch: { impact: [{ type: 'blast', radius: 18, damage: 70, depth: 1.05, pierce: true }] } },
+      { id: 'splitter', name: 'Splitter', style: 'bold',
+        desc: 'A smaller blast (16 m, 50) that throws three bomblets outward, about 14 m each way.',
+        patch: { impact: [{ type: 'blast', radius: 16, damage: 50, depth: 0.6 }, { type: 'throw', count: 3, speed: 7, up: 10, child: 'splitlet' }] } },
+    ],
+    upgrade: { name: 'Wider Charge', desc: 'Its blast reaches 15% wider.', radius: 1.15 },
+  },
+  {
+    id: 'splitlet', name: 'Splitter bomblet', hidden: true,
+    impact: [{ type: 'blast', radius: 9, damage: 22, depth: 0.45 }],
   },
   {
     id: 'scatter', name: 'Scatter', price: 220, bundle: 2, role: 'Damage', tier: 'advanced',
     desc: 'Splits into five shells at the top of its arc.',
     flight: [{ type: 'split', count: 5, spread: 9, child: 'scatterlet' }],
     impact: [{ type: 'blast', radius: 10, damage: 30, depth: 0.55 }],
+    variants: [
+      { id: 'line', name: 'Line', style: 'careful',
+        desc: 'Five shells in a tight row along the aim: more of them on one tank, less ground covered.',
+        patch: { flight: [{ type: 'split', count: 5, spread: 3, shape: 'along', child: 'scatterlet', share: 0.7 }] } },
+      { id: 'ring', name: 'Ring', style: 'bold',
+        desc: 'Five bigger shells (12 m) in a ring round the aim point: a near miss still hits, but dead on only the edges reach.',
+        patch: { flight: [{ type: 'split', count: 5, spread: 3.5, shape: 'ring', child: 'ringlet', share: 0.55 }] } },
+    ],
+    upgrade: { name: 'Sixth Shell', desc: 'It splits into one more shell.', count: 1 },
   },
   {
     id: 'scatterlet', name: 'Scatterlet', hidden: true,
     impact: [{ type: 'blast', radius: 10, damage: 28, depth: 0.55 }],
+  },
+  {
+    id: 'ringlet', name: 'Ring shell', hidden: true,   // Scatter · Ring
+    impact: [{ type: 'blast', radius: 12, damage: 30, depth: 0.5 }],
   },
   {
     id: 'flak', name: 'Flak', price: 200, bundle: 2, role: 'Anti-air', tier: 'standard',
@@ -86,6 +139,15 @@ export const WEAPONS = [
     id: 'roller', name: 'Roller', price: 130, bundle: 3, role: 'Damage', tier: 'standard', start: 1,
     desc: 'Lands, rolls downhill and blows up where it stops or on the first tank it touches.',
     impact: [{ type: 'roll', then: [{ type: 'blast', radius: 14, damage: 55, depth: 0.6 }] }],
+    variants: [
+      { id: 'seeker', name: 'Seeker', style: 'careful',
+        desc: 'Leans toward the nearest enemy tank within 50 m as it rolls. A smaller blast (12 m, 46).',
+        patch: { impact: [{ type: 'roll', seek: { accel: 1.5, range: 50 }, then: [{ type: 'blast', radius: 12, damage: 46, depth: 0.55 }] }] } },
+      { id: 'hopper', name: 'Hopper', style: 'bold',
+        desc: 'Hops once over a bump instead of stopping against it, and rolls on. A little less damage (48).',
+        patch: { impact: [{ type: 'roll', hop: 1, then: [{ type: 'blast', radius: 14, damage: 48, depth: 0.6 }] }] } },
+    ],
+    upgrade: { name: 'Long Roll', desc: 'It rolls half as far again.', reach: 1.5 },
   },
   {
     id: 'mound', name: 'Mound', price: 90, bundle: 3, role: 'Terrain', tier: 'standard', start: 1,
@@ -121,13 +183,31 @@ export const WEAPONS = [
   },
   {
     id: 'napalm', name: 'Napalm', price: 100, bundle: 2, role: 'Area', tier: 'advanced',
-    desc: 'Spills burning fuel that runs downhill and pools. A tank in a crater or a valley burns for up to 56; one on a crest is barely singed. Water puts it out.',
+    desc: 'Spills burning fuel that runs downhill and pools. A tank in a crater or a valley burns for up to 56; one on a crest is barely singed. Water puts it out, and rain damps it.',
     impact: [{ type: 'napalm' }],
+    variants: [
+      { id: 'sticky', name: 'Sticky', style: 'careful',
+        desc: 'Thick: it runs about half as far and lies deeper where it lands, and burns about 2 s longer (up to 62).',
+        patch: { impact: [{ type: 'napalm', params: { film: 0.22, ticks: 11, damage: 62 } }] } },
+      { id: 'flood', name: 'Flood', style: 'bold',
+        desc: 'Thin: more of it, running about half as far again and spreading wide, but shallower and shorter (up to 50).',
+        patch: { impact: [{ type: 'napalm', params: { iters: 96, reach: 40, fuel: 9, film: 0.07, ticks: 5, damage: 50 } }] } },
+    ],
+    upgrade: { name: 'Wet Burn', desc: 'It burns through rain and over shallow water (up to 1.5 m deep).', napalm: { wade: 1.5, rainproof: true } },
   },
   {
     id: 'thunderhead', name: 'Thunderhead', price: 200, bundle: 1, role: 'Damage', tier: 'advanced',
     desc: 'The big one: a 30 m blast that hits as hard as anything in the armory. Mind your own tank.',
     impact: [{ type: 'blast', radius: 30, damage: 95, depth: 0.75 }],
+    variants: [
+      { id: 'deep', name: 'Deep Strike', style: 'careful',
+        desc: 'A narrower blast (25 m) that hits harder at the centre (110) and digs a deeper crater.',
+        patch: { impact: [{ type: 'blast', radius: 25, damage: 110, depth: 1.1 }] } },
+      { id: 'airburst', name: 'Airburst', style: 'bold',
+        desc: 'Goes off 8 m up: no crater and a little less damage (90), but the whole blast reaches across the ground, even under a Dirt Bomb dome.',
+        patch: { flight: [{ type: 'burst', height: 8 }], impact: [{ type: 'blast', radius: 30, damage: 90, depth: 0, flat: true }] } },
+    ],
+    upgrade: { name: 'Wider Charge', desc: 'Its blast reaches 15% wider.', radius: 1.15 },
   },
 ];
 
@@ -169,17 +249,64 @@ export const VALUE_BAND = [0.5, 1.4];
 export function shotValue(weapon) {
   // Napalm: the full burn on one tank, which it gets in a hollow; on open
   // ground less (core/napalm.js), so it counts at three quarters.
-  if ((weapon.impact || []).some((p) => p.type === 'napalm')) return NAPALM.damage * 0.75;
-  const blastOf = (w) => (w.impact || []).flatMap((p) => (p.type === 'roll' ? p.then : [p])).find((p) => p.type === 'blast');
+  const fire = (weapon.impact || []).find((p) => p.type === 'napalm');
+  if (fire) return (fire.params?.damage ?? NAPALM.damage) * 0.75;
+  const blastOf = (w) => (w?.impact || []).flatMap((p) => (p.type === 'roll' ? p.then : [p])).find((p) => p.type === 'blast');
+  const one = (b) => (b ? b.damage * Math.sqrt(b.radius / 11) : 0);
+  const byId = (id) => WEAPONS.find((w) => w.id === id);
   const split = (weapon.flight || []).find((p) => p.type === 'split' || p.type === 'airburst');
-  const child = split ? WEAPONS.find((w) => w.id === split.child) : null;
+  const child = split ? byId(split.child) : null;
   const b = blastOf(child || weapon);
   if (!b) return 0;
   const n = split ? split.count : 1;
   // An airburst's fragments come down over an area: about half land on the tank.
-  const share = split?.type === 'airburst' ? 0.5 : split ? 0.6 : 1;
-  return b.damage * n * share * Math.sqrt(b.radius / 11);
+  const share = split?.share ?? (split?.type === 'airburst' ? 0.5 : split ? 0.6 : 1);
+  // Bomblets thrown on impact (the Splitter) land round the blast: counted like a split's.
+  const thrown = (weapon.impact || []).filter((p) => p.type === 'throw')
+    .reduce((s, t) => s + t.count * 0.6 * one(blastOf(byId(t.child))), 0);
+  return one(b) * n * share + thrown;
 }
+
+// ---------- variants ----------
+
+// The variant `vid` of weapon `w`, or null.
+export const variantOf = (w, vid) => (w?.variants || []).find((v) => v.id === vid) || null;
+
+const resolved = new Map();
+
+// A tank's weapon as it fires: the base, with the chosen variant's patch on
+// top and, with `up`, the family's rank 2 (see the header). The same
+// arguments give back the same object, so the game can call it every step.
+// The result keeps the base's id; `variant` and `label` ("Napalm · Sticky")
+// say which it is.
+export function resolveWeapon(w, vid = null, up = false) {
+  const v = variantOf(w, vid);
+  if (!w || !w.variants || (!v && !up)) return w;
+  const key = `${w.id}|${v ? v.id : ''}|${up ? 1 : 0}`;
+  let out = resolved.get(key);
+  if (out) return out;
+  out = JSON.parse(JSON.stringify({ ...w, ...(v ? v.patch : {}) }));
+  delete out.variants;
+  out.variant = v ? v.id : null;
+  out.label = v ? `${w.name} · ${v.name}` : w.name;
+  if (v) out.desc = v.desc;
+  const u = up ? w.upgrade : null;
+  if (u) {
+    out.upgraded = true;
+    const parts = (list) => (list || []).flatMap((p) => (p.type === 'roll' ? [p, ...p.then] : [p]));
+    for (const p of parts(out.impact)) {
+      if (u.radius && p.type === 'blast') p.radius = Math.round(p.radius * u.radius * 10) / 10;
+      if (u.reach && p.type === 'roll') p.reach = (p.reach || 1) * u.reach;
+      if (u.napalm && p.type === 'napalm') p.params = { ...(p.params || {}), ...u.napalm };
+    }
+    for (const p of out.flight || []) if (u.count && p.type === 'split') p.count += u.count;
+  }
+  resolved.set(key, out);
+  return out;
+}
+
+// Every family with variants, for the skill tree and the guide.
+export const VARIANT_WEAPONS = WEAPONS.filter((w) => w.variants?.length);
 
 export const ITEMS = [
   { id: 'armor', name: 'Armor Plate', price: 200, desc: '+30 armor for the next round. Soaks damage first.' },
@@ -208,11 +335,11 @@ export function impactEffects(weapon, point) {
   const out = [];
   const run = (parts) => {
     for (const part of parts) {
-      if (part.type === 'blast') out.push({ type: 'blast', point, radius: part.radius, damage: part.damage, depth: part.depth });
+      if (part.type === 'blast') out.push({ type: 'blast', point, radius: part.radius, damage: part.damage, depth: part.depth, ...(part.pierce ? { pierce: true } : {}), ...(part.flat ? { flat: true } : {}) });
       else if (part.type === 'mound') out.push({ type: 'mound', point, radius: part.radius, height: part.height });
       else if (part.type === 'scout') out.push({ type: 'scout', point, radius: part.radius, turns: part.turns });
       else if (part.type === 'warp') out.push({ type: 'warp', point });
-      else if (part.type === 'napalm') out.push({ type: 'napalm', point });
+      else if (part.type === 'napalm') out.push({ type: 'napalm', point, ...(part.params ? { params: part.params } : {}) });
       else if (part.type === 'bury') out.push({ type: 'bury', point, radius: part.radius, height: part.height });
       else if (part.type === 'roll') run(part.then);
     }
@@ -223,7 +350,8 @@ export function impactEffects(weapon, point) {
 
 // Children for a split part: same position, velocity fanned out sideways (a
 // row across the line of flight), or with shape 'disc' pushed out over a
-// circle of radius `spread`, so the fragments come down over an area.
+// circle of radius `spread`, so the fragments come down over an area; 'along'
+// is a row down the line of flight, 'ring' an even ring.
 export function splitVelocities(vel, count, spread, shape = 'line') {
   const [vx, , vz] = vel;
   const h = Math.hypot(vx, vz) || 1;
@@ -243,13 +371,39 @@ export function splitVelocities(vel, count, spread, shape = 'line') {
     }
     return disc;
   }
-  // Horizontal unit vector perpendicular to travel.
-  const px = -vz / h;
-  const pz = vx / h;
+  const ux = Math.hypot(vx, vz) > 1e-6 ? vx / h : 1;
+  const uz = Math.hypot(vx, vz) > 1e-6 ? vz / h : 0;
+  if (shape === 'ring') {
+    // Scatter · Ring: evenly round a circle, the first straight ahead.
+    const ring = [];
+    for (let k = 0; k < count; k++) {
+      const a = (k / count) * 2 * Math.PI;
+      const along = spread * Math.cos(a), across = spread * Math.sin(a);
+      ring.push([vel[0] + ux * along - uz * across, vel[1], vel[2] + uz * along + ux * across]);
+    }
+    return ring;
+  }
+  // 'along' (Scatter · Line): a row down the line of flight, faster and
+  // slower; else a row across it.
+  const px = shape === 'along' ? ux : -vz / h;
+  const pz = shape === 'along' ? uz : vx / h;
   const out = [];
   for (let k = 0; k < count; k++) {
     const s = count === 1 ? 0 : (k / (count - 1)) * 2 - 1;
     out.push([vel[0] + px * spread * s, vel[1], vel[2] + pz * spread * s]);
+  }
+  return out;
+}
+
+// The Splitter's bomblets (a `throw` part): lobbed outward from the impact
+// in an even star, the first along the shell's line of flight.
+export function throwVelocities(vel, part) {
+  const h = Math.hypot(vel[0], vel[2]);
+  const a0 = h > 1e-6 ? Math.atan2(vel[2], vel[0]) : 0;
+  const out = [];
+  for (let k = 0; k < part.count; k++) {
+    const a = a0 + (k / part.count) * 2 * Math.PI;
+    out.push([Math.cos(a) * part.speed, part.up, Math.sin(a) * part.speed]);
   }
   return out;
 }

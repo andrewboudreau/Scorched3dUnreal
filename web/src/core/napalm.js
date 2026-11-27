@@ -27,10 +27,18 @@ export const NAPALM = {
   every: 0.45,    // s between ticks
   flowTime: 0.025, // s of screen time per flow step, for the running fuel (render only)
   scorch: 0.75,   // how dark the ground is burnt where the fuel was deepest
+  rain: 0.65,     // share of the damage it does in a Rain round (the rain damps it)
+  // Two fields only the variants set (weapons.js, Napalm's `params`):
+  //   wade       m: water shallower than this does not put it out (it floats and burns)
+  //   rainproof  true: Rain does not damp it
 };
 
+// NAPALM with a spill's own changes (a variant's `params`) on top.
+export const napalmParams = (params) => (params ? { ...NAPALM, ...params } : NAPALM);
+
 // The burn's whole length, s: the fire holds the shot's flight until it is out.
-export const BURN_TIME = NAPALM.lag + (NAPALM.ticks - 1) * NAPALM.every + 0.05;
+export const burnTime = (N = NAPALM) => N.lag + (N.ticks - 1) * N.every + 0.05;
+export const BURN_TIME = burnTime();
 
 const W8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 0.7071], [1, -1, 0.7071], [-1, 1, 0.7071], [-1, -1, 0.7071]];
 
@@ -52,7 +60,7 @@ export function flowNapalm(t, x, z, N = NAPALM) {
       const k = t.index(gi, gj);
       ok[idx] = 1;
       h[idx] = t.heights[k];
-      if (t.isOpen(k) || h[idx] < water) sink[idx] = 1;
+      if (t.isOpen(k) || h[idx] < water - (N.wade || 0)) sink[idx] = 1;   // `wade`: fuel floats over water shallower than this
     }
   }
   // The film each vertex keeps: thinner the steeper the ground falls away from it.

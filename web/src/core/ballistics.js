@@ -221,7 +221,9 @@ export function wellContact(p, wells = p.wells) {
 // 'sea' (no blast). With `recordPath`, `breaks` lists the path indices where a
 // wrapped shell came back in on the far side (draw no line across), and
 // `edges` counts the times it met the edge.
-export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, drag = 0, level = null, field = null, t0 = 0 }) {
+// `burst` (m, the Airburst variant's flight part) ends the flight 'burst'
+// where the falling shell first comes within that height of the ground (burstNow).
+export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], recordPath = false, maxTime = MAX_FLIGHT, gravity = GRAVITY, windK = 1, drag = 0, level = null, field = null, t0 = 0, burst = 0 }) {
   const p = makeProjectile(pos, vel, terrain);
   p.g = gravity;
   p.windK = windK;
@@ -262,6 +264,10 @@ export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], r
         return { kind: 'target', target: t, point: [x, y, z], time: p.time, path, breaks, edges };
       }
     }
+    if (burst && burstNow(p, terrain, burst)) {
+      if (path) path.push([x, y, z]);
+      return { kind: 'burst', point: [x, y, z], time: p.time, path, breaks, edges };
+    }
     const hit = groundContact(p, terrain);
     if (hit) {
       if (path) path.push(hit);
@@ -269,6 +275,18 @@ export function simulateShot({ pos, vel, wind = [0, 0], terrain, targets = [], r
     }
   }
   return lost();
+}
+
+// The Airburst hook (weapons.js `burst` part): is this falling shell within
+// `height` m of the solid ground under it? The live game, simulateShot and the
+// kill cam's forecast all ask this, so they agree on where it goes off. Over
+// open sky (an isle's edge) or out of the arena it never is.
+export function burstNow(p, terrain, height) {
+  if (!(p.vel[1] < 0)) return false;
+  const [x, y, z] = p.pos;
+  if (!terrain.inBounds(x, z) || !terrain.solidAt(x, z)) return false;
+  const g = Math.max(terrain.heightAt(x, z), terrain.sea != null ? terrain.waterLevel : -Infinity);   // the Island's sea counts as ground
+  return y > g && y - g <= height;
 }
 
 // ---- rolling (the Roller weapon) ----
@@ -289,14 +307,70 @@ export const ROLL = {
   stopAfter: 0.2,     // seconds below stopSpeed before it counts as stopped
 };
 
-export function makeRoller(point, vel, terrain) {
+// `part` is the weapon's roll part (weapons.js): its variant fields ride on
+// the roller. `seek` leans it toward `r.targets` (set by the game each step:
+// [{ x, z, owner }]), `reach` stretches the roll, `hop` is kept by the game.
+export function makeRoller(point, vel, terrain, part = null) {
   const x = point[0];
   const z = point[2];
-  return {
+  const r = {
     pos: [x, terrain.heightAt(x, z) + ROLL.radius, z],
     vel: [(vel ? vel[0] : 0) * ROLL.keep, (vel ? vel[2] : 0) * ROLL.keep], // horizontal x/z
     dist: 0, time: 0, still: 0,
+    dir: vel && Math.hypot(vel[0], vel[2]) > 1e-6 ? [vel[0] / Math.hypot(vel[0], vel[2]), vel[2] / Math.hypot(vel[0], vel[2])] : [1, 0],   // the heading it came in on (the Hopper hops that way)
   };
+  if (part?.seek) r.seek = { ...part.seek };
+  if (part?.reach && part.reach !== 1) r.reach = part.reach;
+  return r;
+}
+
+// The Seeker hook: lean the roller toward the nearest tank in `r.targets`
+// that is not its owner's, within `r.seek.range`, by `r.seek.accel` m/s^2
+// along the ground. Returns the push [ax, az] (zero when nothing is near).
+export function seekNudge(r) {
+  if (!r.seek || !r.targets?.length) return [0, 0];
+  let best = null, bd = r.seek.range;
+  for (const t of r.targets) {
+    if (t.owner === r.owner) continue;
+    const d = Math.hypot(t.x - r.pos[0], t.z - r.pos[2]);
+    if (d < bd && d > 1e-6) { bd = d; best = t; }
+  }
+  if (!best) return [0, 0];
+  return [(best.x - r.pos[0]) / bd * r.seek.accel, (best.z - r.pos[2]) / bd * r.seek.accel];
+}
+
+// The Hopper hook: a roller slowing against a bump in its path hops it. It
+// looks HOP.look m ahead along its heading (`r.dir`, the way the shot came in) for a crest that rises at
+// least HOP.min and at most HOP.max over it, with the ground falling away
+// again beyond; then it is thrown over, to come down HOP.past m beyond the
+// crest. Returns the launch velocity [vx, vy, vz], or null (no bump: a hollow
+// with walls all round, a cliff, or level ground).
+// `slow`: m/s along its heading under which the game asks (it is stalling on the rise).
+export const HOP = { look: 16, step: 2, min: 0.4, max: 8, past: 6, clear: 1.5, slow: 0.3 };
+export function hopOver(r, terrain) {
+  const [dx, dz] = r.dir || [1, 0];
+  const x0 = r.pos[0], z0 = r.pos[2];
+  const here = terrain.heightAt(x0, z0);
+  let crest = -Infinity, at = 0;
+  for (let s = HOP.step; s <= HOP.look; s += HOP.step) {
+    const x = x0 + dx * s, z = z0 + dz * s;
+    if (!terrain.inBounds(x, z) || !terrain.solidAt(x, z)) return null;
+    const h = terrain.heightAt(x, z);
+    if (h > crest) { crest = h; at = s; }
+  }
+  const rise = crest - here;
+  if (rise < HOP.min || rise > HOP.max) return null;
+  const land = at + HOP.past;
+  const lx = x0 + dx * land, lz = z0 + dz * land;
+  if (!terrain.inBounds(lx, lz) || !terrain.solidAt(lx, lz)) return null;
+  const low = terrain.heightAt(lx, lz);
+  if (low > crest - 0.3) return null;   // it keeps rising: not a bump
+  const y0 = here + ROLL.radius;
+  const vy = Math.sqrt(2 * GRAVITY * (crest + HOP.clear - y0));
+  const fall = Math.max(0, y0 - low);
+  const time = (vy + Math.sqrt(vy * vy + 2 * GRAVITY * fall)) / GRAVITY;
+  const vh = land / time;
+  return [dx * vh, vy, dz * vh];
 }
 
 // Advance one step. Returns null while rolling, or why it ended:
@@ -304,9 +378,11 @@ export function makeRoller(point, vel, terrain) {
 export function stepRoller(r, terrain, dt = SIM_DT) {
   const [nx, ny, nz] = terrain.normalAt(r.pos[0], r.pos[2]);
   // Gravity along the slope, horizontal part.
-  const ax = GRAVITY * nx * ny;
-  const az = GRAVITY * nz * ny;
-  const grip = ROLL.friction * GRAVITY * ny;
+  const reach = r.reach || 1;
+  const [sx, sz] = r.seek ? seekNudge(r) : [0, 0];
+  const ax = GRAVITY * nx * ny + sx;
+  const az = GRAVITY * nz * ny + sz;
+  const grip = (ROLL.friction / reach) * GRAVITY * ny;
   let [vx, vz] = r.vel;
   vx += ax * dt;
   vz += az * dt;
@@ -353,15 +429,15 @@ export function stepRoller(r, terrain, dt = SIM_DT) {
     r.still += dt;
     if (r.still >= ROLL.stopAfter) return 'stopped';
   } else r.still = 0;
-  if (r.dist >= ROLL.maxDistance) return 'distance';
-  if (r.time >= ROLL.maxTime) return 'timeout';
+  if (r.dist >= ROLL.maxDistance * reach) return 'distance';
+  if (r.time >= ROLL.maxTime * reach) return 'timeout';
   return null;
 }
 
 // Run a whole roll at once (tests, predictions). Returns the resting ground
 // point, the distance travelled and why it ended.
-export function rollDownhill(terrain, start, vel = null) {
-  const r = makeRoller(start, vel, terrain);
+export function rollDownhill(terrain, start, vel = null, part = null) {
+  const r = makeRoller(start, vel, terrain, part);
   let end = null;
   while (!end) end = stepRoller(r, terrain);
   return { point: [r.pos[0], r.pos[1] - ROLL.radius, r.pos[2]], dist: r.dist, time: r.time, end };

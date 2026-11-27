@@ -143,8 +143,8 @@ test('the draft only offers perks that are on, to humans and CPUs', () => {
   for (let r = 0; r < 5; r++) {
     g.endRound();
     g.openShop();
-    for (const offer of Object.values(g.draft)) for (const id of offer) assert.ok(on.includes(id), id);
-    for (const p of g.players) for (const id of p.perks) assert.ok(on.includes(id), id);
+    for (const offer of Object.values(g.draft)) for (const id of offer) assert.ok(on.includes(id) || PERK_BY_ID[id].weapon, id);   // a weapon's variants come with the weapon, not the Perks list
+    for (const p of g.players) for (const id of p.perks) assert.ok(on.includes(id) || PERK_BY_ID[id].weapon, id);
     g.closeShop();
   }
   assert.ok(g.players[1].perks.length > 0, 'the CPUs still draft');

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, PAY, EARNINGS } from '../src/core/game.js';
-import { WEAPONS, WEAPON_BY_ID, TIERS, startKit, opensOnVisit, shotValue, VALUE_BAND } from '../src/core/weapons.js';
+import { WEAPONS, WEAPON_BY_ID, TIERS, startKit, opensOnVisit, shotValue, VALUE_BAND, VARIANT_WEAPONS, resolveWeapon } from '../src/core/weapons.js';
 import { MOD_BY_ID } from '../src/core/mods.js';
 
 const two = (extra = {}) => new Game({ players: [{ name: 'A' }, { name: 'B' }], seed: 3, resolution: 64, ...extra });
@@ -34,6 +34,24 @@ test('price yardstick: a damage weapon costs 0.5 to 1.4 dollars per point of wha
   }
   // A shot that lands pays for itself: the armory never charges more a point than the game pays.
   assert.ok(VALUE_BAND[1] < PAY.perDamage);
+});
+
+test('price yardstick: every weapon variant, with and without its rank 2, is in the band at the base price', () => {
+  // A variant is a trade, not a straight upgrade: it costs what the base does,
+  // what a good shot does stays within the band and within a quarter of the
+  // base's, and the rank 2 upgrade adds at most a quarter more.
+  for (const w of VARIANT_WEAPONS) {
+    const perShot = w.price / w.bundle;
+    for (const v of w.variants) {
+      const r = resolveWeapon(w, v.id), up = resolveWeapon(w, v.id, true);
+      for (const x of [r, up]) {
+        const rate = perShot / shotValue(x);
+        assert.ok(rate >= VALUE_BAND[0] && rate <= VALUE_BAND[1], `${x.label}${x.upgraded ? ' +' : ''}: ${rate.toFixed(2)} a point`);
+      }
+      assert.ok(Math.abs(shotValue(r) / shotValue(w) - 1) <= 0.25, `${r.label}: ${shotValue(r).toFixed(0)} against ${shotValue(w).toFixed(0)}`);
+      assert.ok(shotValue(up) / shotValue(r) <= 1.25, `${r.label} +: ${shotValue(up).toFixed(0)} against ${shotValue(r).toFixed(0)}`);
+    }
+  }
 });
 
 test('Advanced weapons open on the second armory visit; a short match opens them on its only one', () => {

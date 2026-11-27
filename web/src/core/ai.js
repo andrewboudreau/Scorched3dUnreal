@@ -75,7 +75,7 @@ export function dragSeed(power, elev, dist, gravity, drag) {
   return power;
 }
 
-export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0 }) {
+export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, burst = 0 }) {
   const sx = shooter.x;
   const sz = shooter.z;
   const tx = target[0];
@@ -98,7 +98,7 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev),
       vel: launchVelocity(yaw, elev, power),
-      wind, terrain, gravity, windK, drag, level: target[1] - 1, field, t0,
+      wind, terrain, gravity, windK, drag, level: target[1] - 1, field, t0, burst,
     });
     // A shell that fell past an isle is judged by where it came down through the target's height.
     const [ix, iy, iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
@@ -154,9 +154,9 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
 // A target or shooter that has moved, or a change in the wind, puts some back.
 // `sharpen` (0..1) scales the error it carries into this shot: a Survey
 // Satellite overhead to read (satelliteSharpen); the memory itself is kept.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null, sharpen = 1 }) {
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null, sharpen = 1, burst = 0 }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, drag, field, t0 });
+  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, drag, field, t0, burst });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
   let m = memory[target.id];
   if (!m) {
