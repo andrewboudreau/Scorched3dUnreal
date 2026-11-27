@@ -75,10 +75,10 @@ export class TouchControls {
       </div>
       <div class="t-right">
         <div class="t-power"><i></i><b></b><span>PWR</span></div>
-        <div class="t-pad"><span class="t-read"></span><small>drag: &#8596; turret &nbsp; &#8597; elevation</small></div>
+        <div class="t-pad"><div class="t-top"><span class="t-read"></span><small class="t-last"></small></div><small class="t-help">drag: &#8596; turret &nbsp; &#8597; elevation</small></div>
         <div class="t-col">
           <div class="t-btn t-small t-sight" data-key="g">SIGHT</div>
-          <div class="t-btn t-weapon" data-act="weapons"></div>
+          <div class="t-btn t-weapon" data-act="weapons"><span class="t-wn"></span><small class="t-wa"></small></div>
           <div class="t-btn t-fire" data-key=" ">FIRE</div>
         </div>
       </div>
@@ -87,7 +87,7 @@ export class TouchControls {
     parent.appendChild(root);
     const $ = (s) => root.querySelector(s);
     this.el = {
-      pad: $('.t-pad'), read: $('.t-read'), power: $('.t-power'), powerFill: $('.t-power i'), powerNum: $('.t-power b'),
+      pad: $('.t-pad'), read: $('.t-read'), last: $('.t-last'), weaponName: $('.t-wn'), weaponAmmo: $('.t-wa'), power: $('.t-power'), powerFill: $('.t-power i'), powerNum: $('.t-power b'),
       fire: $('.t-fire'), weapon: $('.t-weapon'), note: $('.t-note'),
       fineBtn: $('[data-act=fine]'), chat: $('[data-act=chat]'),
     };
@@ -197,6 +197,10 @@ export class TouchControls {
     el.addEventListener('lostpointercapture', up);
   }
 
+  // The "drag: turret, elevation" line under the pad's numbers: shown for the first
+  // few matches (main.js asks hints.js), then the pad is just the pad.
+  setPadHelp(on) { this.root.classList.toggle('no-help', !on); }
+
   // Called by main.js every frame with the tank being aimed here (or null).
   // Returns the aim change to apply this frame, or null.
   take(dt, p) {
@@ -225,7 +229,13 @@ export class TouchControls {
     const lock = /lock/.test(hint);
     set('fire', this.el.fire, /pass/.test(hint) ? 'PASS' : /blink/.test(hint) ? 'BLINK' : /queue/.test(hint) ? 'SHOT 1' : /both/.test(hint) ? (lock ? 'LOCK ×2' : 'FIRE ×2') : lock ? 'LOCK IN' : 'FIRE');
     this.el.fire.classList.toggle('pass', /pass/.test(hint));
-    set('weapon', this.el.weapon, document.getElementById('ro-weapon')?.textContent || 'Weapon');
+    // What the last shot used (the card's readout is hidden on a phone, so this carries it).
+    const last = p.ai ? null : p.shots[p.shots.length - 1];
+    set('last', this.el.last, last ? `last ${(((last.yaw % 360) + 360) % 360).toFixed(1)}°  ${last.elev.toFixed(1)}°  ${last.power.toFixed(0)}` : '');
+    // The weapon, and how many rounds are left (nothing for an infinite one).
+    set('weapon', this.el.weaponName, document.getElementById('ro-weapon')?.textContent || 'Weapon');
+    const ammo = document.getElementById('ro-ammo')?.textContent || '';
+    set('ammo', this.el.weaponAmmo, ammo === '∞' ? '' : ammo);
     const on = this.online();
     if (s.online !== on) { s.online = on; this.el.chat.style.display = on ? '' : 'none'; }
   }

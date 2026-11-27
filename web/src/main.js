@@ -49,6 +49,8 @@ import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
 import { RunUI } from './runui.js';
+import { hudView, setHudView, installHudViews } from './hudview.js';
+import { useHint } from './hints.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -153,7 +155,8 @@ let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
 let dayLock = null;             // debug: hold the sun still at this time of day
 let fortView = null;
-let bannerHold = 0;             // a round banner keeps the turn banner waiting until then
+let hintGame = null;            // the game whose first-turn hints have been decided
+let bannerHold = 0;            // a round banner keeps the turn banner waiting until then
 let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
@@ -418,14 +421,21 @@ function handleEvents() {
         userCam = false;   // a new planner gets the camera back
         if (!overview && seen(p, fogView())) aimCameraAt(p);
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
+        // On a phone the "tap Lock in" line is taught the first few turns, then the banner is just the title (hints.js).
+        const coach = !(touch && e.plan && !p.ai) || useHint('lockin', 6);
         const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
-          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), touch ? 'Plan it, then tap Lock in' : 'Plan it, then Space to lock it in'];
+          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), touch ? (coach ? 'Plan it, then tap Lock in' : '') : 'Plan it, then Space to lock it in'];
         if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
-        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? 1700 : 1100); },
+        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? (coach ? 1700 : 1000) : 1100); },
           Math.max(50, bannerHold - performance.now()));
-        if (touch && !p.ai && !p.shots.length && game.round === 1) {
-          setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('SIGHT looks down your barrel; drag there to aim', 4500); },
-            Math.max(50, bannerHold - performance.now()) + 1800);
+        // The first turn of a match: the pad's "drag" line and the SIGHT note show only the first few matches (hints.js).
+        if (touch && !p.ai && !p.shots.length && game.round === 1 && hintGame !== game) {
+          hintGame = game;
+          touch.setPadHelp(useHint('pad', 5));
+          if (useHint('sight', 3)) {
+            setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('SIGHT looks down your barrel; drag there to aim', 4500); },
+              Math.max(50, bannerHold - performance.now()) + 1800);
+          }
         }
         break;
       }
@@ -816,7 +826,7 @@ function updatePips() {
 // While you plan, every opponent that is off screen gets an arrow on the
 // screen edge with its name and range. Click one, or press F, to look.
 function updateLocators() {
-  const me = game.phase === 'aim' && !handoffOpen && !overview && game.current && !game.current.ai ? game.current : null;
+  const me = game.phase === 'aim' && !handoffOpen && !overview && !gunner.active && game.current && !game.current.ai ? game.current : null;   // the sight draws its own markers
   const placed = [];
   game.players.forEach((p, i) => {
     const el = locators[i];
@@ -2654,6 +2664,7 @@ function tick(dt, draw = true) {
   effects.update(dt * timeScale);
   updateCamera(dt);
   updateAimAids();
+  setHudView(game ? hudView({ phase: game.phase, sight: gunner.active, overview, killCam: !!killCam }) : 'menu');   // what each HUD element shows (hudview.js)
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   if (!draw) return;
   renderer.render(scene, camera);
@@ -2684,6 +2695,7 @@ scene.add(menuMesh.group, menuScenery.group);
 sky.fit(menuField.terrain.half);
 birds.reset(menuField.terrain, 5);
 
+installHudViews();
 wireLaunch({ rows: setupRows, render: renderSetup, builder });   // the Custom section and the name field (launch.js)
 renderSetup();
 $('loading').classList.add('hidden');

@@ -187,9 +187,10 @@ const KEYS = [
 
 // Controls on a phone: [name, what it does].
 const TOUCH = [
-  ['Aim pad', 'right thumb. Drag like a trackpad: left and right turn the turret, up and down raise the barrel. Slow is precise, a flick goes far.'],
+  ['Aim pad', 'right thumb. Drag like a trackpad: left and right turn the turret, up and down raise the barrel. Slow is precise, a flick goes far. Its numbers are the turret and elevation now; the small line under them is what your last shot used.'],
   ['Power bar', 'beside the pad. Drag up or down.'],
-  ['FIRE', 'the big button (it reads Lock in in a volley). The weapon button above it opens your weapons.'],
+  ['FIRE', 'the big button (it reads Lock in in a volley). The weapon button above it opens your weapons, and says how many rounds are left of one that runs out.'],
+  ['A clear view', 'the screen steps aside for what you are doing. While a shell flies, the aim controls and your card go, and the drive cross and the players box fade (a Guided Missile lights the cross again). In the SIGHT the card shrinks to the wind, and on the View map it fades. Tips like "drag to aim" show the first few matches only.'],
   ['SIGHT', 'the camera rides behind your turret and looks down its line. Drag anywhere to aim. The − / + chip zooms 2×, 4×, 8× (or pinch). A compass tape lists the enemies with their range.'],
   ['Angle dials', 'on your tank while you aim: a ring for the turret (0 is east, angles grow to the right of your aim) and a quarter arc for the elevation. Amber is now, faint white is your last shot. Switch them off in ⚙ Settings.'],
   ['Side view', 'the panel at the top centre shows your planned shot flat, side on: the ground along your line, your tank, the climb to its top and enemies near the line. It shows the climb only, never where the shell lands (the Tracer perk shows a little more). Switch it off in ⚙ Settings > Graphics.'],

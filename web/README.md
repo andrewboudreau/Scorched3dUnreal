@@ -107,6 +107,15 @@ button above Fire opens the weapons as a pop-up, and the keyboard hints are
 hidden. "Add to Home Screen" installs it as an app that opens fullscreen in
 landscape. See `docs/mobile.md`.
 
+On a phone the HUD steps aside for what you are doing (`src/hudview.js`): the
+player card is small (the pad and weapon button carry the aim numbers, the last
+shot's values and the rounds left), while a shell flies the aim controls and card
+fade out and the rest goes faint, the sight keeps only the wind, and the HUD hides
+between rounds. The audit, element by element and view by view, is in
+`docs/mobile.md`. Teaching lines (the SIGHT note, the pad's "drag" line, the
+"tap Lock in" banner text) show only the first few times (`src/hints.js`, kept in
+localStorage).
+
 **Settings** (⚙, bottom right on a desktop and top right on a phone, on every screen) holds the sound:
 Master, Effects and Music levels, each with a mute, and the music track. Master
 sits under the device's own volume (a web page cannot set that), so it starts at
@@ -932,6 +941,10 @@ second column beside the first. On a phone the players box sits top right.
   health bar, telegraph line and phase banners (the rules: `src/core/boss.js`).
   `src/runui.js` (with `css/run.css`) is the run's screen: the map, the
   stops' views, the result card and the summary (the rules: `src/core/run.js`).
+- `src/hudview.js` is what the HUD shows in each view (plan, sight, flight, kill
+  cam, overview, between rounds): one table, with the phone's CSS generated from it
+  (`test/hudview.test.js`). `src/hints.js` counts how often a teaching line has
+  shown (`test/hints.test.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
