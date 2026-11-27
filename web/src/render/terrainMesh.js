@@ -26,6 +26,7 @@ const C = {
   peak: new THREE.Color('#b9a98a'),
   scorch: new THREE.Color('#3b2d21'),
   dirt: new THREE.Color('#6b4a2e'),
+  rubble: new THREE.Color('#857b70'),   // the City's broken ground: dusty concrete and brick
   side: new THREE.Color('#5a3d26'),
   sideDeep: new THREE.Color('#2e2117'),
   // The floating isles' undersides: earth under the grass, banded rock below,
@@ -377,6 +378,7 @@ export class TerrainMesh {
     this.under = null;   // the floating isles' undersides (ensureUnder), built for the first isles field
     this.openMask = null;
     this.cut = null;     // a ridgeline's cut below the crust per vertex (useRidge)
+    this.cityBase = this.cityPaved = null;   // the City's ground as dealt and its pavement (setPaths), for rubble colour
   }
 
   // A ridgeline field (core/ridgeline.js) wears banded rock (render/ridgeline.js):
@@ -493,6 +495,22 @@ export class TerrainMesh {
     const data = P.slot.data;
     for (let i = 0, n = data.length; i < n; i++) data[i] = rgba[i * 4];
     P.slot.tex.needsUpdate = true;
+    // The City's ground as dealt, and which of it was paved: once a blast
+    // scuffs the pavement away, or the ground is heaped or dug from where it
+    // was, it shows rubble rather than the grass under the paint (rebuild).
+    this.cityBase = this.cityPaved = null;
+    if (town) {
+      const f = this.field, n = f.n;
+      this.cityBase = Float32Array.from(f.heights);
+      this.cityPaved = new Uint8Array(n * n);
+      for (let j = 0; j < n; j++) {
+        const ty = Math.min(PATH_TEXELS - 1, Math.max(0, Math.floor(px(f.vx(j)))));
+        for (let i = 0; i < n; i++) {
+          const tx = Math.min(PATH_TEXELS - 1, Math.max(0, Math.floor(px(f.vx(i)))));
+          this.cityPaved[j * n + i] = data[ty * PATH_TEXELS + tx] > 20 ? 1 : 0;
+        }
+      }
+    }
   }
 
   // The ground in `region` was just blown out or buried: the path there is gone.
@@ -639,6 +657,10 @@ export class TerrainMesh {
           if (d < -0.2) tmp.lerp(C.bed, Math.min(1, (-0.2 - d) / 2.5));
         }
         tmp.lerp(C.rock, Math.min(1, Math.max(0, (slope - 0.12) * 3.2)));
+        if (this.cityBase) {
+          const dh = Math.abs(y - this.cityBase[k]);
+          tmp.lerp(C.rubble, this.cityPaved[k] ? 1 : Math.min(1, Math.max(0, dh - 0.15) * 2.5));
+        }
         const sc = f.scorch[k];
         if (sc > 0) {
           tmp.lerp(C.dirt, Math.min(1, sc * 1.4));
