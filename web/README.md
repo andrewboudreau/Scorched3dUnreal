@@ -617,7 +617,7 @@ second column beside the first. On a phone the players box sits top right.
 - **Between rounds: Results, Skills, Armory.** A stepper at the top of each
   screen shows where you are. Results list each tank's pay by where it came
   from: a $150 stipend, $80 for surviving, $300 for the win, $2 a point of
-  damage, $150 a kill, $60 a mod shot down. Then each human spends skill points and shops
+  damage really taken off (no pay for overkill), $150 a kill, $60 a mod shot down. Then each human spends skill points and shops
   in turn (the panel names whose turn it is and who is next); CPU tanks do
   both for themselves. A "Your kit" strip shows what you hold.
 - **Armory.** Weapons come in tiers: the **Kit** (Shells, free and unlimited),

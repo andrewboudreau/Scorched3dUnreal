@@ -2174,7 +2174,8 @@ export class Game {
     const payK = this.modifier.pay || 1;
     const foe = !!attacker && !this.allied(attacker, p);   // a hit on an ally hurts it, but earns nothing
     if (foe) {
-      this.earn(attacker, 'damage', Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK));
+      // Pay for what the hit really took off (armor and health), not the overkill.
+      this.earn(attacker, 'damage', Math.round(dealt * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK));
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
       p.hitBy = attacker.id;
