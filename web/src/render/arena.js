@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { seaMaterial } from './sceneryMesh.js';
 
 // The arena's boundary, drawn: the curtains of the Edges rule and the
 // Island's open sea.
@@ -21,7 +22,6 @@ const TINT = { wall: '#ffb347', bounce: '#5fe0ff', wrap: '#c48bff' };
 const MODE = { wall: 0, bounce: 1, wrap: 2 };
 const LOW = -60;          // the curtains run from here...
 const HIGH = 340;         // ...up to here, fading out towards the top (the rule itself has no top)
-const SEA_COLOR = '#25596c';
 
 const curtainVert = /* glsl */ `
   varying vec3 vW;
@@ -57,7 +57,13 @@ const curtainFrag = /* glsl */ `
     float shimmer = 0.85 + 0.15 * sin(s * 0.37 + uTime * 5.0) * sin(y * 0.23 - uTime * 3.0);
     float fade = smoothstep(${HIGH.toFixed(1)}, ${(HIGH * 0.35).toFixed(1)}, y);
     float a = (grid * 0.2 + 0.03) * glow * shimmer * fade;
-    gl_FragColor = vec4(uColor * (0.7 + grid * 0.6), a);
+    if (uMode < 0.5) {
+      // Wall is drawn with ordinary blending, not added light: amber added to a
+      // bright sky only whitens it. The lines carry more weight to make up for it.
+      gl_FragColor = vec4(uColor * (0.82 + grid * 0.18), min(0.55, a * 1.9));
+    } else {
+      gl_FragColor = vec4(uColor * (0.7 + grid * 0.6), a);
+    }
   }
 `;
 
@@ -104,7 +110,7 @@ export class ArenaView {
     this.rule = rule;
     this.half = half;
     const on = rule in MODE;
-    for (const c of this.curtains) c.visible = on;
+    for (const c of this.curtains) { c.visible = on; c.material.blending = rule === 'wall' ? THREE.NormalBlending : THREE.AdditiveBlending; }
     if (!on) return;
     this.uniforms.uColor.value.set(TINT[rule]);
     this.uniforms.uMode.value = MODE[rule];
@@ -125,13 +131,13 @@ export class ArenaView {
     const key = level == null ? '' : `${level},${half}`;
     if (key === this.seaKey) return;
     this.seaKey = key;
-    if (this.sea) { this.group.remove(this.sea); this.sea.geometry.dispose(); this.sea.material.dispose(); this.sea = null; }
+    if (this.sea) { this.group.remove(this.sea); this.sea.geometry.dispose(); this.sea = null; }   // (its material is the field's own water, shared: not ours to dispose)
     if (level == null) return;
     const R = 6000;
     const shape = new THREE.Shape([new THREE.Vector2(-R, -R), new THREE.Vector2(R, -R), new THREE.Vector2(R, R), new THREE.Vector2(-R, R)]);
     shape.holes.push(new THREE.Path([new THREE.Vector2(-half, -half), new THREE.Vector2(-half, half), new THREE.Vector2(half, half), new THREE.Vector2(half, -half)]));
     const geo = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2);
-    this.sea = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: SEA_COLOR, roughness: 0.25, metalness: 0.1 }));
+    this.sea = new THREE.Mesh(geo, seaMaterial());
     this.sea.position.y = level;
     this.sea.receiveShadow = true;
     this.group.add(this.sea);

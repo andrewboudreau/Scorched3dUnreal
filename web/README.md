@@ -491,7 +491,8 @@ second column beside the first. On a phone the players box sits top right.
   as before. On the Floating isles the walls are the same square's sides and a
   shell that drops below the isles is still lost to the void; on the Ridgeline
   a shell that wraps can come in low on the far side and strike that cliff
-  face. A faint curtain of light stands along each side for Wall (amber, a slow
+  face. A faint curtain of light stands along each side for Wall (amber, drawn with
+  ordinary blending so it stays amber on a bright sky; a slow
   breath), Bounce (cyan, rising bands) and Wrap (violet, bands that run along
   it), with a flash where a shell bounces and a ripple where it goes out and
   comes back in (`render/arena.js`); the aim arc and the shell's trail break
@@ -794,7 +795,8 @@ second column beside the first. On a phone the players box sits top right.
   the Island's coast and sea (`island.js`), and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
   through a mask texture), tank models,
-  effects, the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
+  effects (blasts that land together, as a Scatter Ring's five, each leave a ring on
+  the ground for a moment so the separate impacts read), the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
   in `artifactMesh.js`), the Ridgeline's strata (`ridgeline.js`), the sky, sun and
   clouds (`sky.js`, with the space sky of the floating isles, greyed in a Rain round; the time-of-day presets in `timeofday.js`),
   the falling rain (`rain.js`), the isles' moons
@@ -814,7 +816,8 @@ second column beside the first. On a phone the players box sits top right.
   that fly, bounce, settle and sink (one InstancedMesh), chunks that topple
   into the street, and whole buildings that drop and crumble into their rubble.
   `arena.js` is the arena's boundary: the Edges curtains, bounce flashes and
-  wrap ripples, the Island's open sea and splashes. `bossMark.js` is the
+  wrap ripples, the Island's open sea (the field's own water material, so the
+  two meet without a seam) and splashes. `bossMark.js` is the
   boss's telegraph: the ring and column of light on the marked spot.
   `bulwarkMesh.js` is the Bulwark's own model (a TankMesh with its own build:
   broad dark-steel hull, armour skirts with amber hems, a squat turret, twin
