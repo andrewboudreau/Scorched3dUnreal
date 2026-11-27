@@ -213,25 +213,32 @@ tank. Controls lists the touch controls first, then the keys.
 
 ## Performance on mobile GPUs
 
-Today's desktop defaults: antialias on, pixel ratio up to 1.5, PCF shadows from a
-**4096²** sun shadow map redrawn every frame, plus a second scene render for the
-inset during flight.
+Settings > Graphics > Detail (`src/graphics.js`, `src/render/graphics.js`) sets
+what the GPU draws. High: antialias on, pixel ratio up to 1.5 (**1.25** on a
+`pointer: coarse` device, which reports 3), PCF shadows from a **4096²** sun
+shadow map (**2048²** on a touch device: 16 MB of depth instead of 64), redrawn
+every frame, plus a second scene render for the inset during flight.
 
-Applied on touch-first devices (`pointer: coarse`) only:
+Low, for phones that run hot or slow: pixel ratio 1, a 1024² shadow map with a
+blob under each tank, the terrain's shadow cast from a mesh with a quarter of its
+triangles, and the ground and water shaders' `GFX_LOW` path (no warp, cloud
+shadows or bump tilt on the ground; three waves and no noise on the water).
+Measured at 844x390 on a desktop GPU it about halves the GPU time per frame and
+drops 70k to 100k triangles (the terrain's second shadow-pass copy) on the
+heightfield maps; draw calls stay within a few of High.
 
-- **Pixel ratio capped at 1.25** (phones report 3). That is about 6× fewer pixels
-  than native on an iPhone, and MSAA hides the softness.
-- **Shadow map 2048²**: 16 MB instead of 64 MB of depth, and a quarter of the fill.
+Auto (the default) is Low on a touch device with four cores or fewer or 2 GB of
+memory or less, and otherwise drops to Low once if the menu backdrop's frames run
+slow (median over 24 ms after a warm-up).
 
-Next, if a phone still runs hot or below 60 fps:
+Next, if a phone still runs hot or below 60 fps on Low:
 
-- Measure first (`renderer.info`, frame time on a mid-range Android).
 - Redraw the shadow map only when something moved (tanks, craters, the sun's
   slow drift), not every frame.
 - Fewer instanced trees and bushes beyond a distance, fewer birds and clouds,
-  cap debris and smoke counts in `Effects`.
+  cap debris and smoke counts in `Effects` (Fire and smoke > Light already does
+  some of this).
 - Skip the inset render, or draw it every other frame.
-- An adaptive mode: drop the pixel ratio a step when frame time stays above 20 ms.
 
 ## Audio
 

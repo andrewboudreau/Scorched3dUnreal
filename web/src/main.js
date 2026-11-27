@@ -33,13 +33,15 @@ import { AngleDials } from './render/dials.js';
 import { SidePanel } from './render/sidepanel.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
-import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
+import { TouchControls, wantTouch, coarsePointer } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
 import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml } from './armory.js';
 import { MOD_BY_ID, modPos } from './core/mods.js';
 import { cuesFor } from './sfxmap.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
+import { Graphics } from './graphics.js';
+import { applyGraphics } from './render/graphics.js';
 import { defaultMatch, customBoss, onlineBoss, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { BossUI } from './bossui.js';
 import { BossMarkView } from './render/bossMark.js';
@@ -62,8 +64,6 @@ const $ = (id) => document.getElementById(id);
 // ---------------------------------------------------------------- renderer
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-// MSAA on a 2x screen is 4x the pixels times 4 samples; 1.5 looks the same.
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -77,7 +77,14 @@ const sky = new Sky(scene);   // sun, sky light, fog, clouds
 const rain = new Rain(scene);  // streaks, a grey sky and a hiss in a Rain round
 const moons = new Moons(scene);   // the floating isles' moons
 const gravityLines = new GravityLines(scene);   // flux lines while a well pulls a shell
-if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
+// Settings > Graphics > Detail: High, Low or Auto (src/graphics.js); pixel
+// ratio, shadow map and the cheaper shaders (render/graphics.js). Auto times
+// the menu's frames once and drops to Low if they are slow.
+const graphics = new Graphics({
+  storage: (() => { try { return localStorage; } catch { return null; } })(), coarse: coarsePointer, cores: navigator.hardwareConcurrency, memory: navigator.deviceMemory,
+  apply: (tier) => applyGraphics(tier, { renderer, sky, coarse: coarsePointer }), menu: () => !game,
+});
+graphics.watch();
 
 // A desert floor far below the slab so it never floats in a void.
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), new THREE.MeshStandardMaterial({ color: '#8f7a5c', roughness: 1 }));
@@ -702,7 +709,9 @@ settings.level({ id: 'music', label: 'Music', group: 'sound', get: () => music.v
   set: (v) => { sound.ensure(); music.setVolume(v); }, toggle: () => { sound.ensure(); music.toggleMute(); } });
 settings.choice({ id: 'track', label: `Track${keys(' (N)')}`, group: 'sound', options: TRACKS.map((t) => ({ value: t.id, text: t.name })),
   get: () => music.trackId, set: (id) => { sound.ensure(); music.select(id); } });
-settings.group('look', 'Graphics', 'Light draws fewer flames, smoke puffs and sparks: smoother on a phone.');
+settings.group('look', 'Graphics', 'Low draws fewer pixels, softer shadows and plainer ground; Light draws fewer flames, smoke puffs and sparks. Both are smoother on a phone.');
+settings.choice({ id: 'gfx', label: 'Detail', group: 'look', get: () => graphics.choice, set: (v) => graphics.set(v), options: [
+  { value: 'auto', text: () => `Auto (${graphics.low ? 'Low' : 'High'})` }, { value: 'high', text: 'High' }, { value: 'low', text: 'Low (faster)' }] });
 settings.choice({ id: 'fxq', label: 'Fire and smoke', group: 'look', options: [{ value: 'full', text: 'Full' }, { value: 'light', text: 'Light (faster)' }],
   get: () => effects.quality, set: (v) => { effects.setQuality(v); try { localStorage.setItem(QUALITY_KEY, v); } catch { /* private mode */ } } });
 settings.group('more', 'More');
@@ -1644,7 +1653,7 @@ $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held: input.held,
+window.craterfall = { craft, run, get game() { return game; }, startMatch, graphics, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held: input.held,
   get tanks() { return tanks; }, get camGoal() { return rig.goal; }, rig, get cameraMode() { return rig.mode; },
   get terrainMesh() { return terrainMesh; }, get sceneryMesh() { return sceneryMesh; }, get cityView() { return cityView; },   // for profiling
   lookAt(x, y, z, from) { rig.lookAt(x, y, z, from); },

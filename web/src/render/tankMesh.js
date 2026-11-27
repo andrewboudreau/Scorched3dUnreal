@@ -69,6 +69,35 @@ export function glowTexture() {
   return glowImage;
 }
 
+// A soft dark blob under every tank, shown only at Graphics > Detail > Low,
+// where the 1024² shadow map leaves a tank's own shadow faint. One material for
+// all of them; render/graphics.js turns it on and off (setTankBlobs).
+let blobMaterial = null;
+function blobMat() {
+  if (!blobMaterial) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.55, 'rgba(255,255,255,0.75)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    blobMaterial = new THREE.MeshBasicMaterial({
+      color: '#000000', alphaMap: new THREE.CanvasTexture(c), transparent: true, opacity: 0.5,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
+    blobMaterial.visible = blobsOn;
+  }
+  return blobMaterial;
+}
+let blobsOn = false;
+export function setTankBlobs(on) {
+  blobsOn = !!on;
+  if (blobMaterial) blobMaterial.visible = blobsOn;
+}
+
 // A track run whose plates travel the right way on every face: the top goes
 // forward while the bottom goes back, and both sides agree with the top.
 export function trackGeometry(length = 7.0, height = 1.2, depth = 1.1) {
@@ -87,6 +116,14 @@ export class TankMesh {
     this.trackHalf = TRACK_HALF;          // a model with other tracks (render/bulwarkMesh.js) sets these in build()
     this.exhaustAt = [-3.6, 2.5, 1.25];   // hull-space exhaust: x, y and the side offset
     this.build(color);
+    // The Low blob: on the root, not the hull, so a wreck (which copies the
+    // hull) leaves it behind. sync() lays it on the ground under the hull.
+    const blobGeo = new THREE.PlaneGeometry(this.trackHalf * 2 + 4.6, this.trackHalf * 2 + 1.8);
+    blobGeo.rotateX(-Math.PI / 2);
+    this.blob = new THREE.Mesh(blobGeo, blobMat());
+    this.blob.position.y = 0.06;
+    this.blob.renderOrder = 1;
+    this.root.add(this.blob);
     this.recoil = 0;
     this.work = 0;                    // 0..1, how hard the engine is running
     this.sway = [0, 0];               // aerial lean, along and across the turret
@@ -239,6 +276,7 @@ export class TankMesh {
     this._q.setFromUnitVectors(this._up, this._n);
     this._qy.setFromAxisAngle(this._up, -hull);
     this.hull.quaternion.copy(this._q).multiply(this._qy);
+    this.blob.quaternion.copy(this.hull.quaternion);
     this.recoil = Math.max(0, this.recoil - dt * 4);
     const rel = p.yaw * DEG - hull;
     const kick = this.recoil * this.recoil * 0.07;

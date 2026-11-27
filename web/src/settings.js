@@ -153,16 +153,21 @@ export class Settings {
     } }, group);
   }
 
-  // A pick from a short list.
+  // A pick from a short list. An option's text may be a function (read again
+  // on every refresh, as Detail's "Auto (Low)").
   choice({ id, label, options, get, set, group }) {
     const row = document.createElement('div');
     row.className = 'st-choice';
     row.innerHTML = `<label for="st-${id}"></label><select id="st-${id}"></select>`;
     row.querySelector('label').textContent = label;
     const sel = row.querySelector('select');
-    for (const o of options) sel.add(new Option(o.text, o.value));
+    const text = (o) => (typeof o.text === 'function' ? o.text() : o.text);
+    for (const o of options) sel.add(new Option(text(o), o.value));
     sel.addEventListener('change', () => { set(sel.value); this.render(); });
-    this.place({ el: row, refresh: () => { sel.value = get(); } }, group);
+    this.place({ el: row, refresh: () => {
+      options.forEach((o, i) => { sel.options[i].text = text(o); });
+      sel.value = get();
+    } }, group);
   }
 
   render() { for (const r of this.rows) r.refresh(); }

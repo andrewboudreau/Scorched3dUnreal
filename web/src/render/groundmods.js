@@ -51,6 +51,7 @@ export function makeDecoy(color, holo) {
   let mat = null;
   if (holo) {
     mat = hologramMaterial(color);
+    tank.blob.removeFromParent();   // a hologram casts no blob
     tank.root.traverse((o) => { if (o.isMesh) { o.material = mat; o.castShadow = false; o.receiveShadow = false; o.renderOrder = 3; } });
   }
   return { group: tank.root, tank, mat, holo, kind: 'decoy' };
