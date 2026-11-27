@@ -13,7 +13,7 @@
 #run-new:only-of-type, .run-launch #run-new:not(.alt) { grid-column: 1 / -1; }
 .run-go.alt { border-color: var(--edge); color: var(--text); background: #26303c; }
 #run-continue { border-color: #5fd0bd; }
-.run-abandon { grid-column: 1 / -1; min-height: 36px !important; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; }
+.run-abandon { grid-column: 1 / -1; min-height: 40px !important; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; }
 .run-abandon:hover { color: #ff9a8a; border-color: #b6574c; background: none; }
 /* Last run: the finished run's summary again, a quiet button under the others. */
 .run-last { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-height: 44px; padding: 6px 12px; text-align: left;
@@ -328,6 +328,7 @@ svg .gate { fill: #241817; stroke: none; }
   .run-node.k-boss { width: 52px; height: 52px; }
   .run-node span { font-size: 9px; }
   .run-panel { padding: 8px 10px; }
+  .run-panel .run-gobtn { bottom: -8px; }   /* the panel's padding is 8 here, so the sticky Go sits flush instead of 4px under the edge */
   .run-panel .primary { margin-top: 8px; }
   .run-cards { gap: 8px; }
   .run-card { min-height: 120px; }
@@ -357,13 +358,16 @@ svg .gate { fill: #241817; stroke: none; }
   .run-hull { width: 20px; height: 12px; }
   .run-hbtn { padding: 5px 9px; }
   .run-mapview.portrait { gap: 8px; }
-  .run-mapview.portrait .run-node { width: 38px; height: 38px; }
+  .run-mapview.portrait .run-node { width: 40px; height: 40px; }
   .run-mapview.portrait .run-node svg { width: 20px; height: 20px; }
   .run-mapview.portrait .run-node.k-boss { width: 50px; height: 50px; }
   .run-mapview.portrait .run-node.k-boss svg { width: 28px; height: 28px; }
   .run-mapview.portrait .run-node.k-start { width: 30px; height: 30px; }
-  .run-mapview.portrait .run-node span { font-size: 9px; margin-top: 1px; }
+  .run-mapview.portrait .run-node span { font-size: 10px; }
+  /* The tiers are only ~43 px apart on a phone, so a name under a stop would sit behind the next one: put it beside it (the field's side margins leave room on the right). */
+  .run-mapview.portrait .run-node:not(.k-boss) span { top: 50%; left: 100%; margin: 0 0 0 5px; transform: translateY(-50%); }
   .run-mapview.portrait .run-panel { padding: 8px 12px; }
+  .run-mapview.portrait .run-panel .run-gobtn { bottom: -8px; }
   .run-mapview.portrait .run-kdesc { display: none; }
   .run-mapview.portrait .run-ptitle > svg { width: 26px; height: 26px; }
   .run-mapview.portrait .run-panel .primary { margin-top: 8px; }

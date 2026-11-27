@@ -257,6 +257,8 @@ body.killcam::before, body.killcam::after { height: 10vh; }
   font-weight: 700; letter-spacing: .04em; opacity: 0; transition: opacity .3s; pointer-events: none; text-shadow: 0 2px 6px #000; }
 body.killcam #killcam-cap { opacity: 1; }
 body.killcam :is(#weapon-bar, #help, #player-card, #range-card, #steer-hint, #scoreboard, #settings-btn, .locator) { opacity: 0; transition: opacity .3s; }
+/* A rangefinder mark or an edge pin is plan-time clutter in the replay (main.js sets their opacity inline, so hide them outright). */
+body.killcam :is(.pip.probe, .pip.edge) { visibility: hidden; }
 
 /* Match results: awards and the full numbers. */
 #mo-awards { margin: 12px 0 8px; font-size: 14px; line-height: 1.6; }
@@ -340,7 +342,7 @@ body.touch button { min-height: 40px; }
 .t-dpad .down { grid-area: 3 / 2; }
 .t-jet { width: 60px; height: 46px; font-size: 13px; color: #ffb347; }
 .t-mid { position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: grid; grid-template-columns: repeat(3, 52px); gap: 8px; }
-.t-small { height: 34px; font-size: 12px; font-weight: 600; border-radius: var(--r); }
+.t-small { height: 40px; font-size: 12px; font-weight: 600; border-radius: var(--r); }
 #touch .t-small.on { background: rgba(255, 181, 71, .3); border-color: var(--accent); }
 #touch .t-small.off { opacity: .35; pointer-events: none; }
 .t-right { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 12px; }
@@ -357,7 +359,7 @@ body.touch button { min-height: 40px; }
 .t-read { font-weight: 700; font-variant-numeric: tabular-nums; white-space: pre; text-shadow: 0 1px 3px #000; }
 .t-pad small { font-size: 10px; color: var(--muted); }
 .t-col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.t-weapon { width: 84px; height: 38px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.t-weapon { width: 84px; height: 40px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
 .t-fire { width: 84px; height: 84px; border-radius: 50%; border: none; color: #fff; font-size: 16px;
   background: linear-gradient(135deg, #ff9a3c, #ff5f3c); box-shadow: 0 4px 16px rgba(0, 0, 0, .4); }
 #touch .t-fire.pressed { background: linear-gradient(135deg, #ffc27a, #ff7b5c); transform: scale(.95); }
@@ -366,6 +368,14 @@ body.touch button { min-height: 40px; }
 .t-note { position: absolute; left: 50%; bottom: 100px; transform: translateX(-50%); padding: 6px 12px; border-radius: var(--r); font-size: 13px;
   background: var(--panel); border: 1px solid var(--edge); opacity: 0; transition: opacity .3s; white-space: nowrap; }
 .t-note.show { opacity: 1; }
+/* A landscape phone has no free band at the bottom (the drive cross, power strip and pad fill it), so the hint line
+   hangs under the side view instead, clear of every control. A boss bar pushes the side view down, and the note with it. */
+@media (max-height: 520px) and (orientation: landscape) {
+  body.touch .t-note { bottom: auto; top: calc(88px + env(safe-area-inset-top)); max-width: 46vw; white-space: normal; text-align: center; line-height: 1.25; }
+  body.touch:has(#boss-bar:not(.hidden)) .t-note { top: calc(140px + env(safe-area-inset-top)); }
+  /* In the sight the side view sits at the right (196 wide, 56 in from the edge): keep the note off it. */
+  body.touch[data-view="sight"] .t-note { max-width: min(46vw, calc(100vw - 520px)); }
+}
 .t-rotate { display: none; }
 @media (orientation: portrait) and (max-width: 600px) {
   #touch .t-rotate { display: flex; position: fixed; inset: 0; z-index: 20; pointer-events: auto; flex-direction: column; align-items: center;
@@ -500,6 +510,8 @@ body.touch .gn-line { top: 30%; bottom: 40%; }
 #gunner .gn-zoom span { min-width: 34px; text-align: center; font-size: 12px; font-weight: 700; color: #ffd36a; }
 body.touch #gunner .gn-zoom { top: auto; right: auto; left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom)); }
 body.touch #gunner .gn-zoom button { width: 44px; height: 38px; }
+/* Narrow landscape: the chip lines up with the middle row, so it clears the power strip. */
+@media (max-width: 760px) { body.touch #gunner .gn-zoom { left: 236px; transform: none; } body.touch #gunner .gn-zoom button { width: 40px; } }
 .arc-peak { position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; font-size: 11px; font-weight: 600;
   padding: 1px 6px; border-radius: var(--r); background: rgba(10, 14, 20, .6); color: #fff; text-shadow: 0 1px 2px #000;
   transition: opacity .4s; }
@@ -524,7 +536,7 @@ body.touch #gunner-btn { display: none; }
 .strike-chip.queued { background: rgba(76, 199, 122, .18); border-color: rgba(76, 199, 122, .7); color: #b9f0cc; }
 .strike-chip.reload { background: rgba(140, 150, 165, .2); border-color: rgba(190, 200, 215, .5); color: #dfe6ee; }
 /* On a phone: ×2 sits just above FIRE; the pill floats over the right-hand cluster. */
-#touch .strike-btn { margin: 0; width: 84px; height: 34px; padding: 0; justify-content: center; font-size: 17px; border-radius: var(--r-lg); }
+#touch .strike-btn { margin: 0; width: 84px; height: 40px; padding: 0; justify-content: center; font-size: 17px; border-radius: var(--r-lg); }
 #touch .strike-btn.on { background: rgba(255, 181, 71, .4); border-color: var(--accent); color: #fff; }
 #touch .strike-btn.queued::after { content: '1/2'; margin-left: 6px; font-size: 11px; color: #b9f0cc; }
 #touch .strike-chip { position: absolute; right: 0; bottom: calc(100% + 8px); margin: 0; padding: 5px 10px; font-size: 13px; white-space: nowrap;
@@ -573,9 +585,15 @@ body.touch #boss-bar .bb-mark { font-size: 12px; }
   background-image: linear-gradient(90deg, #8fe39b var(--hp), transparent var(--hp)); }
 /* On a phone the buttons stack at the top of the Fire column, thumb-sized. */
 #touch .t-mods { flex-direction: column; gap: 8px; }
-#touch .mod-btn { margin: 0; width: 84px; height: 34px; padding: 0; justify-content: center; gap: 2px; font-size: 13px; border-radius: var(--r-lg); }
+#touch .mod-btn { margin: 0; width: 84px; height: 40px; padding: 0; justify-content: center; gap: 2px; font-size: 13px; border-radius: var(--r-lg); }
 #touch .mod-btn small { font-size: 10px; opacity: .8; margin-left: 2px; }
 #touch .mod-btn.on { background: rgba(255, 181, 71, .45); color: #fff; }
+/* A short landscape phone has no room for more than two of them stacked over SIGHT, the weapon and Fire (the pile
+   would run up under the gear and the players box). From three up they form a 2-wide block above the aim pad. */
+@media (max-height: 520px) and (orientation: landscape) {
+  #touch .t-mods:has(.mod-btn:not(.hidden) ~ .mod-btn:not(.hidden) ~ .mod-btn:not(.hidden)) { position: absolute; right: 96px; bottom: 154px; width: 176px;
+    flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 6px 8px; }
+}
 .shop-section { grid-column: 1 / -1; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--edge); font-size: 15px; font-weight: 800; }
 .shop-section small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 2px; }
 .shop-item.mod { border-color: rgba(157, 184, 255, .45); background: rgba(90, 110, 190, .08); }

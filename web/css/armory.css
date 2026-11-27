@@ -109,6 +109,9 @@
   .ar-results td { padding: 4px; }
   .sk-tab { min-height: 36px; padding: 4px 8px; }
   .ar-card .sk-side .desc { -webkit-line-clamp: 4; }
+  /* The armory is several screens long on a phone: Done / Go to the armory stays at the foot of the card instead of
+     being a long scroll away (the card pads 12 px, so -12 sits it flush). */
+  .ar-card #shop-done, .ar-card #draft-skip { position: sticky; bottom: -12px; z-index: 2; margin-top: 8px; box-shadow: 0 -10px 14px rgba(18, 23, 30, .96); }
 }
 /* Portrait phone: one column, so the fork takes the row */
 @media (max-width: 600px) {

@@ -36,6 +36,8 @@ const curtainFrag = /* glsl */ `
   uniform float uTime;
   uniform float uMode;
   uniform float uAlong;     // 0: the curtain runs along x, 1: along z
+  uniform float uHalf;      // the field's half-width: where a curtain ends, at a corner
+  uniform float uBase;      // the waterline (the Island's sea), or a huge negative for none
   varying vec3 vW;
   void main() {
     float s = mix(vW.x, vW.z, uAlong);
@@ -56,13 +58,24 @@ const curtainFrag = /* glsl */ `
     }
     float shimmer = 0.85 + 0.15 * sin(s * 0.37 + uTime * 5.0) * sin(y * 0.23 - uTime * 3.0);
     float fade = smoothstep(${HIGH.toFixed(1)}, ${(HIGH * 0.35).toFixed(1)}, y);
-    float a = (grid * 0.2 + 0.03) * glow * shimmer * fade;
+    float a = (grid * 0.24 + 0.04) * glow * shimmer * fade;
+    // The edge itself: a bright line up each corner and, over the Island's sea, along the waterline, so the
+    // boundary reads as a place from far off and not only as a faint grid. They keep a pixel's width at any
+    // distance (the width follows fwidth), so they do not fade out as the camera pulls back.
+    bool sea = uBase > -9000.0;
+    float lat = max(uHalf - abs(s), 0.0);
+    float post = exp(-lat / max(2.5, fwidth(s) * 1.6));
+    float band = sea ? exp(-abs(y - uBase) / max(1.6, fwidth(y) * 1.6)) : 0.0;
+    float rim = max(post * 0.85, band);
+    float rimA = rim * 0.5 * fade * (0.85 + 0.15 * sin(uTime * 2.0 + s * 0.04));
+    // ...and a low swell of colour at the foot of the wall, thinning out upwards.
+    float foot = 0.06 * smoothstep(110.0, 0.0, y - (sea ? uBase : 0.0)) * step(-0.5, y - (sea ? uBase : -1.0e4));
     if (uMode < 0.5) {
       // Wall is drawn with ordinary blending, not added light: amber added to a
       // bright sky only whitens it. The lines carry more weight to make up for it.
-      gl_FragColor = vec4(uColor * (0.82 + grid * 0.18), min(0.55, a * 1.9));
+      gl_FragColor = vec4(uColor * (0.82 + grid * 0.18 + rim * 0.25), min(0.7, a * 1.9 + rimA + foot * 1.5));
     } else {
-      gl_FragColor = vec4(uColor * (0.7 + grid * 0.6), a);
+      gl_FragColor = vec4(mix(uColor, vec3(1.0), rim * 0.25) * (0.7 + grid * 0.6 + rim * 0.9), a + rimA * 1.15 + foot);   // the edge lines run toward white so violet still shows on a blue sea
     }
   }
 `;
@@ -77,7 +90,7 @@ export class ArenaView {
     this.camDist = camDist;
     this.group = new THREE.Group();
     scene.add(this.group);
-    this.uniforms = { uColor: { value: new THREE.Color() }, uTime: { value: 0 }, uMode: { value: 0 } };
+    this.uniforms = { uColor: { value: new THREE.Color() }, uTime: { value: 0 }, uMode: { value: 0 }, uHalf: { value: 1 }, uBase: { value: -1e4 } };
     this.curtains = [];
     for (let k = 0; k < 4; k++) {
       const mat = new THREE.ShaderMaterial({
@@ -114,6 +127,7 @@ export class ArenaView {
     if (!on) return;
     this.uniforms.uColor.value.set(TINT[rule]);
     this.uniforms.uMode.value = MODE[rule];
+    this.uniforms.uHalf.value = half;
     const w = half * 2;
     const mid = (LOW + HIGH) / 2;
     // Two along x (at z = -half and +half), two along z (at x = -half and +half).
@@ -148,6 +162,7 @@ export class ArenaView {
     const rule = game ? game.edge || 'open' : 'open';
     if (rule !== this.rule || (t && t.half !== this.half)) this.setRule(rule, t ? t.half : 0);
     this.setSea(t && t.sea != null ? t.sea : null, t ? t.half : 0);
+    this.uniforms.uBase.value = t && t.sea != null ? t.sea : -1e4;
     this.uniforms.uTime.value = time;
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i];
