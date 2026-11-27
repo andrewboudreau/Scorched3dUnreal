@@ -1,10 +1,31 @@
 import * as THREE from 'three';
+import { mergeGeometries } from '../../vendor/three/addons/utils/BufferGeometryUtils.js';
 import { TANK } from '../core/tank.js';
 import { look } from './timeofday.js';
 
 const DEG = Math.PI / 180;
 const TRACK_PITCH = 0.7;      // metres of ground per repeat of the tread texture
 const TRACK_HALF = 2.2;       // the tracks sit this far either side of the centre line
+// The road wheels: [x along the hull, side 0 (left) or 1 (right)].
+const WHEELS = [0, 1].flatMap((s) => [-2, -1, 0, 1, 2].map((w) => [w * 1.4, s]));
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _p = new THREE.Vector3();
+const _s = new THREE.Vector3();
+const _one = new THREE.Vector3(1, 1, 1);
+
+// One geometry from parts that never move apart, each placed in its group's
+// space: [geometry, x, y, z, rotX, rotY, rotZ, scaleX, scaleY, scaleZ] (the
+// rotation in three's default XYZ order, as Object3D.rotation). The parts'
+// own geometries are disposed.
+export function mergeParts(parts) {
+  const geos = parts.map(([geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1]) =>
+    geo.applyMatrix4(_m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s.set(sx, sy, sz))));
+  const out = mergeGeometries(geos);
+  geos.forEach((g) => g.dispose());
+  return out;
+}
 
 // Tread plates, drawn once and scrolled by texture offset.
 let treadImage = null;
@@ -82,7 +103,12 @@ export class TankMesh {
   }
 
   // The model: sets root, hull, turret, barrelPivot, antenna, wheels (each with
-  // userData.side), treads, materials. A subclass swaps in its own.
+  // userData.side; or `wheelSet`, one InstancedMesh of them all), treads,
+  // materials. A subclass swaps in its own.
+  //
+  // The parts that never move apart are merged, one mesh per material in each
+  // group that moves on its own (hull, turret, aerial, barrel): thirteen meshes,
+  // not thirty-five, and every mesh is drawn twice (the shadow map and the view).
   build(color) {
     const base = new THREE.Color(color);
     const dark = base.clone().multiplyScalar(0.55);
@@ -97,65 +123,74 @@ export class TankMesh {
     this.root = new THREE.Group();
     this.hull = new THREE.Group();
     this.root.add(this.hull);
-    const add = (parent, geo, mat, x, y, z) => {
+    const add = (parent, geo, mat, x = 0, y = 0, z = 0) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
       parent.add(m);
       return m;
     };
     const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+    const cyl = (rt, rb, h, n) => new THREE.CylinderGeometry(rt, rb, h, n);
 
-    add(this.hull, box(6.4, 1.5, 3.8), paint, 0, 1.35, 0);
-    add(this.hull, box(1.6, 1.0, 3.6), trim, 3.2, 1.25, 0).rotation.z = -0.5;      // glacis
-    add(this.hull, box(2.2, 0.35, 3.0), trim, -1.9, 2.25, 0);                      // engine deck
-    for (let k = -1; k <= 1; k++) add(this.hull, box(0.12, 0.1, 2.6), steel, -1.9 + k * 0.55, 2.46, 0);   // grille slats
-    add(this.hull, box(0.7, 0.5, 1.5), trim, -3.35, 1.75, 0);                      // stowage box
+    // Parts: [geometry, x, y, z, rotX, rotY, rotZ, scaleX, scaleY, scaleZ].
+    const hp = [[box(6.4, 1.5, 3.8), 0, 1.35, 0]];
+    const ht = [
+      [box(1.6, 1.0, 3.6), 3.2, 1.25, 0, 0, 0, -0.5],                  // glacis
+      [box(2.2, 0.35, 3.0), -1.9, 2.25, 0],                            // engine deck
+      [box(0.7, 0.5, 1.5), -3.35, 1.75, 0],                            // stowage box
+    ];
+    const hs = [];
+    for (let k = -1; k <= 1; k++) hs.push([box(0.12, 0.1, 2.6), -1.9 + k * 0.55, 2.46, 0]);   // grille slats
+    const hl = [];
     for (const side of [-1, 1]) {
-      add(this.hull, box(7.0, 0.14, 1.3), trim, 0, 1.3, side * TRACK_HALF);          // fender
-      add(this.hull, box(0.14, 0.26, 0.4), lamp, 3.86, 1.5, side * 1.25);            // headlight
-      const pipe = add(this.hull, new THREE.CylinderGeometry(0.16, 0.16, 1.0, 6), steel, -3.3, 2.0, side * 1.25);
-      pipe.rotation.z = 0.5;
+      ht.push([box(7.0, 0.14, 1.3), 0, 1.3, side * TRACK_HALF]);         // fender
+      hl.push([box(0.14, 0.26, 0.4), 3.86, 1.5, side * 1.25]);           // headlight
+      hs.push([cyl(0.16, 0.16, 1.0, 6), -3.3, 2.0, side * 1.25, 0, 0, 0.5]);   // exhaust pipe
     }
+    add(this.hull, mergeParts(hp), paint);
+    add(this.hull, mergeParts(ht), trim);
+    add(this.hull, mergeParts(hs), steel);
+    add(this.hull, mergeParts(hl), lamp);
+    tracks.forEach((mat, s) => add(this.hull, trackGeometry(), mat, 0, 0.6, (s ? 1 : -1) * TRACK_HALF));
+    // The road wheels turn as the tracks run: one instanced mesh, posed by
+    // spinWheels. Their shadow falls inside the tracks' own, so they cast none.
     this.wheels = [];
-    tracks.forEach((mat, s) => {
-      const side = s ? 1 : -1;
-      add(this.hull, trackGeometry(), mat, 0, 0.6, side * TRACK_HALF);
-      for (let w = -2; w <= 2; w++) {
-        const wheel = add(this.hull, new THREE.CylinderGeometry(0.5, 0.5, 1.2, 6), trim, w * 1.4, 0.55, side * TRACK_HALF);
-        wheel.rotation.x = Math.PI / 2;
-        wheel.userData.side = s;
-        this.wheels.push(wheel);
-      }
-    });
+    this.wheelSet = new THREE.InstancedMesh(cyl(0.5, 0.5, 1.2, 6), trim, WHEELS.length);
+    this.hull.add(this.wheelSet);
+    this.wheelSpin = [NaN, NaN];
+    this.spinWheels([0, 0]);
 
     this.turret = new THREE.Group();
     this.turret.position.y = TANK.turretHeight;
     this.root.add(this.turret);
-    const dome = add(this.turret, new THREE.SphereGeometry(1.55, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), paint, 0, -0.35, 0);
-    dome.scale.set(1.15, 0.8, 1);
     // The dome's floor and the turret ring under it: hidden in the hull on a
     // live tank, but a turret blown off (see render/wreck.js) shows its underside.
-    add(dome, new THREE.CircleGeometry(1.55, 14), trim, 0, 0, 0).rotation.x = Math.PI / 2;
-    add(this.turret, new THREE.CylinderGeometry(1.3, 1.4, 0.4, 14), steel, 0, -0.5, 0);
-    add(this.turret, new THREE.CylinderGeometry(0.42, 0.48, 0.22, 8), trim, -0.45, 0.9, 0.5);    // hatch
-    add(this.turret, box(1.1, 0.6, 1.3), trim, -1.75, 0.05, 0);                                  // bustle
-    add(this.turret, box(0.5, 0.7, 0.9), trim, 1.25, 0.05, 0);                                   // mantlet
+    const floor = new THREE.CircleGeometry(1.55, 14);
+    floor.rotateX(Math.PI / 2);
+    add(this.turret, mergeParts([[new THREE.SphereGeometry(1.55, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), 0, -0.35, 0, 0, 0, 0, 1.15, 0.8, 1]]), paint);
+    add(this.turret, mergeParts([
+      [floor, 0, -0.35, 0, 0, 0, 0, 1.15, 0.8, 1],
+      [cyl(0.42, 0.48, 0.22, 8), -0.45, 0.9, 0.5],                     // hatch
+      [box(1.1, 0.6, 1.3), -1.75, 0.05, 0],                            // bustle
+      [box(0.5, 0.7, 0.9), 1.25, 0.05, 0],                             // mantlet
+    ]), trim);
+    add(this.turret, cyl(1.3, 1.4, 0.4, 14), steel, 0, -0.5, 0);
 
     // A whip aerial that leans with every knock.
     this.antenna = new THREE.Group();
     this.antenna.position.set(-1.3, 0.5, -0.8);
     this.turret.add(this.antenna);
-    add(this.antenna, new THREE.CylinderGeometry(0.025, 0.05, 3.4, 4), steel, 0, 1.7, 0);
+    add(this.antenna, cyl(0.025, 0.05, 3.4, 4), steel, 0, 1.7, 0);
     add(this.antenna, box(0.5, 0.26, 0.03), paint, 0.27, 3.2, 0);                                // pennant
 
     this.barrelPivot = new THREE.Group();
     this.turret.add(this.barrelPivot);
-    const barrel = add(this.barrelPivot, new THREE.CylinderGeometry(0.22, 0.28, TANK.barrelLength, 10), trim, TANK.barrelLength / 2, 0, 0);
-    barrel.rotation.z = -Math.PI / 2;
-    const brake = add(this.barrelPivot, new THREE.CylinderGeometry(0.36, 0.36, 0.6, 10), trim, TANK.barrelLength - 0.3, 0, 0);
-    brake.rotation.z = -Math.PI / 2;
+    add(this.barrelPivot, mergeParts([
+      [cyl(0.22, 0.28, TANK.barrelLength, 10), TANK.barrelLength / 2, 0, 0, 0, 0, -Math.PI / 2],
+      [cyl(0.36, 0.36, 0.6, 10), TANK.barrelLength - 0.3, 0, 0, 0, 0, -Math.PI / 2],   // muzzle brake
+    ]), trim);
 
-    this.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.root.traverse((o) => { if (o.isMesh) { o.castShadow = o !== this.wheelSet; o.receiveShadow = true; } });
 
     // After dark (Dusk, Night) the headlights shine: brighter lamps and a soft
     // additive glow on each, no real lights.
@@ -193,7 +228,8 @@ export class TankMesh {
       this.treads[s].offset.x -= d / TRACK_PITCH / 10;
       this.spin[s] -= d / 0.5;
     });
-    for (const w of this.wheels) w.rotation.y = this.spin[w.userData.side];
+    if (this.wheelSet) this.spinWheels(this.spin);
+    else for (const w of this.wheels) w.rotation.y = this.spin[w.userData.side];
     const speed = dt > 0 ? (Math.abs(run[0]) + Math.abs(run[1])) / 2 / dt : 0;
     this.work += (Math.min(1, speed / TANK.driveSpeed) - this.work) * Math.min(1, dt * 6);
 
@@ -224,6 +260,20 @@ export class TankMesh {
     this.antenna.rotation.x = this.sway[1] + Math.sin(this.time * 2.3 + 1) * 0.02;
   }
 
+  // Pose the instanced road wheels: each turns about its own axle by its
+  // side's angle. Rewritten only when a side has turned.
+  spinWheels(spin) {
+    if (spin[0] === this.wheelSpin[0] && spin[1] === this.wheelSpin[1]) return;
+    this.wheelSpin[0] = spin[0];
+    this.wheelSpin[1] = spin[1];
+    for (let i = 0; i < WHEELS.length; i++) {
+      const [x, s] = WHEELS[i];
+      _m.compose(_p.set(x, 0.55, (s ? 1 : -1) * TRACK_HALF), _q.setFromEuler(_e.set(Math.PI / 2, spin[s], 0)), _one);
+      this.wheelSet.setMatrixAt(i, _m);
+    }
+    this.wheelSet.instanceMatrix.needsUpdate = true;
+  }
+
   kick() { this.recoil = 1; }
 
   // World position of the exhaust pipes, for smoke.
@@ -232,7 +282,7 @@ export class TankMesh {
   }
 
   dispose() {
-    this.root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+    this.root.traverse((o) => { if (o.isMesh) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); });
     this.materials.forEach((m) => m.dispose());
     this.treads.forEach((t) => t.dispose());
   }
