@@ -6,7 +6,7 @@ import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
-import { PERK_BY_ID, perkSum } from './core/perks.js';
+import { perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
@@ -37,7 +37,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
-import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
+import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml } from './armory.js';
 import { MOD_BY_ID, modPos } from './core/mods.js';
 import { cuesFor } from './sfxmap.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
@@ -46,11 +46,13 @@ import { BossUI } from './bossui.js';
 import { BossMarkView } from './render/bossMark.js';
 import { bossMatch, fortSpots, ARENA } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
-import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
+import { MatchBuilder, matchConditions, matchTime, parseTestParams } from './builder.js';
 import { CameraRig } from './camera.js';
 import { RunUI } from './runui.js';
 import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
+import { Hud } from './hud.js';
+import { escapeHtml, whose, ownedWeapons } from './hudlogic.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -138,8 +140,6 @@ let day = 0;                    // 0 late morning .. 1 late afternoon, eased tow
 let dayLock = null;             // debug: hold the sun still at this time of day
 let fortView = null;
 let hintGame = null;            // the game whose first-turn hints have been decided
-let bannerHold = 0;            // a round banner keeps the turn banner waiting until then
-let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
 const arenaView = new ArenaView(scene, { effects, sound, camDist });
@@ -308,14 +308,13 @@ function startMatch(config) {
     return el;
   });
   rig.modes.endLook();
-  buildScoreboard();
-  $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
+  hud.start(game);
   // The boss's fort: coloured ground (before the round builds) and rim props, drawn only.
   if (game.cfg.boss) terrainMesh.setFort(fortSpots(ARENA.boss[0] * game.terrain.half, ARENA.boss[1] * game.terrain.half), ARENA.fort.skirt);
   game.start();
   handleEvents();      // builds the round (terrain, scenery, water) so the warm-up sees it
   if (game.fort) scene.add((fortView = new FortView(game)).group);
-  showHud(true);
+  hud.show(true);
   warmShaders();
 }
 
@@ -327,13 +326,8 @@ function warmShaders() {
 
 // ---------------------------------------------------------------- events
 
-function banner(text, sub = '', ms = 1600) {
-  const b = $('banner');
-  b.innerHTML = `${escapeHtml(text)}${sub ? `<small>${escapeHtml(sub)}</small>` : ''}`;
-  b.classList.add('show');
-  clearTimeout(banner.t);
-  banner.t = setTimeout(() => b.classList.remove('show'), ms);
-}
+// The big line in the middle (hud.js).
+function banner(text, sub, ms) { hud.banner(text, sub, ms); }
 
 function addShake(pos, power) {
   rig.shake(pos, power);
@@ -372,12 +366,7 @@ function handleEvents() {
         napalmView.clear();
         day = (e.round - 1) / game.cfg.rounds;
         birds.reset(game.terrain, e.round * 7 + game.players.length);
-        if (game.modifier.id === 'clear' && e.round === 1) banner('Round 1', `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}`, 3200);
-        else if (game.modifier.id === 'clear') banner(`Round ${e.round}`, `of ${game.cfg.rounds} · ${conditionsLabel(game.cfg, game.edge)}`, 1800);
-        else {
-          banner(`Round ${e.round}: ${game.modifier.name}`, e.round === 1 ? `${game.modifier.desc} ${conditionsLabel(game.cfg, game.edge)} · Your kit: ${kitWords({ online: game.online })}` : [game.modifier.desc, edgeLabel(game.edge)].filter(Boolean).join(' · '), e.round === 1 ? 3600 : 3000);
-          bannerHold = performance.now() + 2800;
-        }
+        hud.roundStart(game, e.round);
         break;
       case 'terrain':
         if (e.full) {
@@ -401,18 +390,15 @@ function handleEvents() {
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         // On a phone the "tap Lock in" line is taught the first few turns, then the banner is just the title (hints.js).
         const coach = !(touch && e.plan && !p.ai) || useHint('lockin', 6);
-        const [title, sub] = !e.plan ? [whose(p, 'turn'), p.ai ? `CPU · ${p.ai}` : 'Aim and fire']
-          : p.ai ? [`${p.name} is on the move`, `CPU · ${p.ai}`] : [whose(p, 'shot'), touch ? (coach ? 'Plan it, then tap Lock in' : '') : 'Plan it, then Space to lock it in'];
         if (e.plan && !p.ai && game.localHumans.filter((h) => h.alive).length > 1) { openHandoff(p); break; }
-        setTimeout(() => { if (game && game.turn === p.id && game.phase === 'aim') banner(title, sub, e.plan && !p.ai ? (coach ? 1700 : 1000) : 1100); },
-          Math.max(50, bannerHold - performance.now()));
+        hud.turn(p, { plan: e.plan, coach });   // once the round's banner has been read
         // The first turn of a match: the pad's "drag" line and the SIGHT note show only the first few matches (hints.js).
         if (touch && !p.ai && !p.shots.length && game.round === 1 && hintGame !== game) {
           hintGame = game;
           touch.setPadHelp(useHint('pad', 5));
           if (useHint('sight', 3)) {
             setTimeout(() => { if (game?.current === p && game.phase === 'aim') touch.note('SIGHT looks down your barrel; drag there to aim', 4500); },
-              Math.max(50, bannerHold - performance.now()) + 1800);
+              hud.holdLeft() + 1800);
           }
         }
         break;
@@ -430,7 +416,7 @@ function handleEvents() {
         break;
       }
       case 'aimReset':
-        if (game.current?.id === e.player) driveNote = { text: 'Moved: last aim cleared', until: performance.now() + 1800 };
+        if (game.current?.id === e.player) hud.note('Moved: last aim cleared', 1800);
         break;
       case 'jump':
         startHop(e);
@@ -613,7 +599,7 @@ function doJump() {
   if (!p || p.ai || game.phase !== 'aim' || hops.has(p.id)) return;
   const r = game.jump();
   const why = r === 'edge' && game.isles ? 'No ground to land on' : JUMP_NOTES[r];
-  if (why) driveNote = { text: why, until: performance.now() + 1400 };
+  if (why) hud.note(why, 1400);
 }
 
 function startHop(e) {
@@ -976,10 +962,8 @@ function updateRangeCard() {
 // On a shared screen they all answer the same keys; with one human, only yours.
 let steerFuel = -1;                 // the most guidance fuel left on a local guided missile, -1 for none
 const steerTouch = new Map();       // pointer id -> -1 | 1, fingers steering
-let steerTipUntil = 0;
 function applySteering() {
-  const hint = $('steer-hint');
-  if (!game || game.phase !== 'flight') { hint.classList.add('hidden'); steerFuel = -1; steerTouch.clear(); return; }
+  if (!game || game.phase !== 'flight') { hud.steer(null); steerFuel = -1; steerTouch.clear(); return; }
   let finger = 0;
   for (const d of steerTouch.values()) finger += d;
   const dir = Math.sign((held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0) + finger);
@@ -988,17 +972,8 @@ function applySteering() {
     game.steer(p.id, dir);
     for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) { fuel = Math.max(fuel, pr.steer.fuel); jam ||= !!pr.steer.jammed; }
   }
-  if (jam !== hint.classList.contains('jammed')) { hint.classList.toggle('jammed', jam); hint.querySelector('.sh-title').textContent = jam ? 'Jammed' : 'Guidance'; }
-  if (fuel >= 0 && steerFuel < 0) steerTipUntil = performance.now() + 1800;   // a new missile: say how, briefly
   steerFuel = fuel;
-  hint.classList.toggle('hidden', fuel < 0);
-  if (fuel >= 0) {
-    $('steer-fuel').style.width = `${(fuel / WEAPON_BY_ID.guided.flight[0].fuel) * 100}%`;
-    hint.classList.toggle('empty', fuel <= 0);
-    hint.classList.toggle('tip', performance.now() < steerTipUntil);
-    hint.classList.toggle('l', fuel > 0 && dir < 0);
-    hint.classList.toggle('r', fuel > 0 && dir > 0);
-  }
+  hud.steer({ fuel, jam, dir });   // the hint (hud.js)
 }
 // Caught before the camera's own handlers, so a steering finger does not also orbit.
 window.addEventListener('pointerdown', (e) => {
@@ -1196,12 +1171,11 @@ window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
 const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), weaponBar: $('weapon-bar'), online: () => !!session }) : null;
 if (touch) {
-  // The left column is full on a phone, so the players box sits top right.
-  $('hud').appendChild($('scoreboard'));
   // No keyboard here: the hints say what to tap instead.
-  $('steer-hint').querySelector('.sh-tip').textContent = 'hold left or right to steer';
   $('chat-input').placeholder = 'Say something';
 }
+// The player card, the players box, the banner and the steering hint (src/hud.js).
+const hud = new Hud({ game: () => game, touch, peekAt: (p) => rig.peekAt(p) });
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
@@ -1250,28 +1224,14 @@ settings.toggle({ id: 'sideview', group: 'look', label: 'Side view', hint: 'the 
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
-const ownedWeapons = (p) => WEAPONS.filter((w) => !w.hidden && game.ammoLeft(p, w.id) > 0);
-const ammoText = (n) => (n === Infinity ? '∞' : `×${n}`);
 
 function selectWeaponSlot(i) {
   const p = game.current;
   if (!p || p.ai || game.phase !== 'aim' || handoffOpen) return;
-  const list = ownedWeapons(p);
+  const list = ownedWeapons(game, p);
   if (list[i]) { p.weapon = list[i].id; sound.click(); }
 }
 
-// The row of weapons the current tank carries. Rebuilt only when it changes.
-let weaponBarKey = '';
-function updateWeaponBar(p) {
-  const list = ownedWeapons(p);
-  const key = `${p.id}|${p.weapon}|${p.perks.length}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${game.ammoLeft(p, w.id)}`).join(',')}`;
-  if (key === weaponBarKey) return;
-  weaponBarKey = key;
-  $('weapon-bar').innerHTML = list.map((w, i) => `
-    <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(game.weaponOf(p, w.id).desc)}" ${p.ai ? 'disabled' : ''}>
-      <span class="wb-key">${i + 1}</span>${escapeHtml(game.weaponName(p, w.id))}<span class="wb-n">${ammoText(game.ammoLeft(p, w.id))}</span>
-    </button>`).join('');
-}
 $('weapon-bar').addEventListener('click', (e) => {
   const b = e.target.closest('.wb-item');
   if (b && game) selectWeaponSlot(Number(b.dataset.i));
@@ -1303,7 +1263,7 @@ function applyHeldKeys(dt) {
     rig.driveBack(game.current);   // driving with the camera far away (or zoomed right out) brings it back
     const r = game.drive(go, turn, dt);
     const why = r === 'edge' && game.isles ? 'Edge of the isle' : DRIVE_NOTES[r];
-    if (why) driveNote = { text: why, until: performance.now() + 1200 };
+    if (why) hud.note(why, 1200);
   }
 }
 
@@ -1386,116 +1346,6 @@ function soundScape(dt) {
 }
 
 // ---------------------------------------------------------------- HUD
-
-function showHud(on) { $('hud').classList.toggle('hidden', !on); }
-
-const sbRows = new Map();       // player id -> the scoreboard row and the bits of it that change
-function buildScoreboard() {
-  $('scoreboard').innerHTML = game.players.map((p) => `
-    <div class="sb-row" id="sb-${p.id}" data-id="${p.id}" title="Click to look at ${escapeHtml(p.name)}">
-      <span class="swatch" style="background:${p.color}"></span>
-      <span style="width:74px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(p.name)}</span>
-      <div class="bar"><div class="fill hp"></div></div>
-      <span class="wins"></span>
-      <div class="sb-perks"></div>
-    </div>`).join('');
-  sbRows.clear();
-  $('scoreboard').querySelectorAll('.sb-row').forEach((row) => {
-    row.onclick = () => game && rig.peekAt(game.players[Number(row.dataset.id)]);
-    sbRows.set(Number(row.dataset.id), { row, fill: row.querySelector('.fill'), wins: row.querySelector('.wins'), perks: row.querySelector('.sb-perks') });
-  });
-}
-
-const perkChip = (id, long) => `<span class="perk" title="${escapeHtml(PERK_BY_ID[id].desc)}">${long ? PERK_BY_ID[id].name : PERK_BY_ID[id].tag}</span>`;
-function setPerks(el, p, long) {
-  const key = p.id + p.perks.join();
-  if (el.dataset.key === key) return;
-  el.dataset.key = key;
-  el.innerHTML = [...new Set(p.perks)].map((id) => perkChip(id, long)).join('');   // a stacked perk shows once
-}
-
-// The HUD's fixed elements, looked up once.
-let hudEls = null;
-const HUD_IDS = ['pc-swatch', 'pc-name', 'pc-tag', 'pc-hp', 'pc-armor', 'pc-money', 'pc-fuel', 'ro-fuel', 'pc-note', 'pc-perks', 'ro-yaw', 'ro-elev',
-  'ro-power', 'ro-jets', 'pc-power', 'last-yaw', 'last-elev', 'last-power', 'ro-weapon', 'ro-ammo', 'wind-arrow', 'wind-speed', 'wind-aim', 'round-label', 'round-mod', 'round-desc'];
-
-function updateHud() {
-  if (!hudEls) { hudEls = {}; for (const id of HUD_IDS) hudEls[id] = $(id); }
-  const E = hudEls;
-  const p = game.current || game.players[game.lastShooter ?? 0];
-  if (game.current) game.lastShooter = game.current.id;
-  if (p) {
-    setStyle(E['pc-swatch'], 'background', p.color);
-    setText(E['pc-name'], p.name);
-    setText(E['pc-tag'], p.ai ? `CPU ${p.ai}` : 'Human');
-    setStyle(E['pc-hp'], 'width', `${(p.hp / p.maxHp) * 100}%`);
-    setStyle(E['pc-armor'], 'width', `${Math.min(100, p.armor * 3.3)}%`);
-    setText(E['pc-money'], String(p.money));
-    setStyle(E['pc-fuel'], 'width', `${p.fuelMax ? (p.fuel / p.fuelMax) * 100 : 0}%`);
-    setText(E['ro-fuel'], `${Math.floor(p.fuel + 0.05)} m`);
-    setText(E['ro-jets'], `${p.jets > 0 ? 'J ' : ''}×${p.jets}`);
-    if (E['ro-jets'].classList.contains('none') !== !(p.jets > 0)) E['ro-jets'].classList.toggle('none', !(p.jets > 0));
-    const noting = performance.now() < driveNote.until && game.phase === 'aim' && !p.ai;
-    setText(E['pc-note'], noting ? driveNote.text : p.buried && !p.ai ? 'Buried: your next shot digs you out' : '');
-    setPerks(E['pc-perks'], p, true);
-    setText(E['ro-yaw'], `${p.yaw.toFixed(1)}°`);
-    setText(E['ro-elev'], `${p.elev.toFixed(1)}°`);
-    setText(E['ro-power'], p.power.toFixed(1));
-    setStyle(E['pc-power'], 'width', `${((p.power - TANK.minPower) / (TANK.maxPower - TANK.minPower)) * 100}%`);
-    // Under each: what the last shot used, and how far the aim is from it now.
-    const last = p.ai ? null : p.shots[p.shots.length - 1];
-    const was = (el, then, now, unit, wrap) => {
-      let text = p.ai ? '' : '—';
-      if (last) {
-        const d = wrap ? ((now - then + 540) % 360) - 180 : now - then;
-        const delta = Math.abs(d) < 0.05 ? 'same' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`;
-        text = `last ${then.toFixed(1)}${unit}<b>${delta}</b>`;
-      }
-      if (el.dataset.t !== text) { el.dataset.t = text; el.innerHTML = text; }
-    };
-    was(E['last-yaw'], last?.yaw, p.yaw, '°', true);
-    was(E['last-elev'], last?.elev, p.elev, '°', false);
-    was(E['last-power'], last?.power, p.power, '', false);
-    const w = WEAPON_BY_ID[p.weapon];
-    setText(E['ro-weapon'], game.weaponName(p, w.id));
-    setText(E['ro-ammo'], ammoText(p.inventory[w.id]));
-    updateWeaponBar(p);
-  }
-  // Wind, drawn from behind the turret of the tank on the card (up is the way
-  // it aims, so the arrow holds still while the camera orbits), and split into
-  // what it does to that shot: sideways, and longer or shorter.
-  const [wx, wz] = game.wind;
-  const mag = Math.hypot(wx, wz);
-  const wp = game.current || game.localHumans?.[0] || game.players[0];
-  const yaw = (wp ? wp.yaw : 0) * DEG;
-  const along = (wx * Math.cos(yaw) + wz * Math.sin(yaw)) * 10;
-  const side = (-wx * Math.sin(yaw) + wz * Math.cos(yaw)) * 10;
-  const rel = Math.atan2(side, along);
-  const arrow = `rotate(${Math.round((rel / DEG - 90) * 2) / 2}deg)`;
-  setStyle(E['wind-arrow'], 'transform', arrow);
-  setStyle(E['wind-arrow'], 'opacity', mag < 0.05 ? 0.2 : 1);
-  setText(E['wind-speed'], mag < 0.05 ? 'calm' : (mag * 10).toFixed(0));
-  const parts = [];
-  if (Math.abs(side) >= 0.5) parts.push(`${Math.abs(side).toFixed(0)} ${side > 0 ? 'right' : 'left'}`);
-  if (Math.abs(along) >= 0.5) parts.push(`${Math.abs(along).toFixed(0)} ${along > 0 ? 'longer' : 'shorter'}`);
-  const aimText = mag < 0.05 ? '' : parts.join(' · ');
-  setText(E['wind-aim'], aimText);
-  for (const q of game.players) {
-    const ref = sbRows.get(q.id);
-    if (!ref) continue;
-    const alive = q.alive, active = game.current === q;
-    if (ref.alive !== alive) { ref.alive = alive; ref.row.classList.toggle('dead', !alive); }
-    if (ref.active !== active) { ref.active = active; ref.row.classList.toggle('active', active); }
-    setStyle(ref.fill, 'width', `${(q.hp / q.maxHp) * 100}%`);
-    setText(ref.wins, '★'.repeat(Math.min(q.wins, 3)) + (q.wins > 3 ? q.wins : ''));
-    setPerks(ref.perks, q, false);
-  }
-  const mod = game.modifier;
-  // The round and its modifier head the card.
-  setText(E['round-label'], `Round ${game.round} / ${game.cfg.rounds}`);
-  setText(E['round-mod'], mod.id === 'clear' ? '' : mod.name);
-  setText(E['round-desc'], mod.id === 'clear' ? '' : mod.desc);
-}
 
 let labelModeWas = '';
 let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
@@ -1619,10 +1469,6 @@ function scoutPulse(e) {
 }
 
 // ---------------------------------------------------------------- screens
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 const setupRows = [
   { name: profile.name || 'You', type: 'human' },
@@ -1789,7 +1635,6 @@ $('ro-continue').onclick = () => {
   if (game.phase === 'shop') nextShopper();
 };
 
-const whose = (p, thing) => (/^you$/i.test(p.name.trim()) ? `Your ${thing}` : `${p.name}'s ${thing}`);
 const hotseatStep = (p, doing) => {
   const humans = game.localHumans;
   return humans.length > 1 ? `Player ${humans.indexOf(p) + 1} of ${humans.length} · ${doing}` : doing;
@@ -1889,7 +1734,7 @@ function openShopFor(pid) {
 function toMenuScene() {
   leaveRoom();
   closeHandoff();
-  showHud(false);
+  hud.show(false);
   disposeMatch();
   game = null;
   rig.cutKill();
@@ -2295,7 +2140,7 @@ function tick(dt, draw = true) {
     cityView?.update(sdt);
     napalmView.update(sdt, game);
     arenaView.update(game, elapsed, dt);
-    updateHud();
+    hud.update(game);
     strikeUi.update();
     bossUi.update();
     bossMark.update(game, elapsed);
