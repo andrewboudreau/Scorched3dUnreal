@@ -117,7 +117,7 @@ function forkHtml(b, can) {
   return `<div class="shop-item draft-item sk-branch sk-weapon sk-fork">
     <div class="si-head"><b>${esc(b.name)}</b><span class="ar-badge">Pick one</span></div>
     <div class="sk-sides">${b.options.map(side).join('<span class="sk-or">or</span>')}</div>
-    <div class="si-foot"><span class="si-gives">Then: ${esc(up.name)}</span><span class="sk-note">The other shuts for the match</span></div>
+    <div class="si-foot"><span class="si-gives">Then: ${esc(up.name)}</span><span class="sk-note">The other closes (a run's Depot can swap)</span></div>
   </div>`;
 }
 
