@@ -66,6 +66,23 @@ export function weaponRows(weapons) {
   return rows;
 }
 
+// Weapon variants (weapons.js `variants`): for each weapon that has them, its
+// two sides of the fork and the rank 2 upgrade, one line each.
+export function variantRows(weapons) {
+  const rows = [];
+  for (const w of isList(weapons)) {
+    if (!named(w) || w.hidden || !Array.isArray(w.variants) || !w.variants.length) continue;
+    const names = w.variants.filter(named).map((v) => v.name);
+    for (const v of w.variants) {
+      if (!named(v)) continue;
+      const other = names.filter((n) => n !== v.name);
+      rows.push({ name: `${w.name} · ${v.name}`, meta: other.length ? `or ${other.join(' or ')}` : '', text: firstSentence(v.desc, 160) });
+    }
+    if (named(w.upgrade)) rows.push({ name: `${w.name}: ${w.upgrade.name}`, meta: 'rank 2, either side', text: firstSentence(w.upgrade.desc, 160) });
+  }
+  return rows;
+}
+
 // Armory gear that is not a weapon (armor, fuel, jump jets).
 export const itemRows = (items) => weaponRows(items);
 
@@ -184,7 +201,7 @@ const TOUCH = [
 
 export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) {
   const P = { perDamage: 2, kill: 150, survive: 80, roundWin: 300, stipend: 150, ...(pay || {}) };
-  const weaponList = weaponRows(weapons), itemList = itemRows(items);
+  const weaponList = weaponRows(weapons), itemList = itemRows(items), variantList = variantRows(weapons);
   const modList = modRows(mods), perkList = perkRows(perks);
   const tabs = [];
 
@@ -201,7 +218,7 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
     { h: 'Damage' },
     { p: 'A blast hurts more the nearer it lands, and a direct hit most. Armor soaks damage before hit points. Blasts also dig the ground out from under tanks and buildings.' },
     { h: 'Rounds and money' },
-    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you get a skill point to spend in the skill tree, then shop in the armory: points buy perks and mods, money buys weapons and gear. Perks last the whole match; a deployed mod lasts until it is shot down or wears out.` },
+    { p: `A match is a few rounds; the last tank standing wins the round. You earn $${P.perDamage} a point of damage, $${P.kill} a kill, $${P.survive} for surviving and $${P.roundWin} for the round win, plus a $${P.stipend} stipend every round. Between rounds you get a skill point to spend in the skill tree, then shop in the armory: points buy perks, mods and weapon variants, money buys weapons and gear. Perks last the whole match; a deployed mod lasts until it is shot down or wears out.` },
   ] });
 
   tabs.push({ id: 'controls', title: 'Controls', blocks: [
@@ -214,6 +231,11 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
   tabs.push({ id: 'weapons', title: 'Weapons', blocks: [
     { p: 'Shells are free and unlimited; the rest come from the armory between rounds.' },
     weaponList.length ? { rows: weaponList } : { p: 'No weapons to list.' },
+    ...(variantList.length ? [
+      { h: 'Variants' },
+      { p: 'Some weapons fork in the skill tree (its **Weapons** tab). Rank 1 makes yours one of two variants for the match, and the other is shut; rank 2 upgrades whichever you took. A variant is a trade, not a straight upgrade, and the armory sells it at the same price.' },
+      { rows: variantList },
+    ] : []),
     ...(itemList.length ? [{ h: 'Also in the armory' }, { rows: itemList }] : []),
   ] });
 

@@ -6,7 +6,7 @@ import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
-import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact } from './core/ballistics.js';
+import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact, burstNow } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
@@ -35,7 +35,7 @@ import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
-import { stepperHtml, resultsHtml, skillTreeHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
+import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
 import { MOD_BY_ID } from './core/mods.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
@@ -512,6 +512,7 @@ function handleEvents() {
         sound.thud(camDist(e.pos));
         break;
       case 'rollStart':
+      case 'hop':   // the Hopper kicks off a bump (and lands again as a rollStart)
         // The shell is on the ground now; its visual keeps following it.
         effects.dust(e.pos, 4);
         sound.thud(camDist(e.pos));
@@ -905,7 +906,7 @@ function updateRangeCard() {
   const ax = rangeAxes(a.yaw);
   const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
   const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
-  const w = WEAPON_BY_ID[me.weapon];
+  const w = game.weaponOf(me, me.weapon);
   const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
 
   // ---- plot
@@ -1053,7 +1054,8 @@ let timeScale = 1;
 const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
 
 // Where a projectile comes down within `horizon` seconds if nothing changes.
-function forecast(pr, horizon) {
+// `burst`: the Airburst's height, where it goes off over the ground (ballistics.burstNow).
+function forecast(pr, horizon, burst = 0) {
   const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag, edge: pr.edge };
   const t = game.terrain;
   const step = 1 / 30;
@@ -1061,6 +1063,7 @@ function forecast(pr, horizon) {
     stepProjectile(c, game.wind, step);
     if (c.crossed?.kind === 'wall') return { t: s, pos: c.crossed.point, direct: null };
     if (!t.inBounds(c.pos[0], c.pos[2])) return null;
+    if (burst && burstNow(c, t, burst)) return { t: s, pos: [...c.pos], direct: null };
     for (const p of game.players) {
       if (!p.alive || (p.id === pr.owner && pr.time + s < 0.5)) continue;   // the shooter's grace, as in the game
       const h = hitSphere(p);
@@ -1080,17 +1083,17 @@ function decidingShot() {
   let pick = null;
   for (const pr of game.projectiles) {
     if (pr.dead || pr.probe || pr.roller) continue;
-    const w = WEAPON_BY_ID[pr.weapon];
+    const w = game.weaponOf(pr.owner, pr.weapon);
     const blast = w.impact?.find((i) => i.type === 'blast');
     if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split' || f.type === 'airburst'))) continue;
-    const hit = forecast(pr, KILLCAM.lead);
+    const hit = forecast(pr, KILLCAM.lead, game.burstHeight(pr.owner, pr.weapon));
     if (!hit) continue;
     const o = game.players[pr.owner];
     const radius = blast.radius * (1 + perkSum(o, 'blastRadius'));
     const damage = blast.damage * (1 + perkSum(o, 'blastDamage'));
     for (const p of alive) {
       const h = hitSphere(p);
-      const d = p === hit.direct ? 0 : Math.max(0, Math.hypot(h.x - hit.pos[0], h.y - hit.pos[1], h.z - hit.pos[2]) - TANK.hitRadius * 0.5);
+      const d = p === hit.direct ? 0 : Math.max(0, Math.hypot(h.x - hit.pos[0], blast.flat ? 0 : h.y - hit.pos[1], h.z - hit.pos[2]) - TANK.hitRadius * 0.5);
       if (blastDamage(d, radius, damage) < p.hp + p.armor) continue;
       dying.add(p.id);
       if (!pick || hit.t < pick.t) pick = { id: pr.id, victim: p.id, t: hit.t, from: pr.owner };
@@ -1550,12 +1553,12 @@ function selectWeaponSlot(i) {
 let weaponBarKey = '';
 function updateWeaponBar(p) {
   const list = ownedWeapons(p);
-  const key = `${p.id}|${p.weapon}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${game.ammoLeft(p, w.id)}`).join(',')}`;
+  const key = `${p.id}|${p.weapon}|${p.perks.length}|${p.ai ? 1 : 0}|${list.map((w) => `${w.id}${game.ammoLeft(p, w.id)}`).join(',')}`;
   if (key === weaponBarKey) return;
   weaponBarKey = key;
   $('weapon-bar').innerHTML = list.map((w, i) => `
-    <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(w.desc)}" ${p.ai ? 'disabled' : ''}>
-      <span class="wb-key">${i + 1}</span>${w.name}<span class="wb-n">${ammoText(game.ammoLeft(p, w.id))}</span>
+    <button class="wb-item${w.id === p.weapon ? ' on' : ''}" data-i="${i}" title="${escapeHtml(game.weaponOf(p, w.id).desc)}" ${p.ai ? 'disabled' : ''}>
+      <span class="wb-key">${i + 1}</span>${escapeHtml(game.weaponName(p, w.id))}<span class="wb-n">${ammoText(game.ammoLeft(p, w.id))}</span>
     </button>`).join('');
 }
 $('weapon-bar').addEventListener('click', (e) => {
@@ -1742,7 +1745,7 @@ function updateHud() {
     was(E['last-elev'], last?.elev, p.elev, '°', false);
     was(E['last-power'], last?.power, p.power, '', false);
     const w = WEAPON_BY_ID[p.weapon];
-    setText(E['ro-weapon'], w.name);
+    setText(E['ro-weapon'], game.weaponName(p, w.id));
     setText(E['ro-ammo'], ammoText(p.inventory[w.id]));
     updateWeaponBar(p);
   }
@@ -2096,15 +2099,17 @@ function nextShopper() {
 }
 
 // The skill tree (src/armory.js skillTreeHtml): spend skill points on the
-// next rank of any branch, or save them; then the armory.
+// next rank of any branch, or save them; then the armory. Its tabs (Weapons,
+// Mods, Tank) sit at the top of the grid.
 function openDraftFor(pid) {
   const p = game.players[pid];
   const toShop = () => { $('draft').classList.add('hidden'); openShopFor(pid); };
+  let tab = skillTabs(game, p)[0]?.id || null;
   const render = () => {
     const n = p.points;
     $('draft-step').textContent = hotseatStep(p, n > 1 ? `${n} skill points to spend` : n ? '1 skill point to spend' : 'all points spent');
     $('draft-owned').innerHTML = kitHtml(game, p);
-    $('draft-items').innerHTML = skillTreeHtml(game, p);
+    $('draft-items').innerHTML = skillTabsHtml(game, p, tab) + skillTreeHtml(game, p, tab);
     $('draft-skip').textContent = n ? `Save ${n > 1 ? 'them' : 'it'} · go to the armory` : 'Go to the armory';
   };
   $('draft').classList.remove('hidden');
@@ -2114,6 +2119,8 @@ function openDraftFor(pid) {
   $('draft-steps').innerHTML = stepperHtml('draft', { round: game.round });
   render();
   $('draft-items').onclick = (e) => {
+    const t = e.target.closest('button.sk-tab');
+    if (t) { tab = t.dataset.tab; sound.click(); render(); return; }
     const b = e.target.closest('button.buy');
     if (!b || b.disabled || !game.pickPerk(pid, b.dataset.id)) return;
     sound.click();
@@ -2277,7 +2284,7 @@ function updateNetClock() {
   if (!(left <= 0)) return;
   clockKey = `${key} out`;          // once
   if (key.startsWith('aim')) { game.fire(true); return; }
-  if (!$('draft').classList.contains('hidden')) $('draft-items').querySelector('button')?.click();
+  if (!$('draft').classList.contains('hidden')) $('draft-items').querySelector('button.buy')?.click();
   if (!$('shop').classList.contains('hidden')) $('shop-done').click();
 }
 

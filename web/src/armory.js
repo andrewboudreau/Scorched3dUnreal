@@ -10,6 +10,7 @@
 
 import { WEAPONS, WEAPON_BY_ID, ITEMS, TIERS, startKit } from './core/weapons.js';
 import { PERK_BY_ID } from './core/perks.js';
+import { SKILL_TABS, tabOf } from './core/skills.js';
 import { MODS, MOD_BY_ID, MOD_BAYS } from './core/mods.js';
 import { EARNINGS } from './core/game.js';
 import { TANK } from './core/tank.js';
@@ -72,13 +73,16 @@ export function rankText(b, i) {
 
 // The tree as cards, one a branch: its ranks as a path (held ones lit), the
 // next rank and what it does, and a button (or why it is shut, or Complete).
-// Mod branches first, then the perk branches; a branch `p` has started sorts
-// ahead of the rest in each group.
-export function skillTreeHtml(game, p) {
-  const tree = game.skillTree(p);
-  const order = (b) => (b.mod ? 0 : 2) - (b.held > 0 ? 1 : 0);
+// Weapon branches first, then mods, then the perk branches; a branch `p` has
+// started sorts ahead of the rest in each group. `tab` (SKILL_TABS) shows only
+// that tab's branches; with none, all of them. A weapon's fork, still open, is
+// two choices side by side: taking one shuts the other for the match.
+export function skillTreeHtml(game, p, tab = null) {
+  const tree = game.skillTree(p).filter((b) => !tab || tabOf(b) === tab);
+  const order = (b) => (b.weapon ? 0 : b.mod ? 2 : 4) - (b.held > 0 ? 1 : 0);
   const can = p.points > 0;
   return [...tree].sort((x, y) => order(x) - order(y)).map((b) => {
+    if (b.options) return forkHtml(b, can);
     const names = rankNames(b);
     const path = names.map((n, i) => `<span class="sk-rank${i < b.held ? ' have' : i === b.held ? ' next' : ''}">${esc(n)}</span>`).join('<span class="sk-arrow">›</span>');
     const done = !b.next;
@@ -88,13 +92,49 @@ export function skillTreeHtml(game, p) {
       : b.lock
         ? `<button class="buy" disabled>${esc(b.lock)}</button>`
         : `<button class="buy" data-id="${b.next}" ${can ? '' : 'disabled'} aria-label="Take ${esc(b.name)} rank ${b.held + 1}">${b.held ? `Rank ${b.held + 1}` : 'Start'}</button>`;
-    return `<div class="shop-item draft-item sk-branch${b.mod ? ' sk-mod' : ''}${b.held ? ' sk-started' : ''}${done ? ' sk-full' : ''}">
-      <div class="si-head"><b>${esc(b.name)}</b><span class="ar-badge">${b.mod ? 'Mod' : esc(b.theme)}</span></div>
+    const title = b.taken ? `${b.name} · ${PERK_BY_ID[b.taken].name}` : b.name;
+    return `<div class="shop-item draft-item sk-branch${b.mod ? ' sk-mod' : ''}${b.weapon ? ' sk-weapon' : ''}${b.held ? ' sk-started' : ''}${done ? ' sk-full' : ''}">
+      <div class="si-head"><b>${esc(title)}</b><span class="ar-badge">${b.mod ? 'Mod' : esc(b.theme)}</span></div>
       <div class="sk-path">${path}</div>
       ${done ? '' : `<div class="desc"><b>${esc(nextName)}:</b> ${esc(rankText(b, b.held))}</div>`}
       <div class="si-foot"><span class="si-gives">${b.held} of ${b.ranks.length}</span>${foot}</div>
     </div>`;
   }).join('');
+}
+
+// A weapon branch whose fork is still open: the two variants, each with what
+// it does and its own button, and the upgrade that follows either.
+function forkHtml(b, can) {
+  const up = PERK_BY_ID[b.ranks[1]];
+  const side = (id) => {
+    const k = PERK_BY_ID[id];
+    return `<div class="sk-side sk-${k.style}">
+      <div class="sk-side-name">${esc(k.name)}</div>
+      <div class="desc">${esc(k.desc.replace(/^[^:]*: /, ''))}</div>
+      <button class="buy" data-id="${id}" ${can ? '' : 'disabled'} aria-label="Make ${esc(b.name)} the ${esc(k.name)}">${esc(k.name)}</button>
+    </div>`;
+  };
+  return `<div class="shop-item draft-item sk-branch sk-weapon sk-fork">
+    <div class="si-head"><b>${esc(b.name)}</b><span class="ar-badge">Pick one</span></div>
+    <div class="sk-sides">${b.options.map(side).join('<span class="sk-or">or</span>')}</div>
+    <div class="si-foot"><span class="si-gives">Then: ${esc(up.name)}</span><span class="sk-note">The other shuts for the match</span></div>
+  </div>`;
+}
+
+// The skill screen's tabs (core/skills.js SKILL_TABS) that have a branch this
+// match, each with how many ranks are held there.
+export function skillTabs(game, p) {
+  const tree = game.skillTree(p);
+  return SKILL_TABS.map((t) => {
+    const mine = tree.filter((b) => tabOf(b) === t.id);
+    return { ...t, held: mine.reduce((n, b) => n + b.held, 0), count: mine.length };
+  }).filter((t) => t.count > 0);
+}
+
+// The tabs as buttons; `tab` is the open one.
+export function skillTabsHtml(game, p, tab) {
+  const tabs = skillTabs(game, p).map((t) => `<button class="sk-tab${t.id === tab ? ' on' : ''}" role="tab" aria-selected="${t.id === tab}" data-tab="${t.id}">${esc(t.name)}${t.held ? `<span class="sk-tab-n">${t.held}</span>` : ''}</button>`);
+  return `<div class="sk-tabs" role="tablist">${tabs.join('')}</div>`;
 }
 
 // ---------------------------------------------------------------- your kit
@@ -105,8 +145,9 @@ export function kitHtml(game, p) {
   for (const w of WEAPONS) {
     if (w.hidden) continue;
     const n = p.inventory?.[w.id];
-    if (n === Infinity || n === null) chips.push(`<span class="ar-chip">${esc(w.name)} ∞</span>`);
-    else if (n > 0) chips.push(`<span class="ar-chip">${esc(w.name)} ×${n}</span>`);
+    const name = game.weaponName ? game.weaponName(p, w.id) : w.name;   // "Napalm · Sticky"
+    if (n === Infinity || n === null) chips.push(`<span class="ar-chip">${esc(name)} ∞</span>`);
+    else if (n > 0) chips.push(`<span class="ar-chip">${esc(name)} ×${n}</span>`);
   }
   if (p.jets > 0) chips.push(`<span class="ar-chip">Jump Jets ×${p.jets}</span>`);
   if (p.pendingArmor > 0) chips.push(`<span class="ar-chip gear">+${p.pendingArmor} armor</span>`);
@@ -123,7 +164,9 @@ export function kitHtml(game, p) {
 
 // ---------------------------------------------------------------- the armory
 
-// A weapon's numbers in a few words: "70 dmg · 22 m", "5 × 28 dmg", or its role.
+// A weapon's numbers in a few words: "70 dmg · 22 m", "5 × 28 dmg",
+// "50 dmg · 16 m + 3 × 22", or its role. Give it the weapon as the tank fires
+// it (game.weaponOf), so a variant's numbers show.
 export function weaponStats(w) {
   const blast = (x) => (x?.impact || []).flatMap((q) => (q.type === 'roll' ? q.then : [q])).find((q) => q.type === 'blast');
   const split = (w.flight || []).find((q) => q.type === 'split' || q.type === 'airburst');
@@ -132,7 +175,9 @@ export function weaponStats(w) {
     return b ? `${split.count} × ${b.damage} dmg` : '';
   }
   const b = blast(w);
-  return b ? `${b.damage} dmg · ${b.radius} m` : '';
+  const thrown = (w.impact || []).find((q) => q.type === 'throw');
+  const tb = thrown && blast(WEAPON_BY_ID[thrown.child]);
+  return b ? `${b.damage} dmg · ${b.radius} m${tb ? ` + ${thrown.count} × ${tb.damage}` : ''}` : '';
 }
 
 const GEAR_INFO = {
@@ -170,8 +215,9 @@ export function armoryHtml(game, p, justBought = null) {
   const weapon = (w) => {
     const open = game.inStock(w.id);
     const have = p.inventory?.[w.id] || 0;
+    const as = game.weaponOf ? game.weaponOf(p, w.id) : w;   // with the variant it took in the tree
     return card({
-      id: w.id, name: w.name, tag: w.role, stats: weaponStats(w), desc: w.desc,
+      id: w.id, name: as.label || w.name, tag: w.role, stats: weaponStats(as), desc: as.desc,
       owned: `You have ${have}`, has: have > 0, gives: `${w.bundle} per buy`,
       price: game.priceOf(p, w.id), money, justBought,
       locked: open ? '' : `Round ${game.opensOn(w.id) + 1}`,
