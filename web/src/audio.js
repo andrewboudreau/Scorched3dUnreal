@@ -5,8 +5,10 @@
 //
 // A few Kenney samples (CC0, in sfx/) sit under the synth as defaults for
 // 'debris' (the patter after a big blast) and 'thump' (the low body of a big
-// blast); see DEFAULT_SAMPLES. Anything chosen in the pack review for the same
-// event wins over them.
+// blast), and are the whole sound of the run screens, the boss, the mods and
+// Flak's burst (the CUES table, played with `cue`); see DEFAULT_SAMPLES.
+// Anything chosen in the pack review for the same event wins over them.
+// Which game event asks for which cue is src/sfxmap.js (pure, tested).
 //
 // Levels: every effect goes through `fx` (the Effects level and mute), music
 // through its own bus (music.js), and both through `master` (the Master level,
@@ -32,9 +34,54 @@ const MAX_VOICES = 14;     // noise bursts sounding at once; quiet ones are drop
 
 // Built-in samples (files in sfx/, each as .ogg with an .mp3 fallback). They
 // load after the audio context first starts.
-const DEFAULT_SAMPLES = {
+export const DEFAULT_SAMPLES = {
   debris: ['earth-impact-rock-2', 'earth-impact-rock-3', 'metal-debris-small-2', 'metal-debris-small-3', 'metal-debris-small-5'],
   thump: ['earth-impact-thud-1', 'earth-impact-thud-3', 'explosion-distant-3'],
+  click: ['ui-tap-1', 'ui-tap-2'],
+  // `cue` sounds (see CUES).
+  stop: ['ui-switch-1'],
+  go: ['ui-confirm-2'],
+  coin: ['coins-handle-1', 'coins-handle-2'],
+  ammo: ['metal-latch-1'],
+  skill: ['powerup-9'],
+  hull: ['metal-clank-heavy-2'],
+  runWon: ['powerup-1'],
+  runOver: ['tone-low-down-1'],
+  bossPhase: ['bell-heavy-4'],
+  bossMark: ['tone-two-2'],
+  weakSpot: ['bell-heavy-5'],
+  deploy: ['phaser-up-5', 'phaser-up-6'],
+  modDown: ['metal-debris-plate-3'],
+  intercept: ['laser-shot-3', 'laser-shot-6'],
+  blink: ['teleport-zap-phase-1', 'teleport-zap-phase-2'],
+  pop: ['impact-generic-light-1', 'impact-generic-light-2'],
+  flak: ['explosion-small-3'],
+  scatter: ['soft-impact-medium-2', 'soft-impact-medium-4', 'earth-impact-thud-1', 'earth-impact-thud-3'],
+  frag: ['metal-debris-tin-1', 'metal-debris-tin-2', 'metal-debris-tin-3'],
+};
+
+// The sounds of `cue(name)`. `gain` and `rate` shape the sample; `tone` is the
+// synthesised stand-in (from Hz, to Hz, seconds, gain) for when the sample is
+// not loaded yet (the first moments, or a browser that decodes neither format),
+// and `burst` a noise burst for the same.
+export const CUES = {
+  stop: { gain: 0.4, tone: [900, 1300, 0.06, 0.07] },            // a stop picked on the run map
+  go: { gain: 0.5, tone: [500, 900, 0.14, 0.1] },                // Go, on a stop
+  coin: { gain: 0.45, tone: [1400, 2000, 0.12, 0.07] },          // money gained
+  ammo: { gain: 0.6, tone: [320, 200, 0.1, 0.09] },              // ammo gained
+  skill: { gain: 0.45, tone: [600, 1500, 0.3, 0.09] },           // a skill point gained
+  hull: { gain: 0.7, rate: 0.8, tone: [140, 60, 0.3, 0.2] },     // a hull lost
+  runWon: { gain: 0.5, tone: [520, 1040, 0.5, 0.1] },
+  runOver: { gain: 0.5, tone: [330, 110, 0.7, 0.1] },
+  bossPhase: { gain: 0.7, rate: 0.7, tone: [110, 70, 0.7, 0.18] },
+  bossMark: { gain: 0.5, tone: [700, 500, 0.3, 0.09] },          // the boss marks a target
+  weakSpot: { gain: 0.4, rate: 1.5, tone: [1800, 2400, 0.15, 0.08] },
+  deploy: { gain: 0.5, tone: [300, 900, 0.25, 0.09] },           // a mod goes up
+  modDown: { gain: 0.6, tone: [500, 120, 0.25, 0.1] },           // a mod shot down
+  intercept: { gain: 0.45, rate: 1.1, tone: [2200, 600, 0.2, 0.08] },   // Point Defense shoots a shell down
+  blink: { gain: 0.4, tone: [1200, 500, 0.2, 0.07] },            // the decoy's blink armed
+  pop: { gain: 0.5, tone: [500, 250, 0.08, 0.09] },              // a shell splits in the air
+  flak: { gain: 0.8, rate: 1.35, burst: { dur: 0.18, freq: 2600, sweepTo: 600, type: 'bandpass', gain: 0.4 } },
 };
 
 export class Sound {
@@ -53,6 +100,9 @@ export class Sound {
     this.defaults = {};      // the built-in ones, by event; used when none are set
     this.samplesMode = 'replace';
     this.sampleLevel = 1;
+    this.cluster = null;     // a split shell's children still to land: see expectCluster
+    this.lastHit = -1;
+    this.stagger = 0;
   }
 
   // Play one of the samples set for `event` (a random take, slightly
@@ -113,22 +163,29 @@ export class Sound {
   }
 
   // Fetch and decode the built-in samples (quietly skipping any that fail).
+  // Each file is fetched once however many events use it.
   async loadDefaults() {
     const ctx = this.ctx;
-    for (const [event, names] of Object.entries(DEFAULT_SAMPLES)) {
-      const bufs = [];
-      for (const n of names) {
-        for (const ext of ['ogg', 'mp3']) {        // e.g. Safari without Opus: try the mp3
-          try {
-            const r = await fetch(new URL(`../sfx/${n}.${ext}`, import.meta.url));
-            if (!r.ok) continue;
-            bufs.push(await ctx.decodeAudioData(await r.arrayBuffer()));
-            break;
-          } catch { /* try the next */ }
-        }
+    const files = new Map();
+    const load = (n) => {
+      if (!files.has(n)) {
+        files.set(n, (async () => {
+          for (const ext of ['ogg', 'mp3']) {        // e.g. Safari without Opus: try the mp3
+            try {
+              const r = await fetch(new URL(`../sfx/${n}.${ext}`, import.meta.url));
+              if (!r.ok) continue;
+              return await ctx.decodeAudioData(await r.arrayBuffer());
+            } catch { /* try the next */ }
+          }
+          return null;
+        })());
       }
+      return files.get(n);
+    };
+    await Promise.all(Object.entries(DEFAULT_SAMPLES).map(async ([event, names]) => {
+      const bufs = (await Promise.all(names.map(load))).filter(Boolean);
       if (bufs.length) this.defaults[event] = bufs;
-    }
+    }));
   }
 
   // A buffer of sparse, tiny noise ticks: fire crackling. `density(t)` is ticks
@@ -238,6 +295,26 @@ export class Sound {
     this.rainBed = { hiss: this.loopNoise('highpass', 1700, 0.3), wash: this.loopNoise('lowpass', 520, 0.5), loop: null };
     // The City: a low rumble of distant traffic and a murmur over it, silent elsewhere.
     this.cityBed = { rumble: this.loopNoise('lowpass', 140, 0.7), murmur: this.loopNoise('bandpass', 480, 0.8) };
+    // A Gravity Orbiter: three soft sines a fifth apart under a slow swell, silent until one is up.
+    const og = ctx.createGain();
+    og.gain.value = 0;
+    const swell = ctx.createGain();
+    swell.gain.value = 0.7;
+    const lfo = ctx.createOscillator();
+    const depth = ctx.createGain();
+    lfo.frequency.value = 0.35;
+    depth.gain.value = 0.3;
+    lfo.connect(depth).connect(swell.gain);
+    lfo.start();
+    for (const f of [92, 138.6, 185.3]) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      o.connect(swell);
+      o.start();
+    }
+    swell.connect(og).connect(this.fx);
+    this.orbitBed = { gain: og };
   }
 
   // A sample chosen for 'rain' in the pack review loops in place of the synth
@@ -275,7 +352,8 @@ export class Sound {
   //   fire      0..~1.5, how much is burning near the camera
   //   rain      0..1, how hard it is raining (render/rain.js amount)
   //   city      0..1, how much of the City's hum to play (0 elsewhere)
-  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0, rain = 0, city = 0 } = {}) {
+  //   orbit     distance from the camera to the nearest Gravity Orbiter, or Infinity
+  update(dt, { wind = 0, driving = 0, shell = null, birds = Infinity, sheep = Infinity, fire = 0, rain = 0, city = 0, orbit = Infinity } = {}) {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime;
@@ -320,6 +398,9 @@ export class Sound {
     const hum = 0.8 + 0.2 * Math.sin(t * 0.17) * Math.sin(t * 0.43 + 1);
     ease(this.cityBed.rumble.gain.gain, city * 0.05 * hum, 1);
     ease(this.cityBed.murmur.gain.gain, city * 0.012 * hum, 1);
+    // An orbiter hums, very low, louder the nearer it is.
+    ease(this.orbitBed.gain.gain, orbit < 700 ? 0.035 / (1 + orbit / 90) : 0, 0.6);
+
     if ((this.nextHorn -= dt) <= 0) {
       this.nextHorn = 7 + Math.random() * 16;
       if (city > 0) this.horn(city);
@@ -475,6 +556,13 @@ export class Sound {
   }
 
   explode(radius = 10, dist = 0) {
+    const cl = this.cluster;
+    if (cl && cl.left > 0 && this.ctx && this.ctx.currentTime < cl.until && radius <= cl.maxR && radius >= 5) {
+      cl.left--;
+      cl.until = Math.min(cl.until, this.ctx.currentTime + 1.5);   // the children land together: a count that came out one short must not swallow a later blast
+      this.clusterHit(cl.kind, dist);
+      return;
+    }
     // A recorded blast by size, or a far-off one (already muffled, so it gets
     // only half the distance treatment).
     const far = dist > 320 && this.samples['explode-far'];
@@ -553,7 +641,68 @@ export class Sound {
     o.stop(t + 0.25);
   }
 
-  click() { if (!this.sample('click', 0, { gain: 0.3 })) this.burst({ dur: 0.05, freq: 5000, gain: 0.15 }); }
+  click() { if (!this.sample('click', 0, { gain: 0.25 })) this.burst({ dur: 0.05, freq: 5000, gain: 0.15 }); }
+
+  // A named sound from the CUES table: the run screens, the boss, the mods and
+  // Flak. `dist` quietens and dulls it like the rest; `cluster` ({ kind, n })
+  // says n small blasts will follow (a split shell's children), which then
+  // play as quick thuds or fragment ticks instead of full explosions.
+  // Never starts the audio context: that waits for a tap (ensure).
+  cue(name, dist = 0, { gain = 1, delay = 0, rate = 1, cluster = null } = {}) {
+    const c = CUES[name];
+    if (!c || !this.ctx) return;
+    if (cluster) this.expectCluster(cluster.kind, cluster.n);
+    if (this.sample(name, dist, { gain: c.gain * gain, delay, rate: (c.rate || 1) * rate })) return;
+    const { k, cutoff } = this.far(dist);
+    if (c.burst) this.burst({ ...c.burst, gain: c.burst.gain * gain * k, delay, cutoff });
+    if (c.tone) this.blip(c.tone[0], c.tone[1], c.tone[2], c.tone[3] * gain * Math.max(0.3, k), delay);
+  }
+
+  // A short sine sweep from `from` to `to` Hz.
+  blip(from, to, dur, gain, delay = 0) {
+    const ctx = this.ensure();
+    if (!ctx || this.silent) return;
+    const t = ctx.currentTime + delay;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.setValueAtTime(from, t);
+    o.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + Math.min(0.01, dur / 3));
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(this.fx);
+    o.start(t);
+    o.stop(t + dur + 0.03);
+  }
+
+  // A shell split in the air: its next `n` small blasts (up to ~12 s on) are
+  // its children landing, so `explode` plays them as thuds ('thud') or Flak's
+  // fragment ticks ('frag'): a quick run of them, not a pile of booms. Once
+  // the first lands the rest must follow within 1.5 s.
+  expectCluster(kind, n) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const c = this.cluster && this.cluster.until > t && this.cluster.kind === kind ? this.cluster : null;
+    this.cluster = { kind, left: Math.min(16, (c ? c.left : 0) + n), until: t + 12, maxR: kind === 'frag' ? 10 : 16 };
+  }
+
+  // One child of a split shell landing. Several in one frame are spread a few
+  // hundredths of a second apart so they read as separate hits.
+  clusterHit(kind, dist) {
+    const t = this.ctx.currentTime;
+    this.stagger = t - this.lastHit < 0.03 ? this.stagger + (kind === 'frag' ? 0.035 : 0.065) : 0;
+    this.lastHit = t;
+    const delay = this.stagger;
+    const { k, cutoff } = this.far(dist);
+    if (kind === 'frag') {
+      if (!this.sample('frag', dist, { gain: 0.5, delay, rate: 0.9 + Math.random() * 0.5 })) {
+        this.burst({ dur: 0.06, freq: 2400, q: 1.2, type: 'bandpass', gain: 0.2 * k, delay, cutoff });
+      }
+      return;
+    }
+    this.sample('scatter', dist, { gain: 0.75, delay, rate: 0.85 + Math.random() * 0.3 });
+    this.burst({ dur: 0.16, freq: 900, sweepTo: 150, gain: 0.3 * k, thump: 75, delay, cutoff });
+  }
 
   // A shell striking a tank: recorded only (the blast covers it otherwise).
   hit(dist = 0) { this.sample('hit', dist, { gain: 0.5 }); }

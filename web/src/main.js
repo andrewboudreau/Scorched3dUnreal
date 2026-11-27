@@ -39,7 +39,8 @@ import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js'
 import { StrikeUI } from './strike.js';
 import { ModsUI } from './modsui.js';
 import { stepperHtml, resultsHtml, skillTreeHtml, skillTabs, skillTabsHtml, kitHtml, armoryHtml, kitWords } from './armory.js';
-import { MOD_BY_ID } from './core/mods.js';
+import { MOD_BY_ID, modPos } from './core/mods.js';
+import { cuesFor } from './sfxmap.js';
 import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './settings.js';
 import { defaultMatch, customBoss, onlineBoss, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { BossUI } from './bossui.js';
@@ -364,6 +365,11 @@ function addShake(pos, power) {
   shake = Math.max(shake, power * Math.max(0, 1 - d / 900));
 }
 
+// The sounds a game event asks for (sfxmap.js: the boss, the mods, Flak and
+// the splitting shells; the rest play from the cases below).
+const cueCtx = { mine: (id) => !!game?.players[id] && game.isLocal(game.players[id]), at: (id, mod) => { const p = game.players[id]; return p ? modPos(p, mod) || [p.x, p.y, p.z] : null; } };
+const playCues = (e) => { for (const c of cuesFor(e, cueCtx)) sound.cue(c.cue, c.pos ? camDist(c.pos) : 0, c); };
+
 const fellInVoid = new Set();   // players whose 'void' banner is up, so their death banner stays quiet
 function handleEvents() {
   recentBlasts.length = 0;
@@ -371,6 +377,7 @@ function handleEvents() {
     strikeUi.event(e);
     bossUi.event(e);
     modsUi.event(e);
+    playCues(e);
     cityView?.event(e);
     napalmView.event(e);
     if (e.type === 'buried' && touch && game.localHumans.some((h) => h.id === e.player)) touch.note(`${game.players[e.player].name}: buried! Your next shot digs you out`, 3500);
@@ -500,8 +507,7 @@ function handleEvents() {
         break;
       }
       case 'split':
-        effects.muzzleFlash(e.pos);
-        sound.click();
+        effects.muzzleFlash(e.pos);   // its pop is a cue (sfxmap.js)
         retireShell(e.id);
         break;
       case 'intercept':   // Point Defense shot it down (modsui.js draws the rest)
@@ -1692,7 +1698,9 @@ function soundScape(dt) {
   for (const w of scenery.walkers) if (w.alive && w.kind === 'sheep') sheep = Math.min(sheep, camDist([w.x, w.y, w.z]));
   let driving = 0;
   let shell = null;
+  let orbit = Infinity;
   if (game) {
+    for (const w of game.orbiterWells()) orbit = Math.min(orbit, camDist([w.x, w.y, w.z]));
     game.players.forEach((p, i) => { if (p.alive) driving = Math.max(driving, tanks[i].work / (1 + camDist([p.x, p.y, p.z]) / 160)); });
     for (const pr of game.projectiles) {
       if (pr.dead || pr.roller) continue;
@@ -1701,7 +1709,7 @@ function soundScape(dt) {
     }
   }
   sound.update(dt, { wind: game ? Math.hypot(...game.wind) : 0.6, driving, shell, birds: birds.nearest(camera.position), sheep,
-    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount, city: game?.town ? 1 : 0 });
+    fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount, city: game?.town ? 1 : 0, orbit });
 }
 
 // ---------------------------------------------------------------- HUD
@@ -2235,7 +2243,7 @@ $('mo-again').onclick = () => {
 };
 // The run (runui.js): its map and stops on its own screen, its fights here.
 const run = new RunUI({
-  startMatch, toMenu: toMenuScene, name: humanName, click: () => sound.click(),
+  startMatch, toMenu: toMenuScene, name: humanName, click: () => sound.click(), sfx: (cue, o) => sound.cue(cue, 0, o),
   begin: () => { sound.ensure(); phoneFullscreen(touch); if (humanName()) profile.setName(humanName()); },
   showSetup: () => { $('setup').classList.remove('hidden'); renderSetup(); },
 });

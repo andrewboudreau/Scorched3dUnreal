@@ -885,10 +885,33 @@ second column beside the first. On a phone the players box sits top right.
   afternoon over the match (never night). Clouds drift with the wind and dim
   the ground beneath them, small flocks circle and scatter from blasts and
   passing shells, villagers walk and sheep hop.
-- **Sound** is synthesised, no assets: a wind bed that follows the wind, a
+- **Sound** is mostly synthesised: a wind bed that follows the wind, a
   bird chirp or a bleat now and then (quieter with distance), a layered
   cannon, a whistle as a shell comes down, blasts that arrive later and
-  duller from far away, and an engine hum while a tank drives.
+  duller from far away, and an engine hum while a tank drives. A handful of
+  small CC0 Kenney samples (`sfx/`, `.ogg` with an `.mp3` fallback, about 120 KB
+  for the lot; credits in `CREDITS.md`) sit on top, all under the Effects level
+  and mute, and nothing plays before the first tap:
+  - *Run screens* (`runui.js` gets an `sfx` handle): a soft switch on a stop, a
+    confirm on Go, then the rewards one after another (coins, a latch for
+    ammo, a rising chime for a skill point; the same on a Cache pick), a
+    heavy clank for a lost hull, and a short sting when the run is won or over.
+  - *Boss*: a low bell on a phase change, a tone when it marks a target (louder
+    when it is you), a bright ping on a weak-spot hit.
+  - *Mods*: a rising whoosh on deploy, a clatter when one is shot down, a
+    laser zip for a Point Defense intercept, a soft zap when the decoy's blink
+    is armed (its owner only), and a very quiet hum that swells as the camera
+    nears a Gravity Orbiter.
+  - *Flak* bursts with a small crack and its fragments land as a run of tiny
+    ticks; *Scatter* (Line and Ring too) and the Splitter pop at the split and
+    their children then land as quick separate thuds, a few hundredths of a
+    second apart, not as one big blast each.
+  - *Buttons* on the menu, armory and skills tap very lightly (the same
+    `click` as before, now a sample).
+  Which event plays which cue is `src/sfxmap.js` (pure, tested); `Sound.cue`
+  in `src/audio.js` plays it, with a synthesised stand-in for the moments
+  before the samples have loaded. The pack review can still replace `click`
+  like any event it lists; the new cues have no review slot yet.
 - **Music** is synthesised too: a small step sequencer plays one of four
   tracks, picked on the menu (Music, with its own level) or with N in a
   match: *Outpost* (calm pads and plucks), *Artillery March* (snare rolls and

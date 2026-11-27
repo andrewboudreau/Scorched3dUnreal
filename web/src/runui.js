@@ -22,6 +22,7 @@ import {
 } from './core/run.js';
 import { BOSS } from './core/boss.js';
 import { WEAPON_BY_ID } from './core/weapons.js';
+import { runCues, offerCue } from './sfxmap.js';
 import { skillTreeHtml, skillTabsHtml, skillTabs, kitHtml, armoryHtml } from './armory.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -75,8 +76,9 @@ export function nodeAt(col, cols, index, count, portrait) {
 }
 
 export class RunUI {
-  constructor({ startMatch, toMenu, showSetup, begin = () => {}, name = () => 'You', click = () => {} }) {
-    Object.assign(this, { startMatchFn: startMatch, toMenu, showSetup, begin, name, click });
+  // sfx(cue, { delay }) plays a named sound (audio.js CUES); see sfxmap.js.
+  constructor({ startMatch, toMenu, showSetup, begin = () => {}, name = () => 'You', click = () => {}, sfx = () => {} }) {
+    Object.assign(this, { startMatchFn: startMatch, toMenu, showSetup, begin, name, click, sfx });
     if (!document.getElementById('run-css')) {
       document.head.appendChild(Object.assign(document.createElement('link'), { id: 'run-css', rel: 'stylesheet', href: new URL('../css/run.css', import.meta.url).href }));
     }
@@ -345,7 +347,7 @@ export class RunUI {
     const t = e.target.closest('[data-act], [data-stop], button.buy, button.sk-tab');
     if (!t) return;
     const act = t.dataset.act;
-    if (t.classList.contains('run-node') && !act) { this.click(); this.sel = this.sel === t.dataset.stop ? null : t.dataset.stop; this.render(); return; }
+    if (t.classList.contains('run-node') && !act) { this.sfx('stop'); this.sel = this.sel === t.dataset.stop ? null : t.dataset.stop; this.render(); return; }
     if (t.classList.contains('sk-tab')) { this.tab = t.dataset.tab; this.render(); return; }
     if (t.classList.contains('buy') && !act) { if (!t.disabled) this.buy(t.dataset.id); return; }
     this.click();
@@ -356,12 +358,14 @@ export class RunUI {
       case 'unsel': this.sel = null; this.render(); break;
       case 'ally': this.ally = Number(t.dataset.i) || 0; this.render(); break;
       case 'go':
+        this.sfx('go');
         this.state = chooseStop(this.state, t.dataset.stop);
         this.save();
         this.enter();
         break;
       case 'enter': this.enter(); break;
       case 'take':
+        this.sfx(offerCue(t.dataset.kind));
         this.state = applyCache(this.state, t.dataset.kind);
         this.save();
         this.view = 'map'; this.sel = null; this.render();
@@ -415,6 +419,7 @@ export class RunUI {
     this.el.classList.remove('hidden');
     this.view = 'result';
     this.render();
+    for (const c of runCues(outcome, rewardItems(outcome.reward))) this.sfx(c.cue, { delay: c.delay });
     return true;
   }
 
