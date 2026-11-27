@@ -212,7 +212,8 @@ mine layer.
 The next layer of the roguelike: weapons that grow in two directions, a short
 solo **run** across a small map of fights, and a **boss** at the end of it,
 fought two against one. Built in stages, each playable on its own (see Build
-order). Stage 1, the variants, is built; the run and the boss are still plans.
+order). Stages 1 and 2, the variants and the boss (in the sandbox), are built; the
+run is still a plan.
 
 ### Weapon variants (built)
 
@@ -305,7 +306,7 @@ run's state is a small record (seed, stop, kit, ranks, money, hulls) saved in
 the browser, and later against the player id (stage 3 of Players and
 accounts) so a run follows you to another device.
 
-### The boss: two against one
+### The boss: two against one (built in the sandbox)
 
 The last stop is you and an **ally** against a **boss tank**. The ally is a
 CPU you choose from the tanks you beat on the way, so the run decides your
@@ -315,7 +316,9 @@ The boss is a tank with a script, deterministic like the rest of the core (a
 `boss` flag on the player, its moves chosen in `ai.js` by phase):
 
 - **Big:** half as large again as a tank, with about 400 hp, on a raised
-  platform at one end of a walled arena (Ridgeline or City, Wall edges).
+  platform at one end of a walled arena. As built: a walled meadow (hills
+  at most Hilly), the **Bulwark** on a flat-topped fort 18 m over the ground
+  round it, with two lower ledges a jet hop away (`core/boss.js`).
 - **Phases** by health:
   1. **Full to 60%:** Scatter and Breacher, with Point Defense up.
   2. **60% to 25%:** puts up a Gravity Orbiter, jumps between ledges, and
@@ -325,7 +328,9 @@ The boss is a tank with a script, deterministic like the rest of the core (a
   ("Thunderhead locked on Tester"), so the target has a turn to move, dig in
   or raise a mound. On a phone a warning you can act on beats a surprise.
 - **A weak spot:** hits from above (Airburst, or a high lob onto its turret)
-  do a quarter more, so the variants you picked can matter.
+  do a quarter more, so the variants you picked can matter. As built, "from
+  above" is an Airburst going off, or any shell or fragment coming down at
+  least 60 degrees below the horizontal when it goes off.
 
 Beating it ends the run with a summary: the route, the fights, the build.
 
@@ -335,8 +340,10 @@ Each stage ships on its own:
 
 1. **Variants** (built): the data, the fork rank in the tree, the five
    families, the skill screen's tabs, CPUs choosing.
-2. **The boss in the sandbox:** Custom match > Boss (and `?boss=1`), you and a
-   CPU ally against it, so it can be played and tuned before the run exists.
+2. **The boss in the sandbox** (built): Custom match > Match > Boss (and
+   `?boss=1`), you and a CPU ally against it, so it can be played and tuned
+   before the run exists. Teams came with it (a team per player; allies are
+   never targeted and earn nothing for hitting each other).
 3. **The run:** map generation, the map screen (touch first), the stops,
    spare hulls, saving.
 4. **Polish:** map art, reward cards, the run summary, a balance pass.

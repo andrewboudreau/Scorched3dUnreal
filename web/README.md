@@ -41,6 +41,7 @@ page loads and override both Random and what Custom match remembers.
 | `decoy` | `1`, `2`, `3` | Every tank starts with a Decoy Beacon at that level. |
 | `pointdef` | `1`, `2`, `3` | Every tank starts with Point Defense at that level. |
 | `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
+| `boss` | `1` | Play starts the boss match: you and a CPU ally against the Bulwark (see The boss match below). |
 | `modifier` | a round modifier id: `rain`, `lowgrav`, `gale`, `calm`, `soft`, `goldrush`, `fulltanks`, `clear` | Every round is that modifier. |
 
 An online room rewrites the address to `?room=`, so set test params on the
@@ -724,6 +725,34 @@ second column beside the first. On a phone the players box sits top right.
   both shots travel in the one plan and a reload goes as an empty plan. CPU tanks
   that hold it double when they have the range on a target or can finish it, and
   sit out the reload. A reload does not carry into the next round.
+- **The boss match** (Custom match > Match > **Boss: two against one**, or
+  `?boss=1` with Play; `src/core/boss.js`). You and an ally (the next tank
+  row: a CPU, or a second human on this screen) are one team against the
+  **Bulwark**, one round in a walled meadow. The Bulwark is half as large
+  again as a tank, has 400 hp, and sits on a flat-topped fort at the east end
+  with two lower ledges; you start side by side at the west end with 40 armor,
+  three extra jump jets, a little more ammunition and the Thunderhead's
+  Airburst. Its health bar is top centre, with ticks where its phases begin:
+  1. **Full to 60%:** Scatter and Breacher at either of you, Point Defense up
+     (one charge, refilled every turn).
+  2. **60% to 25%:** a Gravity Orbiter goes up, it hops between its ledges
+     every other turn, and every third turn it answers whoever has hurt it
+     most with a Dirt Bomb.
+  3. **Under 25%:** two shots every turn, and once a Thunderhead.
+
+  A Dirt Bomb or a Thunderhead is **marked a turn ahead**: a red ring the
+  size of the blast and a column of light where it will fall, and a line
+  under the health bar ("Thunderhead locked on Tester"; on a phone also the
+  touch note, and a buzz when it is on you). The shot goes to the marked
+  spot, so drive or hop out of the ring; CPU allies do. Its **weak spot** is
+  on top: a hit from above does 25% more. From above means an Airburst, or a
+  shell or fragment coming down at least 60 degrees below the horizontal
+  (a high lob, or Flak's fragments); the bar flashes when one lands. A banner
+  announces each phase. **Teams:** allies are never a CPU's target, an ally's
+  mods let your shells by, and hitting your ally still hurts but earns
+  nothing. The round ends when one side is wiped out, and every tank left on
+  that side wins it. Online, the room's tanks are the Bulwark's foes and it
+  joins as the last CPU; it runs on every screen like any CPU.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (the wind ×1.8, at most 3.5, so a Gale round on Gale wind stays playable), Dead calm, Low gravity,
@@ -780,10 +809,12 @@ second column beside the first. On a phone the players box sits top right.
   that fly, bounce, settle and sink (one InstancedMesh), chunks that topple
   into the street, and whole buildings that drop and crumble into their rubble.
   `arena.js` is the arena's boundary: the Edges curtains, bounce flashes and
-  wrap ripples, the Island's open sea and splashes.
+  wrap ripples, the Island's open sea and splashes. `bossMark.js` is the
+  boss's telegraph: the ring and column of light on the marked spot.
 - `src/armory.js` is the between-rounds screens (stepper, results, skill tree, kit, armory);
   `src/modsui.js` is the mods' deploy buttons and status chips;
-  `src/strike.js` is Double Strike's.
+  `src/strike.js` is Double Strike's; `src/bossui.js` is the boss match's
+  health bar, telegraph line and phase banners (the rules: `src/core/boss.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
