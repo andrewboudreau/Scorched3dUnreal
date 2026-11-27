@@ -36,6 +36,8 @@
 // new mods once a tank fills its mod bays (mods.js MOD_BAYS). draftOffer and
 // MOD_DRAFT below are the old draft, kept for the strike and twists tests.
 
+import { WEAPON_BY_ID, VARIANT_WEAPONS, resolveWeapon } from './weapons.js';
+
 export const PERKS = [
   { id: 'wideblast', tag: 'WB', name: 'Wide Blast', desc: 'Your blasts reach 15% further.', blastRadius: 0.15 },
   { id: 'heavycharge', tag: 'HC', name: 'Heavy Charge', desc: 'Your blasts hit 12% harder.', blastDamage: 0.12 },
@@ -74,7 +76,50 @@ export const PERKS = [
     desc: 'Your mods last 2 turns longer and take 25% more damage before they break.' },
 ];
 
-export const PERK_BY_ID = Object.fromEntries(PERKS.map((p) => [p.id, p]));
+// Weapon variants (weapons.js `variants` and `upgrade`) as skill ranks, made
+// from the weapon data: one perk per variant, id `weapon:variant` (rank 1 of
+// the weapon's branch, a fork: a tank takes one of the two, for the match),
+// and the family's upgrade, id `weapon:up` (rank 2). They travel and save as
+// any perk does (p.perks, the shop message's picks). They are not in PERKS,
+// the host's Perks list: they are on whenever the tree is and their weapon is
+// in the match (game.perkOn).
+//   weapon    the weapon id         variant   the variant id (rank 1)
+//   upgrade   true (rank 2)
+export const VARIANT_PERKS = VARIANT_WEAPONS.flatMap((w) => [
+  ...w.variants.map((v) => ({
+    id: `${w.id}:${v.id}`, tag: v.name.split(' ')[0], name: v.name, weapon: w.id, variant: v.id, style: v.style,
+    desc: `${w.name} becomes ${v.name}: ${v.desc}`,
+  })),
+  { id: `${w.id}:up`, tag: `${w.name.slice(0, 3)}+`, name: w.upgrade.name, weapon: w.id, upgrade: true,
+    desc: `${w.name}: ${w.upgrade.desc}` },
+]);
+
+export const PERK_BY_ID = Object.fromEntries([...PERKS, ...VARIANT_PERKS].map((p) => [p.id, p]));
+
+// The variant of weapon `id` that `player` picked in the tree, or null, and
+// whether it took the family's rank 2.
+export function variantPick(player, id) {
+  let variant = null, up = false;
+  for (const k of player.perks || []) {
+    const perk = PERK_BY_ID[k];
+    if (!perk || perk.weapon !== id) continue;
+    if (perk.variant && !variant) variant = perk.variant;
+    if (perk.upgrade) up = true;
+  }
+  return { variant, up };
+}
+
+// `player`'s weapon `id` as it fires: the base with its variant and upgrade
+// (weapons.js resolveWeapon). Hidden weapons and the Shell come back as they are.
+export function weaponFor(player, id) {
+  const w = WEAPON_BY_ID[id];
+  if (!w?.variants || !player) return w;
+  const { variant, up } = variantPick(player, id);
+  return resolveWeapon(w, variant, up);
+}
+
+// "Napalm · Sticky", or the plain name.
+export const weaponLabel = (player, id) => { const w = weaponFor(player, id); return w?.label || w?.name || id; };
 
 // Total of a numeric perk field over everything the tank holds.
 export function perkSum(player, key) {
@@ -151,7 +196,7 @@ export const MODIFIERS = [
   { id: 'gale', name: 'Gale', desc: 'The wind is much stronger.', wind: 1.8, weight: 1 },
   { id: 'calm', name: 'Dead calm', desc: 'No wind at all.', calm: true, weight: 1 },
   { id: 'lowgrav', name: 'Low gravity', desc: 'Shells fly further: ease off the power.', gravity: 0.7, weight: 1 },
-  { id: 'rain', name: 'Rain', desc: 'Rain drags your shells down short: add power, aim flatter.', drag: RAIN_DRAG, weight: 1 },
+  { id: 'rain', name: 'Rain', desc: 'Rain drags your shells down short: add power, aim flatter. Napalm burns weaker.', drag: RAIN_DRAG, weight: 1 },
   { id: 'soft', name: 'Soft ground', desc: 'Craters are a third bigger.', crater: 1.3, weight: 1 },
   { id: 'goldrush', name: 'Gold rush', desc: 'All pay is doubled this round.', pay: 2, weight: 1 },
   { id: 'fulltanks', name: 'Full tanks', desc: 'Everyone has double fuel.', fuel: 2, weight: 1 },

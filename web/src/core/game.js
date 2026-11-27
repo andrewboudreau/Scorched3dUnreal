@@ -1,18 +1,18 @@
 import { makeRng } from './rng.js';
 import { Heightfield, ISLES } from './terrain.js';
-import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
+import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, burstNow, hopOver, HOP, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, throwVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
 import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
 import { generateRidgeline, keepCrust, rowStarts, slump, RIDGE } from './ridgeline.js';
 import { ISLAND, islandShape, islandStarts, generateIsland } from './island.js';
-import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, pickModifier, GALE_CAP } from './perks.js';
-import { SKILL, BRANCHES, ranksHeld, branchOf } from './skills.js';
+import { PERKS, PERK_BY_ID, MODIFIERS, MODIFIER_BY_ID, perkSum, hasPerk, aiPickPerk, weaponFor, weaponLabel, pickModifier, GALE_CAP } from './perks.js';
+import { SKILL, BRANCHES, ranksHeld, branchOf, forkTaken } from './skills.js';
 import { normalizeLab } from './survey.js';
 import { DEFAULT_TIME, resolveTime } from './timeofday.js';
-import { NAPALM, BURY, flowNapalm, scorchNapalm, napalmDose, napalmTick, digOut } from './napalm.js';
+import { NAPALM, BURY, napalmParams, burnTime, flowNapalm, scorchNapalm, napalmDose, napalmTick, digOut } from './napalm.js';
 import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
@@ -226,7 +226,25 @@ export class Game {
     if (!w) return false;
     return !!(w.infinite || w.hidden) || !this.cfg.weapons || this.cfg.weapons.includes(id);
   }
-  perkOn(id) { return !!PERK_BY_ID[id] && (!this.cfg.perks || this.cfg.perks.includes(id)); }
+  // A weapon variant's rank (perks.js VARIANT_PERKS) is on whenever the tree
+  // is and its weapon is in the match.
+  perkOn(id) {
+    const k = PERK_BY_ID[id];
+    if (k?.weapon) return this.weaponOn(k.weapon) && this.draftOn;
+    return !!k && (!this.cfg.perks || this.cfg.perks.includes(id));
+  }
+
+  // A tank's weapon `id` as it fires: with the variant and upgrade it took in
+  // the tree (perks.js weaponFor). `who` is a player or a player id. Every
+  // number a shot uses comes through here, children included.
+  weaponOf(who, id) {
+    const p = typeof who === 'number' ? this.players[who] : who;
+    return weaponFor(p, id);
+  }
+  // "Napalm · Sticky", or the weapon's plain name.
+  weaponName(who, id) { return weaponLabel(typeof who === 'number' ? this.players[who] : who, id); }
+  // The height an Airburst goes off at, for weapon `id` of tank `who`, or 0.
+  burstHeight(who, id) { return (this.weaponOf(who, id)?.flight || []).find((f) => f.type === 'burst')?.height || 0; }
   modifierOn(id) { return !!MODIFIER_BY_ID[id] && (!this.cfg.modifiers || this.cfg.modifiers.includes(id)); }
   // Is there a perk draft between rounds at all?
   get draftOn() { return PERKS.some((k) => this.perkOn(k.id)); }
@@ -629,6 +647,7 @@ export class Game {
         ...conds,
         ...this.orbitField(p),
         sharpen: this.aiSharpen(p),
+        burst: this.burstHeight(p, weapon),   // an Airburst is judged where it goes off
       });
       if (weapon === 'ranger') readRange(p.aim, target.id, p.ai);   // it reads the probes
     }
@@ -1189,6 +1208,15 @@ export class Game {
     const bays = MODS.filter((d) => this.modLevel(p, d.id) > 0).length;
     return BRANCHES.map((b) => {
       let ranks, held;
+      if (b.weapon) {
+        // A weapon's variants: only when that weapon is in the match. Rank 1
+        // is the fork: `options` until one is taken, then that one.
+        if (!this.perkOn(b.ranks[1])) return null;
+        const taken = forkTaken(p, b);
+        held = ranksHeld(p, b);
+        ranks = [taken || b.options[0], b.ranks[1]];
+        return { ...b, ranks, held, next: ranks[held] || null, options: taken ? null : b.options, taken, lock: '' };
+      }
       if (b.mod) {
         if (modLab(this.cfg.lab, b.mod).mode !== 'perk' || !this.perkOn(b.ranks[0])) return null;
         ranks = b.ranks.filter((id, i) => i === 0 || this.perkOn(id));
@@ -1212,7 +1240,7 @@ export class Game {
 
   // The ranks `p` could take now: the next one of each open branch.
   skillOffer(p) {
-    return this.skillTree(p).filter((b) => b.next && !b.lock).map((b) => b.next);
+    return this.skillTree(p).filter((b) => b.next && !b.lock).flatMap((b) => b.options || [b.next]);
   }
 
   offerSkills(p) {
@@ -1226,10 +1254,23 @@ export class Game {
   aiSkills(p) {
     for (let offer = this.skillOffer(p); p.points > 0 && offer.length; offer = this.skillOffer(p)) {
       const deeper = offer.filter((id) => { const b = branchOf(id); return b && this.skillTree(p).find((x) => x.id === b.id)?.held > 0; });
-      const id = deeper.length && this.rogue.next() < 0.5 ? this.rogue.pick(deeper) : aiPickPerk(offer, this.rogue, TEMPERS[this.aiTemper(p)].likes);
+      let id = deeper.length && this.rogue.next() < 0.5 ? this.rogue.pick(deeper) : aiPickPerk(offer, this.rogue, TEMPERS[this.aiTemper(p)].likes);
+      if (PERK_BY_ID[id]?.variant) id = this.aiVariant(p, PERK_BY_ID[id].weapon);
       p.perks.push(id);
       p.points--;
     }
+  }
+
+  // Which side of a weapon's fork a CPU takes: by its temper, mostly. A
+  // gunner or skirmisher is bold (Splitter, Hopper, Flood, Ring, Airburst), a
+  // sapper or spotter careful (Bunker Buster, Seeker, Sticky, Line, Deep
+  // Strike); a quarter of the time it goes the other way. Seeded dice only.
+  aiVariant(p, weapon) {
+    const t = this.aiTemper(p);
+    const style = (t === 'gunner' || t === 'skirmisher') ? 'bold' : 'careful';
+    const options = BRANCHES.find((b) => b.weapon === weapon).options.map((id) => PERK_BY_ID[id]);
+    const liked = options.find((k) => k.style === style) || options[0];
+    return (this.rogue.next() < 0.75 ? liked : options.find((k) => k !== liked) || liked).id;
   }
 
   // A perk this match can use at all: on in the match (cfg.perks), and able to
@@ -1248,6 +1289,12 @@ export class Game {
   // level-up only for one it has. (needsMod) needs a mod.
   perkFits(p, perk) {
     if (!this.perkUseful(perk)) return false;
+    if (perk.weapon) {
+      // A variant: only while the fork is open; the upgrade: once it is taken, and once.
+      const b = BRANCHES.find((x) => x.weapon === perk.weapon);
+      const taken = forkTaken(p, b);
+      return perk.variant ? !taken : !!taken && !p.perks.includes(perk.id);
+    }
     const bays = MODS.filter((d) => this.modLevel(p, d.id) > 0).length;
     if (perk.needsMod && !bays) return false;
     for (const id of Object.keys(perk.mods || {})) {
@@ -1483,7 +1530,7 @@ export class Game {
   // flash of a volley; the shells all leave on the same step.
   launch(p, delay = 0) {
     if (p.buried) return this.digOut(p, delay);
-    const w = WEAPON_BY_ID[p.weapon];
+    const w = this.weaponOf(p, p.weapon);
     if (!(p.inventory[w.id] > 0)) return false;
     if (!w.infinite) p.inventory[w.id]--;
     const pos = muzzleOrigin(p);
@@ -1524,7 +1571,7 @@ export class Game {
     const drag = this.shellDrag(this.players[owner]);
     if (drag) pr.drag = drag;   // children (split, flak, bomblets) come through here too
     if (this.terrain.wells.length) pr.wells = this.terrain.wells;
-    const steer = (WEAPON_BY_ID[weaponId].flight || []).find((f) => f.type === 'steer');
+    const steer = (this.weaponOf(owner, weaponId).flight || []).find((f) => f.type === 'steer');
     if (steer) pr.steer = { rate: steer.rate, fuel: steer.fuel, input: 0 };
     this.projectiles.push(pr);
     this.emit({ type: 'projectile', id: pr.id, weapon: weaponId, owner, shot });
@@ -1634,7 +1681,7 @@ export class Game {
         this.emit({ type: 'edge', kind: c.kind, id: pr.id, pos: [...c.point], ...(c.to ? { to: [...c.to] } : {}) });
         if (c.kind === 'wall') { this.detonate(pr, c.point, null); continue; }
       }
-      const w = WEAPON_BY_ID[pr.weapon];
+      const w = this.weaponOf(pr.owner, pr.weapon);
       // Apex split.
       if (!pr.splitDone && vyBefore > 0 && pr.vel[1] <= 0 && w.flight) {
         const split = w.flight.find((f) => f.type === 'split');
@@ -1699,6 +1746,9 @@ export class Game {
         if (y < t.bedrock || pr.time > MAX_FLIGHT) this.lose(pr);
         continue;
       }
+      // The Airburst goes off over the ground, not on it (ballistics.burstNow).
+      const air = !pr.probe && w.flight && w.flight.find((f) => f.type === 'burst');
+      if (air && burstNow(pr, t, air.height)) { this.detonate(pr, [x, y, z], null, false, null, true); continue; }
       const g = groundContact(pr, t);
       if (g?.sea) { this.splash(pr, g); continue; }
       if (g) { this.detonate(pr, g, null); continue; }
@@ -1739,23 +1789,44 @@ export class Game {
   }
 
   // `moon`: it struck a moon. `struck`: it struck a mod ({ owner, mod }), in the air.
-  detonate(pr, point, directHit, moon = false, struck = null) {
-    const w = WEAPON_BY_ID[pr.weapon];
+  // `aloft`: an Airburst going off over the ground.
+  detonate(pr, point, directHit, moon = false, struck = null, aloft = false) {
+    const w = this.weaponOf(pr.owner, pr.weapon);
     const wall = point.building != null || !!point.edge;   // it struck a building in the City, or the arena's wall
     // A rolling weapon that lands on open ground starts its run instead.
-    if (rollPart(w) && !directHit && !pr.roller && !moon && !struck && !wall) {
-      pr.roller = makeRoller(point, pr.vel, this.terrain);
+    const roll = rollPart(w);
+    if (roll && !directHit && !pr.roller && !moon && !struck && !wall) {
+      pr.roller = makeRoller(point, pr.vel, this.terrain, roll);
+      pr.roller.owner = pr.owner;
+      if (pr.hops == null) pr.hops = roll.hop || 0;   // the Hopper's hop, once a shot
       pr.pos = pr.roller.pos;
       this.emit({ type: 'rollStart', id: pr.id, pos: point });
       return;
     }
     pr.dead = true;
-    this.emit({ type: 'impact', id: pr.id, pos: point });
+    this.emit({ type: 'impact', id: pr.id, pos: point, ...(aloft ? { aloft: true } : {}) });
     for (const fx of impactEffects(w, point)) {
       const more = { ...(struck ? { struck } : {}), ...(pr.decoy ? { decoy: pr.decoy } : {}) };
       this.applyEffect(struck || pr.decoy ? { ...fx, ...more } : fx, pr.owner, directHit, pr.shot);
     }
     if (pr.weapon === 'shell' && !directHit && !moon && !struck && !wall) this.throwShrapnel(pr, point);
+    // The Splitter: bomblets lobbed outward from where it went off.
+    for (const part of w.impact || []) if (part.type === 'throw' && !moon && !struck) this.throwBomblets(pr, point, part, directHit);
+  }
+
+  // A `throw` part (weapons.js): `part.count` bomblets outward in a star,
+  // from just above where the shell went off.
+  throwBomblets(pr, point, part, directHit = null) {
+    const t = this.terrain;
+    // Off a tank it hit square on, they leave from over it, not inside it.
+    const y = directHit ? directHit.y + TANK.hitCenterY + TANK.hitRadius + 0.5
+      : (t.inBounds(point[0], point[2]) && t.solidAt(point[0], point[2]) ? Math.max(point[1], t.heightAt(point[0], point[2])) : point[1]) + 0.8;
+    for (const v of throwVelocities(pr.vel, part)) {
+      const child = this.spawnProjectile([point[0], y, point[2]], v, part.child, pr.owner, pr.shot);
+      child.splitDone = true;
+      child.frag = true;   // only a level 3 Point Defense stops these
+    }
+    this.emit({ type: 'split', id: pr.id, pos: [...point], thrown: true });
   }
 
   // Shrapnel perk: a plain Shell that hits the ground lobs bomblets onward.
@@ -1777,7 +1848,24 @@ export class Game {
   // A roller on the ground: follow the surface until it stops, runs out of
   // road or bumps into a tank (its owner included).
   stepRolling(pr, spheres, dt) {
+    if (pr.roller.seek) pr.roller.targets = spheres.map((s) => ({ x: s.x, z: s.z, owner: s.tank.id }));   // the Seeker leans toward these
     const end = stepRoller(pr.roller, this.terrain, dt);
+    const r = pr.roller;
+    if (pr.hops > 0 && (end === 'stopped' || (!end && r.vel[0] * r.dir[0] + r.vel[1] * r.dir[1] < HOP.slow))) {
+      // The Hopper: slowing (or stopped) with a bump ahead, it hops it
+      // (ballistics.hopOver) and is a shell in the air again until it lands and rolls on.
+      const v = hopOver(r, this.terrain);
+      if (v) {
+        pr.hops--;
+        const [x, y, z] = pr.roller.pos;
+        pr.roller = null;
+        pr.pos = [x, y, z];
+        pr.prev = [x, y, z];
+        pr.vel = v;
+        this.emit({ type: 'hop', id: pr.id, pos: [x, y - ROLL.radius, z] });
+        return;
+      }
+    }
     const c = pr.roller.crossed;
     if (c) this.emit({ type: 'edge', kind: c.kind, id: pr.id, pos: [...c.point], ...(c.to ? { to: [...c.to] } : {}) });
     const [x, y, z] = pr.pos;
@@ -1821,7 +1909,7 @@ export class Game {
       if (fx.decoy) this.leaveDecoy(p, fx.decoy);   // the Decoy Beacon's blink
       return;
     }
-    if (fx.type === 'napalm') { this.spillNapalm(fx.point, owner, shot); return; }
+    if (fx.type === 'napalm') { this.spillNapalm(fx.point, owner, shot, fx.params); return; }
     if (fx.type === 'mound' || fx.type === 'bury') {
       let region = t.raiseMound(fx.point[0], fx.point[2], fx.radius, fx.height);
       this.ground?.ops.push(['m', fx.point[0], fx.point[2], fx.radius, fx.height]);
@@ -1844,7 +1932,7 @@ export class Game {
       this.blasting++;
       // A blast high in the air (on a mod) leaves the ground alone.
       const g = this.groundAt(bx, bz);
-      if (!(by - (g ?? -Infinity) > radius)) this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);
+      if (!(by - (g ?? -Infinity) > radius) && fx.depth > 0) this.carve(bx, by, bz, radius * (this.modifier.crater || 1), fx.depth);   // depth 0: no crater (the Airburst)
       this.blastMods(fx.point, radius, damage, owner, fx.struck);
       if (this.town) this.cityBlast(bx, by, bz, radius, damage);
       for (const p of this.players) {
@@ -1852,7 +1940,10 @@ export class Game {
         // Whoever blows the ground out from under a tank on the isles gets the credit for its fall.
         if ((this.isles || this.island) && Math.hypot(p.x - bx, p.z - bz) < radius * 1.5) p.blamed = owner;
         const s = hitSphere(p);
-        const dist = p === directHit ? 0 : Math.max(0, Math.hypot(s.x - bx, s.y - by, s.z - bz) - TANK.hitRadius * 0.5);
+        // A flat blast (the Airburst) counts only the distance across; a
+        // piercing one (the Bunker Buster) does for a tank buried or lower than it.
+        const across = Math.abs(s.y - by) < radius && (fx.flat || (fx.pierce && (p.buried || s.y < by)));
+        const dist = p === directHit ? 0 : Math.max(0, (across ? Math.hypot(s.x - bx, s.z - bz) : Math.hypot(s.x - bx, s.y - by, s.z - bz)) - TANK.hitRadius * 0.5);
         const dmg = blastDamage(dist, radius, damage);
         if (dmg > 0) this.damage(p, dmg, owner, shot);
       }
@@ -1976,37 +2067,44 @@ export class Game {
 
   // Napalm lands: the fuel runs downhill at once (flowNapalm), the ground
   // under it is scorched, and the fire burns for a few seconds (burnFires).
-  spillNapalm(point, owner, shot = 0) {
+  // `params` are a variant's changes to NAPALM (weapons.js, Sticky, Flood and
+  // the Wet Burn upgrade); they go in the ground op so a rebuild runs the same flow.
+  spillNapalm(point, owner, shot = 0, params = null) {
     const t = this.terrain;
-    const flow = flowNapalm(t, point[0], point[2]);
-    const region = scorchNapalm(t, flow.cells);
-    this.ground?.ops.push(['n', point[0], point[2]]);
+    const N = napalmParams(params);
+    const flow = flowNapalm(t, point[0], point[2], N);
+    const region = scorchNapalm(t, flow.cells, N);
+    this.ground?.ops.push(params ? ['n', point[0], point[2], { ...params }] : ['n', point[0], point[2]]);
     if (region) this.emit({ type: 'terrain', region });
     const id = ++this.fireSeq;
     const cells = flow.cells.map(([i, j, fuel, arrive]) => [t.vx(i), t.heights[t.index(i, j)], t.vz(j), fuel, arrive]);
-    this.emit({ type: 'napalm', id, owner, pos: [...point], cells, doused: flow.doused, lost: flow.lost });
+    this.emit({ type: 'napalm', id, owner, pos: [...point], cells, doused: flow.doused, lost: flow.lost, burn: burnTime(N) });
     if (!flow.cells.length) return;
-    this.fires.push({ id, owner, shot, cells: flow.cells.map(([i, j, fuel]) => [i, j, fuel]), t: 0, tick: 0 });
+    // Rain damps it (NAPALM.rain), unless it is rainproof.
+    const wet = this.modifier.drag && !N.rainproof ? N.rain : 1;
+    this.fires.push({ id, owner, shot, cells: flow.cells.map(([i, j, fuel]) => [i, j, fuel]), t: 0, tick: 0,
+      ticks: N.ticks, every: N.every, lag: N.lag, hit: (N.damage / N.ticks) * wet });
   }
 
-  // The fires burn on the fixed step: every NAPALM.every s each live tank
-  // (not a buried one: the soil covers it) takes its tick, by how deep the
-  // fuel is round it, credited to whoever fired it.
+  // The fires burn on the fixed step: every NAPALM.every s (the fire's own
+  // `every`, for a variant) each live tank (not a buried one: the soil covers
+  // it) takes its tick, by how deep the fuel is round it, credited to whoever fired it.
   burnFires(dt) {
     const N = NAPALM;
+    const ticks = (f) => f.ticks ?? N.ticks;
     for (const f of this.fires) {
       f.t += dt;
-      while (f.tick < N.ticks && f.t >= N.lag + f.tick * N.every - 1e-9) {
+      while (f.tick < ticks(f) && f.t >= (f.lag ?? N.lag) + f.tick * (f.every ?? N.every) - 1e-9) {
         f.tick++;
         for (const p of this.players) {
           if (!p.alive || p.buried) continue;
           const dose = napalmDose(this.terrain, f.cells, p.x, p.z);
-          if (dose > 0.02) this.damage(p, napalmTick() * dose, f.owner, f.shot);
+          if (dose > 0.02) this.damage(p, (f.hit ?? napalmTick()) * dose, f.owner, f.shot);
         }
       }
     }
-    for (const f of this.fires) if (f.tick >= N.ticks) this.emit({ type: 'napalmOut', id: f.id });
-    this.fires = this.fires.filter((f) => f.tick < N.ticks);
+    for (const f of this.fires) if (f.tick >= ticks(f)) this.emit({ type: 'napalmOut', id: f.id });
+    this.fires = this.fires.filter((f) => f.tick < ticks(f));
   }
 
   // A Dirt Bomb's dome has just gone up: every live tank with soil over it buries.
@@ -2119,7 +2217,7 @@ export class Game {
       }
       else if (op[0] === 'b') this.town?.blast(op[1], op[2], op[3], op[4], op[5]);
       else if (op[0] === 'r') { if (this.town) this.collapseBuilding(op[1], true); }
-      else if (op[0] === 'n') scorchNapalm(t, flowNapalm(t, op[1], op[2]).cells);
+      else if (op[0] === 'n') { const N = napalmParams(op[3]); scorchNapalm(t, flowNapalm(t, op[1], op[2], N).cells, N); }
       else { const region = t.raiseMound(op[1], op[2], op[3], op[4]); this.slumpAfter(op[1], op[2], op[3], region); this.scenery.afterMound(op[1], op[2], op[3]); }
     }
     this.scenery.drainEvents();

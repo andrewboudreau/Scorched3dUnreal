@@ -18,6 +18,7 @@
 
 import { PERKS, PERK_BY_ID, perkCount } from './perks.js';
 import { MODS } from './mods.js';
+import { VARIANT_WEAPONS } from './weapons.js';
 
 export const SKILL = { perRound: 1 };
 
@@ -42,16 +43,38 @@ export function modBranch(mod) {
   return { id: mod.id, name: unlock.name, theme: mod.name, mod: mod.id, ranks };
 }
 
-export const BRANCHES = [...MODS.map(modBranch).filter(Boolean), ...PERK_BRANCHES];
+// A weapon's branch (weapons.js `variants`, perks.js VARIANT_PERKS): rank 1
+// is a fork, `options` the two variants (taking one shuts the other for the
+// match); rank 2 is the family's upgrade, on whichever was taken. `ranks`
+// holds the variant taken (the first option until then) and the upgrade.
+export function weaponBranch(w) {
+  const options = w.variants.map((v) => `${w.id}:${v.id}`);
+  return { id: w.id, name: w.name, theme: 'Weapon', weapon: w.id, options, ranks: [options[0], `${w.id}:up`] };
+}
+export const WEAPON_BRANCHES = VARIANT_WEAPONS.map(weaponBranch);
+
+// The variant of branch `b` (a weapon branch) the tank took, or null.
+export const forkTaken = (player, b) => b.options.find((id) => perkCount(player, id) > 0) || null;
+
+// The skill screen's tabs (src/armory.js): which a branch shows under.
+export const SKILL_TABS = [
+  { id: 'weapons', name: 'Weapons' },
+  { id: 'mods', name: 'Mods' },
+  { id: 'tank', name: 'Tank' },
+];
+export const tabOf = (b) => (b.weapon ? 'weapons' : b.mod || b.id === 'modtuning' ? 'mods' : 'tank');
+
+export const BRANCHES = [...WEAPON_BRANCHES, ...MODS.map(modBranch).filter(Boolean), ...PERK_BRANCHES];
 export const BRANCH_BY_ID = Object.fromEntries(BRANCHES.map((b) => [b.id, b]));
 
 // Which branch a perk belongs to (the first that lists it).
-export const branchOf = (perkId) => BRANCHES.find((b) => b.ranks.includes(perkId)) || null;
+export const branchOf = (perkId) => BRANCHES.find((b) => b.ranks.includes(perkId) || b.options?.includes(perkId)) || null;
 
 // How many ranks of branch `b` the tank holds: a mod branch counts the
 // mod's level from the tree; a perk branch counts its ranks the tank holds
-// (repeats count once per copy).
+// (repeats count once per copy); a weapon branch, its fork and then its upgrade.
 export function ranksHeld(player, b) {
+  if (b.options) return forkTaken(player, b) ? 1 + (perkCount(player, b.ranks[1]) > 0 ? 1 : 0) : 0;
   const seen = {};
   let n = 0;
   for (const id of b.ranks) {

@@ -91,7 +91,7 @@ export class NapalmView {
         if (flames.some((f) => Math.hypot(f.c[0] - c[0], f.c[2] - c[2]) < 7)) continue;
         flames.push({ c, lit: false, key: `napalm${e.id}.${flames.length}` });
       }
-      this.fires.set(e.id, { cells: e.cells, t: 0, out: -1, flames, tilt: null });
+      this.fires.set(e.id, { cells: e.cells, t: 0, out: -1, flames, tilt: null, burn: e.burn || BURN_TIME });
     } else if (e.type === 'napalmOut') {
       const f = this.fires.get(e.id);
       if (f && f.out < 0) f.out = 0;
@@ -119,7 +119,7 @@ export class NapalmView {
         fl.lit = true;
         const [x, y, z, fuel] = fl.c;
         const big = Math.min(1, fuel / NAPALM.ref);
-        this.effects.burn(fl.key, x, y, z, { flame: 0.55 + 0.4 * big, smoke: 0.55, ttl: Math.max(0.5, BURN_TIME - f.t), size: 0.8 + 0.7 * big, spread: 1.6, ground: true, fade: 1 });
+        this.effects.burn(fl.key, x, y, z, { flame: 0.55 + 0.4 * big, smoke: 0.55, ttl: Math.max(0.5, f.burn - f.t), size: 0.8 + 0.7 * big, spread: 1.6, ground: true, fade: 1 });
       }
       for (let c = 0; c < f.cells.length; c++) {
         const [x, y, z, fuel, arrive] = f.cells[c];

@@ -62,7 +62,7 @@ test('skill tree: a point a round, the next rank of each branch on offer, CPUs s
   assert.equal(g.players[2].perks.length, 1, 'the CPU already spent its point');
   assert.equal(g.players[2].points, 0);
   const tree = g.skillTree(g.players[0]);
-  assert.deepEqual(g.draft[0], tree.filter((b) => b.next && !b.lock).map((b) => b.next), 'one card per open branch');
+  assert.deepEqual(g.draft[0], tree.filter((b) => b.next && !b.lock).flatMap((b) => b.options || [b.next]), 'one card per open branch (both sides of a weapon fork)');
   assert.ok(g.draft[0].includes('heavycharge') && g.draft[0].includes('orbital') && g.draft[0].includes('satrecon'));
   assert.ok(!g.draft[0].includes('wideblast'), 'rank 2 waits for rank 1');
   assert.ok(tree.find((b) => b.id === 'gunnery').ranks.includes('double'));

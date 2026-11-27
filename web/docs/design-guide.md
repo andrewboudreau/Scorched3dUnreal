@@ -212,9 +212,9 @@ mine layer.
 The next layer of the roguelike: weapons that grow in two directions, a short
 solo **run** across a small map of fights, and a **boss** at the end of it,
 fought two against one. Built in stages, each playable on its own (see Build
-order).
+order). Stage 1, the variants, is built; the run and the boss are still plans.
 
-### Weapon variants
+### Weapon variants (built)
 
 A **variant** is the same weapon doing its job a different way. It is picked
 in the **skill tree**, so the rule stays whole: points decide how your weapons
@@ -227,15 +227,15 @@ Each variant weapon gets a branch with two ranks:
 2. **An upgrade** of the variant you picked: one named improvement.
 
 The branch only shows when the weapon is in the match. Each rank costs a
-point, like any other. First five families:
+point, like any other. The first five families (the README has the numbers):
 
 | Weapon | Variant A | Variant B | Rank 2 (either) |
 | --- | --- | --- | --- |
 | Breacher | **Bunker Buster**: digs half as deep again and hits a buried or dug-in tank in full | **Splitter**: throws three bomblets outward on impact | 15% wider |
 | Roller | **Seeker**: leans toward the nearest tank as it rolls | **Hopper**: hops once over a bump instead of stopping | rolls half as far again |
-| Napalm | **Sticky**: burns 2 s longer, runs half as far | **Flood**: runs twice as far, burns shorter | burns through rain and shallow water |
+| Napalm | **Sticky**: burns 2 s longer, runs about half as far and lies deeper | **Flood**: more, thinner fuel that runs about half as far again, burns shorter | burns through rain and shallow water |
 | Scatter | **Line**: five shells in a tight row along the aim | **Ring**: five shells round the aim point | a sixth shell |
-| Thunderhead | **Deep Strike**: a deeper crater, more damage at the centre | **Airburst**: goes off 8 m up, no crater, full damage in the radius, hits through a Dirt Bomb dome | 15% wider |
+| Thunderhead | **Deep Strike**: a deeper crater, more damage at the centre | **Airburst**: goes off 8 m up, no crater, damage by the distance across, hits through a Dirt Bomb dome | 15% wider |
 
 Rules for a good variant:
 
@@ -252,7 +252,19 @@ Rules for a good variant:
 - **CPUs** choose by personality (an aggressive CPU picks Splitter and Flood,
   a careful one Bunker Buster and Sticky).
 
-**The skill screen grows**, so on a phone it gets three tabs: **Weapons**
+How it is built: a variant pick is a perk id (`napalm:sticky`, `VARIANT_PERKS`
+in `perks.js`), so it travels in snapshots and online like any other rank.
+`game.weaponOf(player, id)` resolves the weapon (base, patch, then the
+upgrade) for every shot, the CPUs' solver and the kill cam. The hooks are
+`seekNudge`, `hopOver` and `burstNow` in `ballistics.js`, the `throw` impact
+part (the Splitter's bomblets), the `ring` and `along` split shapes, and
+Napalm's `params` (`napalmParams`), kept in the spill's ground op so a
+rebuilt ground matches. Building it added one base rule: rain damps napalm
+(65% damage), which Wet Burn ignores. The aim arc only draws the climb, which
+no variant changes. Gunners and skirmishers count as aggressive, sappers and
+spotters as careful, three times in four on the seeded dice.
+
+**The skill screen grows**, so on a phone it has three tabs: **Weapons**
 (the variant branches), **Mods**, and **Tank** (Firepower, Hull, Gunnery,
 Supply, Chassis).
 
@@ -321,8 +333,8 @@ Beating it ends the run with a summary: the route, the fights, the build.
 
 Each stage ships on its own:
 
-1. **Variants:** the data, the fork rank in the tree, the five families,
-   the skill screen's tabs, CPUs choosing.
+1. **Variants** (built): the data, the fork rank in the tree, the five
+   families, the skill screen's tabs, CPUs choosing.
 2. **The boss in the sandbox:** Custom match > Boss (and `?boss=1`), you and a
    CPU ally against it, so it can be played and tuned before the run exists.
 3. **The run:** map generation, the map screen (touch first), the stops,

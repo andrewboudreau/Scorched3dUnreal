@@ -315,8 +315,9 @@ second column beside the first. On a phone the players box sits top right.
   hurt by how deep the fuel is within 5 m of it, up to 56 in all, credited to
   the shooter. So a tank in a crater or a valley takes the full dose, one on
   the level about 17 from a direct hit, and one on a crest almost nothing.
-  Water and open sky swallow the fuel: in a lake it goes out at once. It
-  leaves the ground scorched but makes no crater. CPU tanks fire it at a
+  Water and open sky swallow the fuel: in a lake it goes out at once. In a
+  Rain round it does 65% of its damage. It leaves the ground scorched but
+  makes no crater. CPU tanks fire it at a
   target sitting in a hollow (`holeDepth`), rarely at one on a crest.
 - **Dirt Bomb** (Standard, $130 for two) bursts into a dome of earth, 20 m
   across the base and 16 m high, the Mound's heap made bigger. A tank with
@@ -652,7 +653,9 @@ second column beside the first. On a phone the players box sits top right.
   Hull, Gunnery, Supply, Chassis, Mod Tuning; `src/core/skills.js`), from the
   perks ticked under Custom match > Perks (none ticked: no skill tree). Ranks
   go in order and last the whole match; unspent points carry over. CPU tanks
-  spend theirs at once. In hotseat each human gets their own skills and
+  spend theirs at once. The screen has three tabs: **Weapons** (the weapon
+  variants, below), **Mods** and **Tank** (Firepower, Hull, Gunnery, Supply,
+  Chassis). In hotseat each human gets their own skills and
   armory in turn, with the hand-off named
   on the button. Owned perks show as tags on the player card and scoreboard.
 
@@ -682,6 +685,33 @@ second column beside the first. On a phone the players box sits top right.
   | Twin Feeds | your Point Defense goes up a level (taken up to twice) |
   | Long-Life Cells | your mods last 2 turns longer and take 25% more damage (only if you own one) |
 | Double Strike | from round 3 on: queue two shots in one turn (see below) |
+
+- **Weapon variants** (`variants` in `src/core/weapons.js`). Five weapons
+  have a branch of their own in the skill tree, shown only when that weapon
+  is in the match. Rank 1 is a fork: two buttons, and taking one shuts the
+  other for the match. Rank 2 upgrades whichever you took. Each costs a skill
+  point. The weapon keeps its price and its place in the rack, and its name
+  shows the variant ("Napalm · Sticky") on the weapon bar, the aim card, the
+  kit strip and the armory card. A variant is a trade, never a straight
+  upgrade, and each passes the armory's price yardstick
+  (`test/economy.test.js`). CPU tanks pick by temper: gunners and skirmishers
+  take the bold side, sappers and spotters the careful one, three times in four.
+
+  | Weapon | Careful | Bold | Rank 2 |
+  | --- | --- | --- | --- |
+  | Breacher (22 m, 70) | **Bunker Buster**: 18 m, 70, digs half again as deep; a tank that is buried, or lower than the blast, is hit by the distance across, so a buried or dug-in tank takes it all | **Splitter**: 16 m, 50, and three bomblets (9 m, 22) thrown out in a star | Wider Charge: blast 15% wider |
+  | Scatter (5 × 28) | **Line**: the five shells land in a row along the line of flight | **Ring**: five bigger shells (12 m, 30) in an even ring round the aim point; none lands in the middle, so a tank dead centre takes only the edges of the five blasts | Sixth Shell |
+  | Roller (14 m, 55) | **Seeker**: leans toward the nearest enemy tank within 50 m as it rolls; 12 m, 46 | **Hopper**: hops once over a bump (0.4 to 8 m high) in its path and rolls on; 14 m, 48 | Long Roll: rolls half as far again |
+  | Napalm (56) | **Sticky**: thick, runs about half as far and lies deeper, burns 11 ticks (about 5 s) for up to 62 | **Flood**: more and thinner fuel that runs about half as far again and spreads wide, five ticks for up to 50 | Wet Burn: burns through rain and over water up to 1.5 m deep |
+  | Thunderhead (30 m, 95) | **Deep Strike**: 25 m, 110, a deeper crater | **Airburst**: goes off 8 m over the ground (`ballistics.burstNow`), 30 m and 90 by the distance across, no crater, so it hits a tank under a Dirt Bomb's dome in full | Wider Charge: blast 15% wider |
+
+  The choice is a perk id like `napalm:sticky` (`VARIANT_PERKS` in
+  `src/core/perks.js`), so it travels in snapshots and online like any rank.
+  `game.weaponOf(player, id)` gives the weapon as that tank fires it (base,
+  then the variant's patch, then the upgrade), and every shot, the CPUs'
+  solver and the kill cam read their numbers from it. Napalm's variants
+  change the flow's numbers (`napalmParams`); the spill's ground op keeps
+  them, so a rebuilt ground matches.
 
 - **Double Strike** (the last Gunnery rank, open from round 3). On a turn, or
   a go at planning a volley, press ×2 (X; on a phone the ×2 button just above
@@ -768,7 +798,8 @@ second column beside the first. On a phone the players box sits top right.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
-  skill tree, modifiers, driving and fuel (`twists.test.js`), the match builder's
+  skill tree, modifiers, driving and fuel (`twists.test.js`), weapon variants
+  (`variants.test.js`), the match builder's
   allow-lists, Random rolls and query params (`builder.test.js`), the launch
   screen's saved state and its migrations (`launch.test.js`), road routing (`paths.test.js`),
   aim history and both firing modes (`volley.test.js`), jump jets, Teleport and Flak

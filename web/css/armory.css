@@ -35,6 +35,7 @@
 .ar-chip { padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, .07); border: 1px solid var(--edge); white-space: nowrap; }
 .ar-chip.gear { border-color: rgba(255, 181, 71, .45); color: var(--accent); }
 .ar-chip.mod { border-color: rgba(157, 184, 255, .55); color: #b9cbff; }
+.ar-chip.var { border-color: rgba(255, 140, 60, .55); color: #ffb27a; }
 
 /* Draft cards: Perk / New mod / Mod level */
 .ar-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 1px 7px; border-radius: 10px;
@@ -61,6 +62,29 @@
 .sk-done { font-size: 12px; font-weight: 700; color: #9be36b; }
 .sk-branch button.buy:disabled { background: #26303c; border-color: var(--edge); color: var(--muted); }
 
+/* The skill screen's tabs: Weapons, Mods, Tank (big enough to tap) */
+.sk-tabs { grid-column: 1 / -1; display: flex; gap: 6px; position: sticky; top: 0; z-index: 1; padding: 2px 0 6px; background: rgb(18, 23, 30); }
+.sk-tab { flex: 1 1 0; min-height: 40px; padding: 6px 10px; border-radius: var(--r); font-weight: 700; font-size: 13px;
+  background: rgba(255, 255, 255, .05); border: 1px solid var(--edge); color: var(--muted); }
+.sk-tab.on { background: #5b46b8; border-color: #8a75e6; color: #fff; }
+.sk-tab-n { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 4px; border-radius: 9px;
+  background: rgba(255, 255, 255, .18); font-size: 11px; }
+
+/* A weapon's branch, and its fork: two variants side by side */
+.sk-weapon { border-color: rgba(255, 181, 71, .4); background: rgba(255, 181, 71, .06); }
+.sk-weapon .ar-badge { background: rgba(255, 181, 71, .22); color: #ffd79a; }
+.sk-weapon .sk-rank.have { background: #9a5d12; border-color: #e0a04a; }
+.sk-fork { grid-column: span 2; }
+.sk-sides { display: flex; align-items: stretch; gap: 6px; }
+.sk-side { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border-radius: var(--r);
+  border: 1px solid var(--edge); background: rgba(0, 0, 0, .18); }
+.sk-side-name { font-weight: 700; font-size: 13px; }
+.sk-side .desc { flex: 1 1 auto; }
+.sk-side button.buy { margin-top: auto; min-height: 38px; background: #9a5d12; border-color: #e0a04a; }
+.sk-side button.buy:hover { background: #b06d18; }
+.sk-or { align-self: center; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sk-note { font-size: 11px; color: var(--muted); }
+
 /* Armory cards */
 .ar-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11px; }
 .ar-role { padding: 0 6px; border-radius: 2px; background: rgba(255, 255, 255, .09); color: var(--text); font-weight: 600; }
@@ -83,4 +107,10 @@
   .ar-card .si-foot { margin-top: auto; }
   .ar-steps { margin: 0 0 8px; }
   .ar-results td { padding: 4px; }
+  .sk-tab { min-height: 36px; padding: 4px 8px; }
+  .ar-card .sk-side .desc { -webkit-line-clamp: 4; }
+}
+/* Portrait phone: one column, so the fork takes the row */
+@media (max-width: 600px) {
+  .sk-fork { grid-column: 1 / -1; }
 }
