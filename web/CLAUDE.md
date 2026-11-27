@@ -15,7 +15,7 @@ render layout, `docs/design-guide.md` for where the design is going, and
   - `ai.js` is the CPUs.
   - The data lives in `weapons.js`, `perks.js` and `mods.js`.
 - `src/render/`: three.js meshes and effects, one file per thing.
-- `src/main.js`: the glue (input, online, the match's events). It's large, and several
+- `src/main.js`: the glue (online, the match's events). It's large, and several
   agents edit it, so keep changes there small and put new UI in its own module
   (as `modsui.js`, `guide.js` and `launch.js` do).
 - `src/guide.js`: the in-game guide (Settings > Guide). It builds its lists
@@ -36,9 +36,10 @@ module, with main.js as glue.
   The HUD (`hudview.js`) and the marks over the tanks read that mode, so add a
   camera behaviour as a mode or a rule there rather than a new flag in main.js.
   main.js hands the rig its reads of the match as `deps` (see the header of
-  `camera.js`) and calls it from events (`turn`, `volley`, `cutKill`, `shake`),
-  keys (`toggleOverview`, `toggleSight`, `toggleFollow`, `peekNext`) and the
-  frame (`updateKill` before the game steps, `update` after).
+  `camera.js`) and calls it from events (`turn`, `volley`, `cutKill`, `shake`)
+  and the frame (`updateKill` before the game steps, `update` after). input.js
+  calls it from keys (`toggleOverview`, `toggleSight`, `toggleFollow`,
+  `peekNext`) and calls `takeOver` when a drag or the wheel takes the camera.
 - **HUD and labels** (`src/hud.js`, `src/labels.js`, `src/rangecard.js`,
   `src/inset.js`, `src/hudlogic.js`, `src/domwrite.js`). `Hud` owns the player
   card, the players box, banners (`banner`, `roundStart`, `turn`, `note`), the
@@ -50,8 +51,19 @@ module, with main.js as glue.
   `domwrite.js`, which skips unchanged values. main.js calls `hud.update(game)`
   and `marks.update(game, { mode, sight, overview, handoff })` each frame and
   keeps a `banner()` wrapper that other modules receive.
-- **Next**: an input router keyed by mode, and the match glue (start, events,
-  back to the menu). The plan is in the header of `camera.js`.
+- **Input** (`src/input.js`, `src/inputmap.js`). `Input` owns the window's key
+  listeners, the held keys (`input.held`), the per-frame aim and drive from
+  held keys and the touch pad (`aim(dt)`), guided-missile steering (`steer()`),
+  the pointer and wheel handling on the view (the sight's drag and pinch, the
+  steering fingers, the drag that takes the camera over) and the SIGHT and
+  weapon-bar buttons. What each input does in which state (key + match,
+  hand-off, online -> action; drag and wheel by camera mode) is `inputmap.js`
+  (no three.js, no DOM, tested in `test/inputmap.test.js`), whose header is
+  the binding table. The touch controls (`touch.js`) press the same keys with
+  synthetic events. Add a key there and its action in `Input.act`, not a new
+  listener in main.js or a UI module.
+- **Next**: the match glue (start, events, back to the menu). The plan is in
+  the header of `camera.js`.
 
 ## Checking work
 

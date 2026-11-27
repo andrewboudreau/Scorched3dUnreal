@@ -23,7 +23,8 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 //   hold      where it is
 //
 // Everywhere but the sight the orbit controls stay live: a drag or wheel zoom
-// takes the camera over (userCam) until the next turn. The camera never sinks
+// takes the camera over (userCam, takeOver()) until the next turn. The view's
+// pointer and wheel handling (the sight's drag and pinch included) is input.js. The camera never sinks
 // into the ground (camlimit.js), and blasts shake it.
 //
 // main.js gives it what it needs from the match through `deps` (functions, read
@@ -51,11 +52,12 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 //    inset.js. Their words and rules are hudlogic.js (pure, tested); DOM writes
 //    go through domwrite.js. main.js hands them rig.labelMode / rig.mode /
 //    rig.modes each frame and calls them from the Game events.
-// 2. Input router (input.js): keys, the touch controls' synthetic keys, pointer
-//    steering and the held-key aim ramp, routed by mode: in 'sight' a drag aims,
-//    in 'kill' nothing but the camera keys, on a hand-off card only Space/Enter.
-//    A pure keymap (key + mode + phase -> action) is testable without the DOM.
-//    The camera's own canvas listeners (here) would move there too.
+// 2. Done: input router. input.js (Input: keys, the touch controls' synthetic
+//    keys, the steering fingers, the held-key aim ramp, the sight's drag, pinch
+//    and wheel, the drag that takes the camera over, X and B) routes each input
+//    through inputmap.js (pure, tested: key + state -> action, and which pointer
+//    route is live in which mode). It is a pure move: every binding does what it
+//    did before, in the same states (no key is shut off by mode yet).
 // 3. Match glue (match.js): startMatch / disposeMatch / toMenuScene and the
 //    Game event switch (handleEvents), which today call into the camera, the
 //    HUD, sound and effects. Split the switch into per-concern handlers
