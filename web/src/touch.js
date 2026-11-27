@@ -23,12 +23,6 @@ export function wantTouch() {
   return q === '1' || coarsePointer;
 }
 
-// Cheap defaults for phone and tablet GPUs: fewer pixels, a smaller shadow map.
-export function mobilePerf(renderer, sky) {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
-  sky.sun.shadow.mapSize.set(2048, 2048);   // 4096² is 64 MB of depth on a phone
-}
-
 // Aim pad and power strip: a drag moves the aim like a trackpad moves a cursor.
 // Slow drags are precise; quick flicks are boosted (pointer acceleration) so a
 // half turn does not take five swipes.

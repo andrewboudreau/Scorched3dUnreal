@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BRIDGE, BUILDINGS, isBuilding } from '../core/scenery.js';
 import { addFogShade } from './terrainMesh.js';
+import { cheapWhenLow } from './detail.js';
 import { look } from './timeofday.js';
 import { ArtifactMesh } from './artifactMesh.js';
 
@@ -354,6 +355,12 @@ vec2 wWave(vec2 p, vec2 d, float k, float speed, float amp) { return d * amp * c
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 {
   vec2 w = vWaterP.xz;
+#ifdef GFX_LOW
+  // Detail Low (render/detail.js): three waves, no bending noise, no patches.
+  vec2 g = wWave(w, vec2(0.80, 0.60), 0.37, 0.9, 1.0)
+         + wWave(w, vec2(-0.36, 0.93), 0.61, 1.2, 0.8)
+         + wWave(w, vec2(0.97, -0.24), 0.89, 1.5, 0.6);
+#else
   vec2 q = w + 5.0 * vec2(wNoise(w * 0.045 + uTime * 0.04), wNoise(w * 0.045 + vec2(7.3, 1.9) - uTime * 0.03));
   vec2 g = wWave(q, vec2(0.80, 0.60), 0.37, 0.9, 1.0)
          + wWave(q, vec2(-0.36, 0.93), 0.61, 1.2, 0.8)
@@ -361,6 +368,7 @@ vec2 wWave(vec2 p, vec2 d, float k, float speed, float amp) { return d * amp * c
          + wWave(q, vec2(-0.69, -0.72), 1.31, 1.9, 0.45)
          + wWave(q, vec2(0.17, -0.99), 1.93, 2.3, 0.3);
   g *= 0.6 + 0.8 * wNoise(w * 0.02 - uTime * 0.02);    // calmer and choppier patches
+#endif
   float fade = clamp(1.0 - length(vViewPosition) / 450.0, 0.1, 1.0);
   vec3 rip = vec3(g.x, 0.0, g.y) * 0.03 * fade;
   normal = normalize(normal + (viewMatrix * vec4(rip, 0.0)).xyz);
@@ -379,6 +387,7 @@ if (uLit > 0.0 && vColor.a < 0.9) totalEmissiveRadiance += vec3(1.0, 0.72, 0.36)
   };
   addFogShade(material, 'props');
   addFogShade(water, 'water');
+  cheapWhenLow(water);
   shared = { geo, tints, material, water, time };
   return shared;
 }

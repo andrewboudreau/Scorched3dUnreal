@@ -120,9 +120,22 @@ localStorage).
 **Settings** (⚙, bottom right on a desktop and top right on a phone, on every screen) holds the sound:
 Master, Effects and Music levels, each with a mute, and the music track. Master
 sits under the device's own volume (a web page cannot set that), so it starts at
-full. Also **Graphics > Fire and smoke** (Full, or Light, the default on phones: fewer
+full. Also **Graphics > Detail** (Auto, High or Low; kept in localStorage as
+`craterfall.graphics`), **Graphics > Fire and smoke** (Full, or Light, the default on phones: fewer
 flames, puffs and embers), full screen where the browser allows it, and the resource-pack review
 where packs are served.
+
+**Detail** switches live, mid-match included (the shaders that change recompile once).
+High is the game as designed. Low is the same game, cheaper to draw: pixel ratio 1,
+a 1024² sun shadow map (tanks, trees and buildings still cast) with a soft blob under
+each tank so it still sits on the ground, the ground's shadow cast from a
+quarter-triangle copy of the terrain, and a plainer ground shader (no warp, one noise
+layer fewer, no bump tilt, no cloud shadows) and water (three waves, no noise).
+**Auto**, the default, picks Low on a touch device with four cores or fewer or 2 GB
+of memory or less; otherwise it times the menu backdrop's frames for a few seconds and
+drops to Low once if their median is over 24 ms. It never climbs back during a
+session. The rule is `src/graphics.js` (tested in `test/graphics.test.js`); what each
+tier draws is `src/render/graphics.js`.
 
 **Guide** (Settings > Guide, from the launch screen or mid-match) is a short in-game
 page in tabs: Basics, Controls (touch first, then keys), Weapons, Mods and perks
@@ -992,7 +1005,8 @@ second column beside the first. On a phone the players box sits top right.
   terrain changes, the City's buildings (`city.js`) and traffic (`traffic.js`),
   the Island's coast and sea (`island.js`), and the `Game` state machine. It emits events and runs headless.
 - `src/render/` holds the terrain mesh (partial updates per crater, roads painted
-  through a mask texture), tank models,
+  through a mask texture), the Detail tiers (`graphics.js`, with the shaders'
+  `GFX_LOW` switch in `detail.js`), tank models,
   effects (blasts that land together, as a Scatter Ring's five, each leave a ring on
   the ground for a moment so the separate impacts read), the instanced scenery and water (`sceneryMesh.js`, with the isles' relics
   in `artifactMesh.js`), the Ridgeline's strata (`ridgeline.js`), the sky, sun and

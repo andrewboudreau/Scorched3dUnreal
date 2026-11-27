@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { makePerlin } from '../core/noise.js';
 import { ridgeMaterials, ridgeShade, ridgeCut } from './ridgeline.js';
 import { CITY } from '../core/city.js';
+import { cheapWhenLow, forgetDetail } from './detail.js';
 
 // Renders a core Heightfield as a lit, vertex-coloured slab with earthen sides.
 // Only the region a crater touched is rewritten after each blast.
@@ -219,6 +220,7 @@ const mat2 gR3 = mat2(0.26, -0.97, 0.97, 0.26);
 vec2 gWarp(vec2 p) { return p + (vec2(gNoise(p * 0.05 + 3.7), gNoise(gR2 * p * 0.05 + 9.1)) - 0.5) * 4.0; }
 float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * w * 1.13 + 5.9) * 0.3 + gNoise(gR3 * w * 2.71 + 8.2) * 0.2; }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+#ifndef GFX_LOW
 {
   float fade = 1.0 - smoothstep(50.0, 420.0, length(vViewPosition));
   if (fade > 0.0) {
@@ -227,17 +229,30 @@ float gRough(vec2 w) { return gNoise(gR1 * w * 0.47 + 1.3) * 0.5 + gNoise(gR2 * 
     vec3 tilt = vec3(h0 - gRough(q + vec2(0.35, 0.0)), 0.0, h0 - gRough(q + vec2(0.0, 0.35))) * (1.3 * fade * (1.0 - 0.8 * gPave));
     normal = normalize(normal + (viewMatrix * vec4(tilt, 0.0)).xyz);
   }
-}`)
+}
+#endif`)
+      // Detail Low (render/detail.js): no warp, two noise layers instead of
+      // three, one for the broad patches, no cloud shadows and no bump tilt.
+      // The same colours, just plainer.
       .replace('#include <color_fragment>', `#include <color_fragment>
+#ifdef GFX_LOW
+vec2 gQW = vGroundP.xz;
+#else
 vec2 gQW = gWarp(vGroundP.xz);
+#endif
 {
   vec2 q = vGroundP.xz;
   vec2 qw = gQW;
+#ifdef GFX_LOW
+  float n = gNoise(gR1 * qw * 0.083 + 2.1) * 0.6 + gNoise(gR3 * qw * 1.63 + 4.4) * 0.4;
+  float m = smoothstep(0.3, 0.7, gNoise(gR3 * q * 0.012 + 7.0));
+#else
   float n = gNoise(gR1 * qw * 0.083 + 2.1) * 0.5 + gNoise(gR2 * qw * 0.29 + 6.3) * 0.3 + gNoise(gR3 * qw * 1.63 + 4.4) * 0.2;
-  diffuseColor.rgb *= 0.84 + 0.32 * n;
   // Broad patches, tens of metres across: drier, yellower grass in some,
   // lusher and cooler in others, so a wide field is never one even tone.
   float m = smoothstep(0.25, 0.75, gNoise(gR3 * q * 0.012 + 7.0) * 0.7 + gNoise(gR1 * q * 0.031 + 1.0) * 0.3);
+#endif
+  diffuseColor.rgb *= 0.84 + 0.32 * n;
   diffuseColor.rgb *= mix(vec3(0.97, 1.0, 1.02), vec3(1.035, 1.01, 0.93), m);
   // Gravel where the path mask says so, with a ragged edge and a little grit.
   float pm = texture2D(uPath, q * uPathScale + 0.5).r;
@@ -258,12 +273,14 @@ vec2 gQW = gWarp(vGroundP.xz);
     vec3 gravel = vec3(0.47, 0.41, 0.31) * (0.8 + 0.32 * gHash(floor(q * 2.6))) * (0.9 + 0.2 * n);
     diffuseColor.rgb = mix(diffuseColor.rgb, gravel, worn * 0.9);
   }
+#ifndef GFX_LOW
   float shade = 0.0;
   for (int i = 0; i < ${MAX_CLOUD_SHADOWS}; i++) {
     vec3 c = uCloud[i];
     shade = max(shade, 1.0 - smoothstep(c.z * 0.35, c.z, length((q - c.xy) * vec2(0.6, 1.0))));
   }
   diffuseColor.rgb *= 1.0 - 0.22 * shade;
+#endif
   if (uFogOn > 0.5) {
     float d = 1e5;
     for (int i = 0; i < ${MAX_FOG_SPOTS}; i++) {
@@ -322,6 +339,40 @@ function gridFor(field) {
 
 const TMP = new THREE.Color();
 
+// Detail Low (render/graphics.js): the ground casts its shadow from a coarser
+// copy of itself, every other vertex each way (a quarter of the triangles),
+// drawn only in the shadow pass. It shares the full mesh's position buffer, so
+// craters reach it with no work of its own. The sun's shadow camera sees layer
+// SHADOW_LAYER as well as 0; the view's camera sees only 0.
+export const SHADOW_LAYER = 1;
+const PROXY_STEP = 2;
+const proxyMaterial = new THREE.MeshBasicMaterial();   // the shadow pass uses its own depth shader
+const live = new Set();   // TerrainMeshes not yet disposed (the menu's and the match's)
+let lowShadow = false;
+
+export function setTerrainLow(on) {
+  lowShadow = !!on;
+  for (const t of live) t.setLowShadow(lowShadow);
+}
+
+// The coarse grid's triangles (`open`: the isles' open-sky vertices; a coarse
+// quad with every corner open is left out, as rebuildIndex does).
+function coarseIndex(field, open = null) {
+  const n = field.n, res = field.res;
+  const out = [];
+  for (let j = 0; j < res; j += PROXY_STEP) {
+    const j2 = Math.min(res, j + PROXY_STEP);
+    for (let i = 0; i < res; i += PROXY_STEP) {
+      const i2 = Math.min(res, i + PROXY_STEP);
+      const a = j * n + i, b = j * n + i2, c = j2 * n + i, d = j2 * n + i2;
+      if (open && open[a] && open[b] && open[c] && open[d]) continue;
+      if (((i + j) / PROXY_STEP) & 1) out.push(a, c, d, a, d, b);
+      else out.push(a, c, b, b, c, d);
+    }
+  }
+  return n * n > 65535 ? new Uint32Array(out) : new Uint16Array(out);
+}
+
 export class TerrainMesh {
   constructor(field) {
     this.field = field;
@@ -348,6 +399,7 @@ export class TerrainMesh {
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
     this.paths = { map: { value: NO_PATHS }, scale: { value: 1 / field.size }, city: { value: 0 }, slot: null, dirty: null };
     addGroundDetail(this.material, this.paths);
+    cheapWhenLow(this.material);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = true;
@@ -385,6 +437,27 @@ export class TerrainMesh {
     this.openMask = null;
     this.cut = null;     // a ridgeline's cut below the crust per vertex (useRidge)
     this.cityBase = this.cityPaved = null;   // the City's ground as dealt and its pavement (setPaths), for rubble colour
+    this.proxy = null;   // the coarse shadow caster (setLowShadow)
+    live.add(this);
+    this.setLowShadow(lowShadow);
+  }
+
+  // Detail Low: the coarse copy casts the ground's shadow instead of the full mesh.
+  setLowShadow(on) {
+    if (on && !this.proxy) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', this.geometry.attributes.position);
+      g.setIndex(new THREE.BufferAttribute(coarseIndex(this.field, this.under ? this.openMask : null), 1));
+      const m = this.proxy = new THREE.Mesh(g, proxyMaterial);
+      m.castShadow = true;
+      m.receiveShadow = false;
+      m.frustumCulled = false;
+      m.layers.set(SHADOW_LAYER);
+      this.group.add(m);
+    }
+    if (this.proxy) this.proxy.visible = on;
+    this.mesh.castShadow = !on;
+    if (this.under) this.under.mesh.castShadow = !on;
   }
 
   // A ridgeline field (core/ridgeline.js) wears banded rock (render/ridgeline.js):
@@ -430,7 +503,7 @@ export class TerrainMesh {
       totalEmissiveRadiance += diffuseColor.rgb * 0.17;`);
     };
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
+    mesh.castShadow = !this.proxy?.visible;
     mesh.receiveShadow = true;
     this.group.add(mesh);
     this.under = { geo, pos, nrm, col, mesh };
@@ -464,6 +537,7 @@ export class TerrainMesh {
     this.geometry.setIndex(new THREE.BufferAttribute(top.slice(0, w), 1));
     this.under.geo.setIndex(new THREE.BufferAttribute(bot.slice(0, w), 1));
     this.under.geo.computeBoundingSphere();
+    if (this.proxy) this.proxy.geometry.setIndex(new THREE.BufferAttribute(coarseIndex(f, open), 1));
   }
 
   // Paint these paths (core/paths.js) onto the ground, replacing any before;
@@ -579,6 +653,10 @@ export class TerrainMesh {
   }
 
   dispose() {
+    live.delete(this);
+    forgetDetail(this.material);
+    // The proxy shares the position buffer: its index only, then the full geometry.
+    if (this.proxy) { this.proxy.geometry.deleteAttribute('position'); this.proxy.geometry.dispose(); this.proxy = null; }
     this.geometry.dispose();
     if (this.under) { this.under.geo.dispose(); this.under.mesh.material.dispose(); }
     this.skirtGeometry.dispose();
@@ -608,7 +686,10 @@ export class TerrainMesh {
     if (f.under) this.ensureUnder();
     else {
       if (this.under) this.under.mesh.visible = false;
-      if (this.geometry.index !== this.sharedIndex) this.geometry.setIndex(this.sharedIndex);
+      if (this.geometry.index !== this.sharedIndex) {
+        this.geometry.setIndex(this.sharedIndex);
+        if (this.proxy) this.proxy.geometry.setIndex(new THREE.BufferAttribute(coarseIndex(f), 1));
+      }
     }
     this.updateRegion({ i0: 0, i1: f.res, j0: 0, j1: f.res }, true);
     this.geometry.computeBoundingSphere();
