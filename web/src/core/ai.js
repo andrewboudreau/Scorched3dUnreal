@@ -75,7 +75,10 @@ export function dragSeed(power, elev, dist, gravity, drag) {
   return power;
 }
 
-export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, burst = 0 }) {
+// `pass` (m): aim to pass that high over the target rather than hit it (a
+// proximity fuse, flakPass): each trial shot is judged by where it comes down
+// through that height over the target, not where it lands.
+export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25, tolerance = 1.5, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, burst = 0, pass = 0 }) {
   const sx = shooter.x;
   const sz = shooter.z;
   const tx = target[0];
@@ -98,10 +101,13 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
     const shot = simulateShot({
       pos: muzzleOrigin(shooter, yaw, elev),
       vel: launchVelocity(yaw, elev, power),
-      wind, terrain, gravity, windK, drag, level: target[1] - 1, field, t0, burst,
+      wind, terrain, gravity, windK, drag, level: target[1] - 1, field, t0, burst, recordPath: pass > 0,
     });
-    // A shell that fell past an isle is judged by where it came down through the target's height.
-    const [ix, iy, iz] = shot.kind === 'lost' && shot.cross ? shot.cross : shot.point;
+    // A shell that fell past an isle is judged by where it came down through
+    // the target's height; one aimed to pass over, by where it came down
+    // through that height over it (or where it landed, if it never did).
+    const over = pass > 0 ? descentThrough(shot, target[1] - 1 + pass) : null;
+    const [ix, iy, iz] = over || (shot.kind === 'lost' && shot.cross ? shot.cross : shot.point);
     // A shell that struck a building in the City (core/city.js) is judged in
     // three dimensions: a hit high on a tower beside the target is no hit.
     const wall = shot.point.building != null;
@@ -146,6 +152,21 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
   };
 }
 
+// Where a simulated flight (simulateShot with recordPath) first came down
+// through height `level`, or null: the recorded path, interpolated.
+export function descentThrough(shot, level) {
+  const path = shot.path || [];
+  for (let k = 1; k < path.length; k++) {
+    if ((shot.breaks || []).includes(k)) continue;   // a wrap: no segment across
+    const [a, b] = [path[k - 1], path[k]];
+    if (a[1] >= level && b[1] < level) {
+      const f = (a[1] - level) / (a[1] - b[1]);
+      return [a[0] + (b[0] - a[0]) * f, level, a[2] + (b[2] - a[2]) * f];
+    }
+  }
+  return null;
+}
+
 // A CPU's shot at `target` (a player). `field` / `t0` are the enemy orbiters'
 // wells as a function of the game clock and the clock at launch (see
 // simulateShot): the solver flies its trial shots through them. `memory` belongs to the shooter and maps
@@ -154,9 +175,9 @@ export function solveShot({ shooter, target, wind, terrain, rng, iterations = 25
 // A target or shooter that has moved, or a change in the wind, puts some back.
 // `sharpen` (0..1) scales the error it carries into this shot: a Survey
 // Satellite overhead to read (satelliteSharpen); the memory itself is kept.
-export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null, sharpen = 1, burst = 0 }) {
+export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'normal', memory, gravity = GRAVITY, windK = 1, drag = 0, field = null, t0 = 0, scatter = null, sharpen = 1, burst = 0, pass = 0 }) {
   const cfg = DIFFICULTY[difficulty] || DIFFICULTY.normal;
-  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, drag, field, t0, burst });
+  const sol = solveShot({ shooter, target: [target.x, target.y + 1, target.z], wind, terrain, rng, gravity, windK, drag, field, t0, burst, pass });
   const fresh = (k) => ({ yaw: rng.gauss() * cfg.yaw * k, power: rng.gauss() * cfg.power * k });
   let m = memory[target.id];
   if (!m) {
@@ -192,6 +213,19 @@ export function planShot({ shooter, target, wind, terrain, rng, difficulty = 'no
   m.power *= keep();
   m.shots++;
   return out;
+}
+
+// Flak (a proximity fuse, weapons.js `airburst`) is not aimed at a tank but
+// over it: it bursts on its nearest pass, `low`..`high` m above (or at its
+// `floor` over the ground), and rains its fragments down. How high a CPU aims
+// to pass over the tank, by difficulty: 0 aims at the tank like a shell, so
+// the fuse goes off at its floor short of it. Easy CPUs don't know the trick.
+// About 10 m does most (tools/balance.mjs flak). planShot's `pass`.
+export const FLAK_PASS = { easy: 0, normal: 10, hard: 10 };
+export function flakPass(weapon, difficulty = 'normal') {
+  const fuse = (weapon?.flight || []).find((f) => f.type === 'airburst');
+  if (!fuse) return 0;
+  return FLAK_PASS[difficulty] ?? FLAK_PASS.normal;
 }
 
 // Pick a target: nearest enemy for easy/normal, weakest for hard.

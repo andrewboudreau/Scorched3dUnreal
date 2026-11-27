@@ -3,7 +3,7 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, burstNow, hopOver, HOP, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, throwVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, bossMoves, bossHop, planDodge, TEMPERS, UTILITY, ARSENAL } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, bossMoves, bossHop, planDodge, flakPass, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { BOSS, bossPhase, fromAbove, weakSpot, freshBossState, bossStarts, buildFort, fortSpots } from './boss.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
@@ -754,6 +754,7 @@ export class Game {
         ...this.orbitField(p),
         sharpen: this.aiSharpen(p),
         burst: this.burstHeight(p, weapon),   // an Airburst is judged where it goes off
+        pass: flakPass(this.weaponOf(p, weapon), p.ai),   // Flak is aimed to pass over the target
       });
       if (weapon === 'ranger') readRange(p.aim, target.id, p.ai);   // it reads the probes
     }

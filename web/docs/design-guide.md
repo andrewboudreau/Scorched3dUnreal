@@ -351,7 +351,7 @@ partner. Online later: two players against the boss, a co-op run.
 The boss is a tank with a script, deterministic like the rest of the core (a
 `boss` flag on the player, its moves chosen in `ai.js` by phase):
 
-- **Big:** half as large again as a tank, with about 400 hp, on a raised
+- **Big:** half as large again as a tank, with about 370 hp, on a raised
   platform at one end of a walled arena. As built: a walled meadow (hills
   at most Hilly), the **Bulwark** on a flat-topped fort 18 m over the ground
   round it, with two lower ledges a jet hop away (`core/boss.js`).
