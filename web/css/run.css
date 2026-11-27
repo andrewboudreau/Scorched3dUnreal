@@ -13,7 +13,7 @@
 #run-new:only-of-type, .run-launch #run-new:not(.alt) { grid-column: 1 / -1; }
 .run-go.alt { border-color: var(--edge); color: var(--text); background: #26303c; }
 #run-continue { border-color: #5fd0bd; }
-.run-abandon { grid-column: 1 / -1; min-height: 36px !important; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; }
+.run-abandon { grid-column: 1 / -1; min-height: 40px !important; padding: 4px 10px; font-size: 12px; color: var(--muted); background: none; }
 .run-abandon:hover { color: #ff9a8a; border-color: #b6574c; background: none; }
 /* Last run: the finished run's summary again, a quiet button under the others. */
 .run-last { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-height: 44px; padding: 6px 12px; text-align: left;
