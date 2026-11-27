@@ -191,6 +191,39 @@ test('city: a tank cannot drive or hop into a building, or teleport into one', (
   assert.ok(g.obstacles().some((o) => o.box));
 });
 
+test('city: a tank drives into a blown-out corner, under what hangs over it, and back out', () => {
+  const { t, c } = lot([[0, 0, 10, 10, 6]]);
+  const b = c.buildings[0];
+  const drive = (tank, dir = 1) => {
+    let r, steps = 0;
+    while ((r = driveStep(tank, t, dir, 0.1, c.standing)) === 'ok' && steps++ < 600);
+    return r;
+  };
+  // Intact, the building is its box: a tank heading for the corner stops outside it.
+  const before = { x: -30, y: 0, z: -30, hull: 45, fuel: 200, alive: true };
+  assert.equal(drive(before), 'blocked');
+  assert.ok(before.x < -10 && before.z < -10, `stopped outside, at ${before.x}, ${before.z}`);
+  // Blow out the south-west ground corner: the floors over it hang (7 m up).
+  c.blast(-10, b.base + 2, -10, 14, 55);
+  assert.deepEqual(alive(b), [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  const tank = { x: -30, y: 0, z: -30, hull: 45, fuel: 200, alive: true };
+  assert.equal(drive(tank), 'blocked');
+  assert.ok(tank.x > -10 + 4 && tank.z > -10 + 4, `parked in the gap, at ${tank.x}, ${tank.z}`);
+  assert.ok(tank.x < -TANK.bodyRadius + 0.5 && tank.z < -TANK.bodyRadius + 0.5, 'clear of the standing chunks');
+  // It backs out the way it came.
+  assert.equal(driveStep(tank, t, -1, 0.1, c.standing), 'ok');
+  // The standing chunks still stop it: along the south face, past the gap.
+  const side = { x: 5, y: 0, z: -30, hull: 90, fuel: 200, alive: true };
+  assert.equal(drive(side), 'blocked');
+  assert.ok(side.z < -10 - TANK.bodyRadius + 0.5, `stopped at the wall, z ${side.z}`);
+  // A Teleport into the gap lands there; a hop's arc may pass through it.
+  const spot = findSpot(tank, t, c.standing, -5, -5);
+  assert.deepEqual([spot.x, spot.z], [-5, -5]);
+  const hopper = { x: -27, y: t.heightAt(-27, -27), z: -27, hull: 45, fuel: 0, jets: 1, alive: true };
+  const hop = planHop(hopper, t, c.standing, 45);
+  assert.ok(hop.ok && hop.x < -TANK.bodyRadius + 0.5, `hop lands at ${hop.x}, ${hop.z}`);
+});
+
 test('city: the CPU lobs over a tower between it and its target', () => {
   const { t } = lot([[0, 0, 12, 12, 11]]);   // about 39 m tall
   const shooter = { x: -45, y: t.heightAt(-45, 0), z: 0 };
@@ -304,28 +337,104 @@ test('city: a chunk with nothing under it falls, unless its neighbours hold it',
   const fallen = c2.blast(10, m.base + 1, -10, 6, 16);
   assert.equal(fallen.heaps.length, 0);
   assert.deepEqual(alive(m), [1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 'it hangs over the gap');
-  // Take a neighbour's foot too and it no longer holds: the column falls, with
-  // a heap of debris in the street, and with half its ground floor gone the
-  // building comes down.
+  // Take a neighbour's foot too and neither holds the other: with no foot
+  // under either column, one neighbour is not enough, so the east side falls
+  // into the street (a heap of debris for each column) and the west half stands.
   m.cells[3] = 1;
   const f2 = c2.blast(10, m.base + 1, 10, 6, 16);
-  assert.ok(f2.heaps.length >= 1);
-  assert.equal(m.cells[5] + m.cells[9], 0, 'the south-east column fell');
+  assert.equal(f2.heaps.length, 2);
+  assert.equal(m.cells[5] + m.cells[9] + m.cells[7] + m.cells[11], 0, 'the east columns fell');
   const h = f2.heaps[0];
   assert.ok(Math.abs(h.x) > m.hx && Math.abs(h.z) > m.hz, `the heap lands outside, at ${h.x}, ${h.z}`);
-  assert.ok(f2.includes(m.id));
+  assert.ok(!f2.includes(m.id) && !c2.failing(m), 'half its ground floor is not enough to bring it down');
+  // A third foot is.
+  m.cells[0] = 1;
+  assert.ok(c2.blast(-10, m.base + 1, -10, 6, 16).includes(m.id));
 });
 
-test('city: losing half the ground floor brings a building down, in the game too', () => {
+test('city: a hole holds the floors above it on one sound neighbour, until a second hit wears it', () => {
+  // Ten storeys: bands of three floors, three, three and one.
+  const { c } = lot([[0, 0, 12, 12, 10]]);
+  const b = c.buildings[0];
+  // Knock the south half of the second band out by hand and let it settle:
+  // the floors above hang off the north half (one neighbour each, the chunk
+  // across the corner standing), over a foot that still stands.
+  b.cells[4] = b.cells[5] = 0;
+  c.settle(b, [], 0, -20);
+  c.refresh(b);
+  assert.deepEqual(alive(b), [1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  // Worn below CITY.sound, the north half lets go at the next blast that reaches it.
+  b.cells[10] = b.cells[11] = b.cellMax[10] * CITY.sound * 0.9;
+  const fallen = c.blast(0, b.base + 30, b.hz + 5, 6, 8);   // a small blast off the north side: no chunk lost
+  const e = c.events.find((k) => k.how === 'chunks');
+  assert.ok(e && e.lost.length === 0 && e.fell.length === 4, `fell ${e?.fell}`);
+  assert.equal(fallen.heaps.length, 2);
+  assert.deepEqual(alive(b).slice(8), [0, 0, 1, 1, 0, 0, 1, 1]);
+  // A cantilever over a lost foot is not a hole: one neighbour does not hold it.
+  const { c: c3 } = lot([[0, 0, 12, 12, 10]]);
+  const t3 = c3.buildings[0];
+  t3.cells[0] = t3.cells[1] = 0;
+  c3.settle(t3, [], 0, -20);
+  assert.deepEqual(alive(t3).filter((v, k) => k % 4 < 2), [0, 0, 0, 0, 0, 0, 0, 0]);
+});
+
+test('city: a Breacher into a tall facade punches a hole; a second one nearby drops what hangs', () => {
+  for (const [hx, hz, floors, drops] of [[11, 10, 7, true], [12, 12, 10, true], [15, 15, 10, false]]) {
+    const { c } = lot([[0, 0, hx, hz, floors]]);
+    const b = c.buildings[0];
+    const y = b.base + (b.top - b.base) * 0.5;
+    const fallen = c.blast(0, y, -hz, 22, 70);
+    assert.equal(fallen.length, 0, 'still standing');
+    const per = b.nx * b.nz;
+    // A gap in the south face with standing floors above it, at full height.
+    const gap = b.cells.findIndex((v, k) => v <= 0 && k >= per && (k % per) < 2);
+    assert.ok(gap > 0, `a hole (${alive(b)})`);
+    assert.ok(b.cells.some((v, k) => v > 0 && k > gap && k % per === gap % per), `floors over it (${alive(b)})`);
+    assert.equal(b.floors, floors);
+    // A second Breacher, a little higher and to the side, wears down what
+    // holds them, and in all but the broadest tower they come down.
+    const hung = b.cells.map((v, k) => (v > 0 && k > gap && k % per === gap % per ? k : -1)).filter((k) => k >= 0);
+    const down = c.blast(3, y + 3, -hz, 22, 70);
+    assert.equal(down.length > 0 || hung.every((k) => b.cells[k] <= 0), drops, `${floors} floors, ${hx * 2} m: ${alive(b)}`);
+  }
+});
+
+test("city: one Shell takes a shop's ground corner, not the shop; two or three bring it down", () => {
+  for (const [hx, hz] of [[6, 9], [5.5, 6], [6, 10]]) {
+    const { c } = lot([[0, 0, hx, hz, 2]]);
+    const b = c.buildings[0];
+    const fallen = c.blast(-hx, b.base + 1.5, -hz, 11, 38);
+    assert.equal(fallen.length, 0, `${hx}x${hz} stands`);
+    assert.equal(b.cells[0], 0, 'the ground corner is gone');
+    assert.ok(b.cells[4] > 0, 'the floor over it hangs between its neighbours');
+    assert.equal(alive(b).reduce((s, v) => s + v, 0), 7);
+    // More shells at its foot: down in two or three.
+    let n = 1;
+    const feet = [[hx, -hz], [-hx, hz], [hx, hz]];
+    while (!b.collapsed && n < 6) {
+      const [x, z] = feet[(n - 1) % 3];
+      for (const id of c.blast(x, b.base + 1.5, z, 11, 38)) c.collapse(id);
+      n++;
+    }
+    assert.ok(b.collapsed && n >= 2 && n <= 3, `${hx}x${hz} down after ${n}`);
+  }
+});
+
+test('city: losing three of four ground quadrants brings a building down, in the game too', () => {
   const g = city(17, 2);
   const b = g.town.buildings.find((k) => k.nx === 2 && k.nz === 2 && k.floors0 >= 4 && k.floors0 <= 6);
   assert.ok(b, 'a mid-rise to try it on');
+  const foot = (sx, sz) => g.applyEffect({ type: 'blast', point: [b.x + sx * b.hx, b.base + 1, b.z + sz * b.hz], radius: 14, damage: 55, depth: 0.6 }, null, null);
   // One ground corner: still standing.
-  g.applyEffect({ type: 'blast', point: [b.x - b.hx, b.base + 1, b.z - b.hz], radius: 14, damage: 55, depth: 0.6 }, null, null);
+  foot(-1, -1);
   assert.equal(b.cells[0], 0);
   assert.ok(!b.collapsed);
-  // The other on that side: down it comes, into a rubble mound.
-  g.applyEffect({ type: 'blast', point: [b.x + b.hx, b.base + 1, b.z - b.hz], radius: 14, damage: 55, depth: 0.6 }, null, null);
+  // The other on that side: the south side falls into the street, the north half stands.
+  foot(1, -1);
+  assert.equal(b.cells[0] + b.cells[1], 0);
+  assert.ok(!b.collapsed, 'half a ground floor holds');
+  // A third: down it comes, into a rubble mound.
+  if (b.cells[2] > 0) foot(-1, 1);
   assert.ok(b.collapsed);
   assert.ok(g.ground.ops.some((o) => o[0] === 'r' && o[1] === b.id));
   assert.equal(g.town.contact([b.x - 60, b.base + 4, b.z], [b.x + 60, b.base + 4, b.z])?.building === b.id, false);
@@ -366,4 +475,25 @@ test('city: snapshot and restore carry every chunk; the ops replay to the same c
   r.rebuildGround(a.round, JSON.parse(JSON.stringify(a.ground)));
   assert.deepEqual(r.town.buildings.map((k) => k.cells), a.town.buildings.map((k) => k.cells));
   assert.deepEqual(Array.from(r.terrain.heights), Array.from(a.terrain.heights));
+});
+
+test('city: holes, worn neighbours and what they drop replay exactly from the ops and the snapshot', () => {
+  const a = city(23, 2);
+  const towers = [...a.town.buildings].sort((p, q) => q.floors0 - p.floors0).slice(0, 5);
+  const blast = (g, x, y, z, r, d) => g.applyEffect({ type: 'blast', point: [x, y, z], radius: r, damage: d, depth: 0.7 }, null, null);
+  for (const [i, b] of towers.entries()) {
+    const y = b.base + (b.top - b.base) * 0.5, sz = i % 2 ? 1 : -1;
+    blast(a, b.x, y, b.z + sz * b.hz, 22, 70);                  // a Breacher's hole
+    blast(a, b.x + 3, y + 4, b.z + sz * b.hz, 11, 38);          // a Shell beside it
+  }
+  assert.ok(a.town.buildings.some((b) => !b.collapsed && b.lost > 0), 'some stand holed');
+  const cells = (g) => g.town.buildings.map((b) => b.cells.map((v) => Math.round(v * 100) / 100));
+  const r = city(23, 2);
+  r.rebuildGround(a.round, JSON.parse(JSON.stringify(a.ground)));
+  assert.deepEqual(r.town.buildings.map((k) => k.cells), a.town.buildings.map((k) => k.cells));
+  assert.deepEqual(Array.from(r.terrain.heights), Array.from(a.terrain.heights));
+  const s = city(23, 2);
+  s.restore(JSON.parse(JSON.stringify(a.snapshot())));
+  assert.deepEqual(cells(s), cells(a));
+  assert.deepEqual(s.town.buildings.map((k) => k.top), a.town.buildings.map((k) => k.top));
 });

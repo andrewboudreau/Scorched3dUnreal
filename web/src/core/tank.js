@@ -1,4 +1,5 @@
 import { muzzleDirection } from './ballistics.js';
+import { chunkRoom } from './city.js';
 
 // Tank geometry shared by the game, the AI and the renderer, so the shell
 // leaves the barrel exactly where the model draws it.
@@ -27,6 +28,7 @@ export const TANK = {
   hullTurnSpeed: 75,   // deg/s, free
   maxClimb: 1.0,       // steepest rise over run the tracks can take (45 degrees)
   bodyRadius: 4.5,     // tanks keep two of these apart
+  height: 3.4,         // m from the ground to the top of the turret: what fits under a building's overhang
 };
 
 // Jump jets: a hop along the hull. The core lands the tank at once (like a
@@ -53,21 +55,31 @@ export function onIsle(terrain, x, z) {
 
 // Can a tank stand at x/z? Inside the arena, out of the water, and clear of
 // every other tank and standing house (`others`, like driveStep's).
-// How much room a tank at x/z has from obstacle `o` (below 0: too close).
-// Tanks and props are round; the City's buildings are boxes (`box`, half
-// sizes `hx` and `hz`), which a tank's hull may come right up to.
-function room(o, x, z) {
+// How much room a tank at x/z, on ground at height y, has from obstacle `o`
+// (below 0: too close). Tanks and props are round; the City's buildings are
+// boxes (`box`, half sizes `hx` and `hz`), which a tank's hull may come right
+// up to. A damaged building is only its standing chunks at the tank's height
+// (city.chunkRoom), so a tank can nose into a blown-out corner or a
+// ground-floor gap, or under what hangs over it, where it fits.
+function room(o, x, z, y) {
   if (o.box) {
     const dx = Math.abs(x - o.x) - o.hx;
     const dz = Math.abs(z - o.z) - o.hz;
-    return Math.hypot(dx > 0 ? dx : 0, dz > 0 ? dz : 0) - TANK.bodyRadius;
+    const d = Math.hypot(dx > 0 ? dx : 0, dz > 0 ? dz : 0) - TANK.bodyRadius;
+    if (d >= 0 || !o.lost || !o.cells) return d;
+    const y0 = y ?? o.base;
+    return chunkRoom(o, x, z, y0, y0 + TANK.height) - TANK.bodyRadius;
   }
   return Math.hypot(o.x - x, o.z - z) - TANK.bodyRadius * 2;
 }
 
-// Does the point x/y/z sit inside a box obstacle (a building)?
+// Does the point x/y/z sit inside a box obstacle (a building), or within a
+// metre of its side? Only a damaged building's standing chunks count.
 function inBox(others, x, y, z) {
-  for (const o of others) if (o.box && y < o.top && Math.abs(x - o.x) < o.hx + 1 && Math.abs(z - o.z) < o.hz + 1) return true;
+  for (const o of others) {
+    if (!o.box || y >= o.top || Math.abs(x - o.x) >= o.hx + 1 || Math.abs(z - o.z) >= o.hz + 1) continue;
+    if (!o.lost || !o.cells || chunkRoom(o, x, z, y, y) < 1) return true;
+  }
   return false;
 }
 
@@ -76,9 +88,10 @@ function standable(tank, terrain, others, x, z) {
   if (Math.abs(x) > edge || Math.abs(z) > edge) return 'edge';
   if (!onIsle(terrain, x, z)) return 'edge';
   if (terrain.heightAt(x, z) < terrain.waterLevel + 0.3) return 'water';
+  const y = terrain.heightAt(x, z);
   for (const o of others) {
     if (o === tank || o.alive === false) continue;
-    if (room(o, x, z) < 0) return 'blocked';
+    if (room(o, x, z, y) < 0) return 'blocked';
   }
   return null;
 }
@@ -159,8 +172,8 @@ export function driveStep(tank, terrain, dir, dt, others = []) {
   if (h < terrain.waterLevel + 0.3 && h <= here) return 'water';
   for (const o of others) {
     if (o === tank || o.alive === false) continue;
-    const then = room(o, x, z);
-    if (then < 0 && then < room(o, tank.x, tank.z)) return 'blocked';
+    const then = room(o, x, z, h);
+    if (then < 0 && then < room(o, tank.x, tank.z, here)) return 'blocked';
   }
   tank.x = x;
   tank.z = z;
