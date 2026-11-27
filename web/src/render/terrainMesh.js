@@ -41,6 +41,12 @@ const C = {
   underDeep: new THREE.Color('#9484ac'),
   underBand: new THREE.Color('#4e3d68'),
   underBed: new THREE.Color('#d2bca2'),
+  // The boss's fort (setFort): a slate deck, pale ledge tops with a lighter lip,
+  // and dark steep faces.
+  fortDeck: new THREE.Color('#a39b89'),
+  fortLedge: new THREE.Color('#d6c79f'),
+  fortLip: new THREE.Color('#ece3c0'),
+  fortFace: new THREE.Color('#554a41'),
 };
 
 // Faint cloud shadows: render/sky.js writes each cloud's shadow here as
@@ -657,6 +663,7 @@ export class TerrainMesh {
           if (d < -0.2) tmp.lerp(C.bed, Math.min(1, (-0.2 - d) / 2.5));
         }
         tmp.lerp(C.rock, Math.min(1, Math.max(0, (slope - 0.12) * 3.2)));
+        if (this.fort) this.fortTint(tmp, f.vx(i), f.vz(j), slope);
         if (this.cityBase) {
           const dh = Math.abs(y - this.cityBase[k]);
           tmp.lerp(C.rubble, this.cityPaved[k] ? 1 : Math.min(1, Math.max(0, dh - 0.15) * 2.5));
@@ -704,6 +711,34 @@ export class TerrainMesh {
       a.needsUpdate = true;
     }
     if (i0 === 0 || j0 === 0 || i1 === f.res || j1 === f.res) this.updateSkirt();
+  }
+
+  // A boss match's fort (core/boss.js fortSpots: [x, z, r] for the deck and
+  // each ledge; `skirt` m of slope round them): colours the ground so the
+  // levels read apart. Colour only: the heights are the core's. Call before rebuild().
+  setFort(spots, skirt) {
+    this.fort = spots ? { spots, skirt } : null;
+  }
+
+  fortTint(c, x, z, slope) {
+    const { spots, skirt } = this.fort;
+    let top = -1;     // 0: the deck, 1+: a ledge
+    let lip = 0;
+    let near = Infinity;
+    for (let s = 0; s < spots.length; s++) {
+      const [cx, cz, r] = spots[s];
+      const d = Math.hypot(x - cx, z - cz);
+      near = Math.min(near, d - r);
+      if (d <= r && (top < 0 || s < top)) top = s;
+      if (d <= r) lip = Math.max(lip, Math.min(1, Math.max(0, (d - (r - 1.8)) / 1.8)));
+    }
+    if (top >= 0) {
+      c.lerp(top === 0 ? C.fortDeck : C.fortLedge, 0.92);
+      if (top === 0 && (Math.floor(x / 3.2) + Math.floor(z / 3.2)) & 1) c.multiplyScalar(0.93);   // flagstones
+      if (lip > 0) c.lerp(C.fortLip, lip * 0.8);
+    } else if (near < skirt + 2) {
+      c.lerp(C.fortFace, Math.min(0.92, Math.max(0, (slope - 0.04) * 5)));
+    }
   }
 
   // One vertex of the underside: its height, a downward normal and a colour

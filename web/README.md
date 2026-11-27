@@ -748,11 +748,15 @@ second column beside the first. On a phone the players box sits top right.
   on top: a hit from above does 25% more. From above means an Airburst, or a
   shell or fragment coming down at least 60 degrees below the horizontal
   (a high lob; not Flak's fragments, which always fall steeply); the bar
-  flashes when one lands. A banner
+  flashes when one lands. The fort is drawn so its levels read: a slate deck
+  with a crenelled rim, paler ledge tops with lamp posts and bollards, and
+  dark steep faces (colour and props only; the heights are the core's). A banner
   announces each phase. **Teams:** allies are never a CPU's target, an ally's
   mods let your shells by, and hitting your ally still hurts but earns
   nothing. The round ends when one side is wiped out, and every tank left on
-  that side wins it. Online, the room's tanks are the Bulwark's foes and it
+  that side wins it. The match-over screen says "Allies win" or "The Bulwark
+  wins" and lists the allies by damage dealt to the boss (not wins or funds),
+  then the boss (`bossStandings` in `core/boss.js`). Online, the room's tanks are the Bulwark's foes and it
   joins as the last CPU; it runs on every screen like any CPU.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
@@ -812,6 +816,11 @@ second column beside the first. On a phone the players box sits top right.
   `arena.js` is the arena's boundary: the Edges curtains, bounce flashes and
   wrap ripples, the Island's open sea and splashes. `bossMark.js` is the
   boss's telegraph: the ring and column of light on the marked spot.
+  `bulwarkMesh.js` is the Bulwark's own model (a TankMesh with its own build:
+  broad dark-steel hull, armour skirts with amber hems, a squat turret, twin
+  barrels ending in one muzzle block, a sensor mast whose amber beacon pulses
+  faster each phase; about eighteen draw calls). `fortMesh.js` is the fort's
+  props, drawn only (crenels, bollards, lamp posts; one instanced mesh each).
 - `src/armory.js` is the between-rounds screens (stepper, results, skill tree, kit, armory);
   `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's; `src/bossui.js` is the boss match's

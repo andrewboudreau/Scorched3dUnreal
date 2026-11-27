@@ -8,7 +8,7 @@ const TRACK_HALF = 2.2;       // the tracks sit this far either side of the cent
 
 // Tread plates, drawn once and scrolled by texture offset.
 let treadImage = null;
-function treadTexture() {
+export function treadTexture() {
   if (!treadImage) {
     treadImage = document.createElement('canvas');
     treadImage.width = 32;
@@ -31,7 +31,7 @@ function treadTexture() {
 
 // A soft round glow, shared by every tank's headlights.
 let glowImage = null;
-function glowTexture() {
+export function glowTexture() {
   if (!glowImage) {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
@@ -50,8 +50,8 @@ function glowTexture() {
 
 // A track run whose plates travel the right way on every face: the top goes
 // forward while the bottom goes back, and both sides agree with the top.
-function trackGeometry() {
-  const g = new THREE.BoxGeometry(7.0, 1.2, 1.1);
+export function trackGeometry(length = 7.0, height = 1.2, depth = 1.1) {
+  const g = new THREE.BoxGeometry(length, height, depth);
   const uv = g.attributes.uv;
   // BoxGeometry faces come in the order +x -x +y -y +z -z, four vertices each.
   for (const face of [3, 5]) for (let i = face * 4; i < face * 4 + 4; i++) uv.setX(i, 1 - uv.getX(i));
@@ -63,6 +63,27 @@ function trackGeometry() {
 // says the shell spawns. Everything that moves on it is driven from `sync`.
 export class TankMesh {
   constructor(color) {
+    this.trackHalf = TRACK_HALF;          // a model with other tracks (render/bulwarkMesh.js) sets these in build()
+    this.exhaustAt = [-3.6, 2.5, 1.25];   // hull-space exhaust: x, y and the side offset
+    this.build(color);
+    this.recoil = 0;
+    this.work = 0;                    // 0..1, how hard the engine is running
+    this.sway = [0, 0];               // aerial lean, along and across the turret
+    this.swayV = [0, 0];
+    this.spin = [0, 0];               // wheel angle per side
+    this.last = null;
+    this.time = Math.random() * 10;
+    this._up = new THREE.Vector3(0, 1, 0);
+    this._n = new THREE.Vector3();
+    this._q = new THREE.Quaternion();
+    this._qy = new THREE.Quaternion();
+    this._qr = new THREE.Quaternion();
+    this._axis = new THREE.Vector3();
+  }
+
+  // The model: sets root, hull, turret, barrelPivot, antenna, wheels (each with
+  // userData.side), treads, materials. A subclass swaps in its own.
+  build(color) {
     const base = new THREE.Color(color);
     const dark = base.clone().multiplyScalar(0.55);
     const paint = new THREE.MeshStandardMaterial({ color: base, roughness: 0.55, metalness: 0.25, flatShading: true });
@@ -150,20 +171,6 @@ export class TankMesh {
         this.hull.add(s);
       }
     }
-
-    this.recoil = 0;
-    this.work = 0;                    // 0..1, how hard the engine is running
-    this.sway = [0, 0];               // aerial lean, along and across the turret
-    this.swayV = [0, 0];
-    this.spin = [0, 0];               // wheel angle per side
-    this.last = null;
-    this.time = Math.random() * 10;
-    this._up = new THREE.Vector3(0, 1, 0);
-    this._n = new THREE.Vector3();
-    this._q = new THREE.Quaternion();
-    this._qy = new THREE.Quaternion();
-    this._qr = new THREE.Quaternion();
-    this._axis = new THREE.Vector3();
   }
 
   sync(p, terrain, dt) {
@@ -181,7 +188,7 @@ export class TankMesh {
     if (Math.abs(turned) > 0.5) turned = 0;
     const yawRate = dt > 0 ? (((p.yaw - last.yaw + 540) % 360) - 180) / dt : 0;
     last.x = p.x; last.z = p.z; last.hull = hull; last.yaw = p.yaw;
-    const run = [along + turned * TRACK_HALF, along - turned * TRACK_HALF];
+    const run = [along + turned * this.trackHalf, along - turned * this.trackHalf];
     run.forEach((d, s) => {
       this.treads[s].offset.x -= d / TRACK_PITCH / 10;
       this.spin[s] -= d / 0.5;
@@ -221,7 +228,7 @@ export class TankMesh {
 
   // World position of the exhaust pipes, for smoke.
   exhaust(out, side = 1) {
-    return this.hull.localToWorld(out.set(-3.6, 2.5, side * 1.25));
+    return this.hull.localToWorld(out.set(this.exhaustAt[0], this.exhaustAt[1], side * this.exhaustAt[2]));
   }
 
   dispose() {

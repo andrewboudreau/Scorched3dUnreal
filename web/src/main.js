@@ -18,6 +18,8 @@ import { ArenaView } from './render/arena.js';
 import { BUILDINGS } from './core/scenery.js';
 import { isArtifact } from './core/artifacts.js';
 import { TankMesh } from './render/tankMesh.js';
+import { BulwarkMesh } from './render/bulwarkMesh.js';
+import { FortView } from './render/fortMesh.js';
 import { Wreck } from './render/wreck.js';
 import { Effects, ShellVisual, QUALITY_KEY } from './render/effects.js';
 import { Sky } from './render/sky.js';
@@ -41,7 +43,7 @@ import { Settings, canFullscreen, isFullscreen, toggleFullscreen } from './setti
 import { defaultMatch, customBoss, onlineBoss, humanName, phoneFullscreen, showLaunchTab, wireLaunch } from './launch.js';
 import { BossUI } from './bossui.js';
 import { BossMarkView } from './render/bossMark.js';
-import { bossMatch } from './core/boss.js';
+import { bossMatch, fortSpots, ARENA } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
@@ -147,6 +149,7 @@ let shopQueue = [];
 let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
 let dayLock = null;             // debug: hold the sun still at this time of day
+let fortView = null;
 let bannerHold = 0;             // a round banner keeps the turn banner waiting until then
 let driveNote = { text: '', until: 0 };
 const _v = new THREE.Vector3();
@@ -238,6 +241,7 @@ function disposeMatch() {
   cityView?.dispose(); cityView = null;
   arenaView.clear();
   bossMark.clear();
+  if (fortView) { scene.remove(fortView.group); fortView.dispose(); fortView = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
   ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
@@ -283,7 +287,7 @@ function startMatch(config) {
   review?.onMatch();
   effects.groundAt = (x, z) => game.terrain.heightAt(x, z);
   tanks = game.players.map((p) => {
-    const m = new TankMesh(p.color);
+    const m = p.boss ? new BulwarkMesh(p.color) : new TankMesh(p.color);
     m.root.scale.setScalar(p.size || 1);   // the boss is bigger
     scene.add(m.root);
     return m;
@@ -323,8 +327,11 @@ function startMatch(config) {
   peek = null;
   buildScoreboard();
   $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
+  // The boss's fort: coloured ground (before the round builds) and rim props, drawn only.
+  if (game.cfg.boss) terrainMesh.setFort(fortSpots(ARENA.boss[0] * game.terrain.half, ARENA.boss[1] * game.terrain.half), ARENA.fort.skirt);
   game.start();
   handleEvents();      // builds the round (terrain, scenery, water) so the warm-up sees it
+  if (game.fort) scene.add((fortView = new FortView(game)).group);
   showHud(true);
   warmShaders();
 }
@@ -2068,12 +2075,13 @@ function showRoundResult(kind) {
   if (!game) return;
   const w = game.lastRoundResult.winner != null ? game.players[game.lastRoundResult.winner] : null;
   if (kind === 'matchOver') {
-    const sorted = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
-    $('mo-title').textContent = bossUi.matchTitle() || `Match winner: ${sorted[0].name}`;
-    $('mo-table').innerHTML = standingsTable(sorted);
+    const boss = bossUi.matchResult();   // a boss match is teams, not wins and funds
+    const sorted = boss ? boss.order : [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
+    $('mo-title').textContent = boss ? boss.title : `Match winner: ${sorted[0].name}`;
+    $('mo-table').innerHTML = boss ? boss.table : standingsTable(sorted);
     $('mo-stats').innerHTML = statsTable(sorted);
     $('mo-awards').innerHTML = awards(game.players);
-    if (session?.isHost) link?.result(session.seatOf[sorted[0].id] ?? null);   // for the players' records
+    if (session?.isHost) link?.result(boss && boss.winner !== 'allies' ? null : session.seatOf[sorted[0].id] ?? null);   // for the players' records
     $('matchover').classList.remove('hidden');
     return;
   }
@@ -2590,6 +2598,7 @@ function tick(dt, draw = true) {
     strikeUi.update();
     bossUi.update();
     bossMark.update(game, elapsed);
+    fortView?.update(elapsed);
     modsUi.update(sdt, elapsed);
     updateLabels();
     updatePips();
