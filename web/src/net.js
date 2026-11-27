@@ -7,12 +7,23 @@
 // (`rejoin: true` in the reply) instead of taking a second one.
 
 import { tabKey } from './profile.js';
+import { PROTOCOL } from './core/netplay.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The server's limit on one request (module/Rooms.cs MaxBody).
+export const MAX_MESSAGE = 128 * 1024;
+
+// Worth sending again: no answer at all (the network), or the server busy or
+// down. Not a refusal (4xx), nor a full room (507): those would fail forever.
+export const retryable = (err) => !err.status || (err.status >= 500 && err.status !== 507);
+
 export class RoomLink {
-  constructor(base = new URL('api/rooms', location.href).href) {
+  // `fetch` is there for tests.
+  constructor(base = new URL('api/rooms', location.href).href, { fetch: get = (...a) => globalThis.fetch(...a) } = {}) {
     this.base = base;
+    this.fetch = get;
+    this.failed = null;         // why sending stopped for good, if it did
     this.tab = tabKey();
     this.code = null;
     this.seat = -1;
@@ -24,17 +35,20 @@ export class RoomLink {
     this.onEntry = () => {};
     this.onCaughtUp = () => {};
     this.onLost = () => {};     // the room is gone (server restarted, or it expired)
+    // A send that failed for good also comes to onEntry, as a `stop` (see fail).
   }
 
   async post(path, body) {
-    const r = await fetch(this.base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await this.fetch(this.base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(data.error || `The server said ${r.status}.`), { status: r.status });
     return data;
   }
 
-  async create(name, priv = false) { return this.attach(await this.post('', { name, private: priv, tab: this.tab })); }
-  async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name, tab: this.tab })); }
+  // `v`: rooms are kept to one version of the messages; joining one of
+  // another version is refused with a message to reload.
+  async create(name, priv = false) { return this.attach(await this.post('', { name, private: priv, tab: this.tab, v: PROTOCOL })); }
+  async join(code, name) { return this.attach(await this.post(`/${encodeURIComponent(code.trim().toUpperCase())}/join`, { name, tab: this.tab, v: PROTOCOL })); }
 
   // The host's screen at match end: `winner` is a seat, or null (a CPU won).
   // Counts toward each player's record; sent once, failures ignored.
@@ -49,24 +63,42 @@ export class RoomLink {
     return r;
   }
 
-  // Messages leave one at a time, in the order they were sent; a failed send
-  // is retried before the next one goes.
+  // Messages leave one at a time, in the order they were sent. A send that
+  // fails on the way (no network, or the server busy: 5xx but 507) is retried
+  // with backoff before the next one goes. One the server refuses (4xx, or 507:
+  // the room's log is full), or one too large to send, will never go: the
+  // match ends (fail).
   send(msg) {
     this.chain = this.chain.then(async () => {
-      for (let tries = 0; !this.closed; tries++) {
-        try { await this.post(`/${this.code}/send`, { token: this.token, msg }); return; } catch (err) {
+      const body = { token: this.token, msg };
+      const size = JSON.stringify(body).length;
+      if (size > MAX_MESSAGE) { this.fail(`a message was too large to send (${msg.t}, ${Math.round(size / 1024)} KB).`); return; }
+      for (let tries = 0; !this.closed && !this.failed; tries++) {
+        try { await this.post(`/${this.code}/send`, body); return; } catch (err) {
           if (err.status === 404 || err.status === 403) { this.lost(); return; }
+          if (!retryable(err)) { this.fail(`the server refused a message (${msg.t}, ${err.status}: ${err.message})`); return; }
           await sleep(Math.min(5000, 400 * 2 ** tries));
         }
       }
     });
+    return this.chain;
+  }
+
+  // The match cannot go on: say why in the room's log, so every screen ends
+  // it (core/netplay.js `stop`), and end it here even if that does not get through.
+  fail(why) {
+    if (this.failed || this.closed) return;
+    this.failed = why;
+    console.error(`Craterfall online: ${why}`);
+    this.post(`/${this.code}/send`, { token: this.token, msg: { t: 'stop', why } }).catch(() => {});
+    this.onEntry({ n: 0, seat: this.seat, msg: { t: 'stop', why } });
   }
 
   async poll() {
     let fails = 0;
     while (!this.closed) {
       try {
-        const r = await fetch(`${this.base}/${this.code}/events?token=${this.token}&after=${this.after}`, { cache: 'no-store' });
+        const r = await this.fetch(`${this.base}/${this.code}/events?token=${this.token}&after=${this.after}`, { cache: 'no-store' });
         if (r.status === 404 || r.status === 403) { this.lost(); return; }
         if (!r.ok) throw new Error(String(r.status));
         const { entries } = await r.json();
@@ -74,6 +106,7 @@ export class RoomLink {
         for (const e of entries) {
           if (e.n <= this.after) continue;
           this.after = e.n;
+          if (e.msg?.t === 'stop') console.error(`Craterfall online: the match stopped: ${e.msg.why}`);
           this.onEntry(e);
         }
         if (!this.caught && entries.length < 500) { this.caught = true; this.onCaughtUp(); }
@@ -94,7 +127,7 @@ export class RoomLink {
   // Leave on purpose (not a reload): the seat is let go at once.
   leave() {
     if (!this.code || !this.token) return;
-    fetch(`${this.base}/${this.code}/leave`, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: this.token }) }).catch(() => {});
+    this.fetch(`${this.base}/${this.code}/leave`, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: this.token }) }).catch(() => {});
   }
 }
 

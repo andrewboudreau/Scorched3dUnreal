@@ -196,6 +196,35 @@ test('a message over 128 KB is refused; one under it goes through', async () => 
   assert.equal((await send('x'.repeat(130 * 1024))).status, 400);
 });
 
+test('a room keeps to one version of the messages: another version cannot join, with a message to reload', async () => {
+  const host = browser();
+  const made = (await host.req('/api/rooms', { name: 'Host', tab: TAB1, v: 2 })).body;
+  const old = await browser().req(`/api/rooms/${made.code}/join`, { name: 'Old', tab: TAB2 });   // no v: version 1
+  assert.equal(old.status, 409);
+  assert.match(old.body.error, /another version.*Reload/);
+  assert.equal((await browser().req(`/api/rooms/${made.code}/join`, { name: 'New', tab: TAB2, v: 3 })).status, 409);
+  assert.equal((await browser().req(`/api/rooms/${made.code}/join`, { name: 'Same', tab: TAB2, v: 2 })).status, 200);
+  // And a room made by an old client (no v) takes only old clients.
+  const oldRoom = (await browser().req('/api/rooms', { name: 'Old host', tab: TAB1 })).body;
+  assert.equal((await browser().req(`/api/rooms/${oldRoom.code}/join`, { name: 'New', tab: TAB2, v: 2 })).status, 409);
+});
+
+test('a full room log refuses sends with 507 and tells every screen once, with a stop entry', async () => {
+  const host = browser();
+  const made = (await host.req('/api/rooms', { name: 'Host', tab: TAB1, v: 2 })).body;
+  const send = () => host.req(`/api/rooms/${made.code}/send`, { token: made.token, msg: { t: 'snap', pad: 'x'.repeat(120 * 1024) } });
+  let r;
+  for (let i = 0; i < 100 && (r = await send()).status === 200; i++);
+  assert.equal(r.status, 507);
+  assert.match(r.body.error, /full/);
+  assert.equal((await send()).status, 507);
+  const { entries } = (await host.req(`/api/rooms/${made.code}/events?token=${made.token}&after=0`)).body;
+  const stops = entries.filter((e) => e.msg.t === 'stop');
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].seat, -1);
+  assert.match(stops[0].msg.why, /full/);
+});
+
 test('an empty name makes no record; a visit after a name keeps it', async () => {
   const b = browser();
   assert.deepEqual((await b.req('/api/me', { name: '' })).body.name, '');

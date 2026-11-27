@@ -50,7 +50,9 @@ module, with main.js as glue.
   Its harness (`test/lockstep.js`, see its header) plays several screens from
   one room log and reports the first field where a screen's state differs from
   the host's. New state a guest can't work out for itself goes in `snapshot()`
-  or in the `plan` message.
+  or in the `plan` message. Only the host decides whether a round goes on
+  (its `end` message); a change to the message format bumps `PROTOCOL` in
+  `netplay.js`.
 - **Dev server:** `node tools/devserver.mjs <port>` serves the game and the same
   APIs as the live server. Port 8090 is usually the main session's; agents use
   another port.
@@ -82,7 +84,10 @@ of memory, shared with the other modules.
 **`Rooms.cs`** runs online rooms: an ordered message log per room, read by
 long-polling. Rooms live in memory only, so every deploy restarts the host and
 ends matches in progress. There are limits on message size, room log size,
-total memory and room count; they are listed in the file's header.
+total memory and room count; they are listed in the file's header. A full
+room log gets one `stop` entry from the server (and 507), which ends the
+match on every screen. Rooms keep the client's protocol version (`v`) and
+refuse joins from another one.
 
 **`Suggestions.cs`** keeps what players send from Settings > Suggest:
 text, an area (game, match builder, settings, ...), the player id and name if

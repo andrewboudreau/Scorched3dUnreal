@@ -1516,7 +1516,22 @@ export class Game {
     this.bossTurnOver();
     this.turnsThisRound++;
     const limit = this.cfg.maxTurnsPerRound * (this.volleyMode ? 1 : this.players.length);
-    if (this.aliveTeams() <= 1 || this.turnsThisRound >= limit) {
+    const over = this.aliveTeams() <= 1 || this.turnsThisRound >= limit;
+    // Online the host's screen decides whether the round goes on (its verdict,
+    // netplay.js): this screen holds in 'verdict' until carryOn says.
+    if (this.volleyMode && this.decide) {
+      this.turn = -1;
+      this.phase = 'verdict';
+      this.phaseTime = 0;
+      this.decide(over);
+      return;
+    }
+    this.carryOn(over);
+  }
+
+  // After a turn or volley: end the round, or go on to the next turn or volley.
+  carryOn(over) {
+    if (over) {
       this.endRound();
       return;
     }
