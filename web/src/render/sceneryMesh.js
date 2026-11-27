@@ -389,6 +389,10 @@ const WALKERS = ['villager', 'limb', 'sheep', 'sails'];
 const SHADOW = { pine: true, oak: true, bush: true, rock: true, villager: true, limb: true, sheep: true, sails: true };
 for (const k of BUILT) SHADOW[k] = true;
 
+// The water's material, for the open sea round the Island (render/arena.js): the
+// same sheet as the field's own, so the two meet without a seam.
+export function seaMaterial() { return assets().water; }
+
 // One stand-in for each scenery shader variant (water, a plain mesh such as
 // the bridge, instanced props with and without per-instance colour), for the
 // shader warm-up at match start. They are never rendered.

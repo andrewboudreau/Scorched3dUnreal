@@ -108,6 +108,7 @@ function flameTexture(seed) {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+const MARK_SEG = 40;           // segments in a blast's ground ring
 const FLAME_ASPECT = 1.4;      // a flame is this much taller than it is wide
 
 export class Effects {
@@ -118,7 +119,7 @@ export class Effects {
     this.wind = [0, 0];                 // main.js keeps this at the game's wind
     this.damp = 0;                      // 0..1, rain (render/rain.js amount): craters smoulder shorter
     this.setQuality(readQuality());
-    this.live = { fire: 0, trail: 0 };  // sprites alive per capped kind
+    this.live = { fire: 0, trail: 0, mark: 0 };  // sprites alive per capped kind
     this.emitters = new Map();          // things that keep burning
     this.heat = new Map();              // key -> time a hit keeps it burning until
     this.craters = 0;
@@ -147,6 +148,8 @@ export class Effects {
     // makes no new materials and no garbage.
     this.freeSprites = [];
     this.freeFires = [];
+    this.freeMarks = [];                // ground rings (see markBlast), pooled likewise
+    this.recent = [];                   // the last second's blasts, to spot a cluster
     // Debris: every chunk of every explosion is one instance of a single
     // mesh, one draw call (and one shadow draw) however many are flying.
     this.debris = new THREE.InstancedMesh(this.debrisGeo, new THREE.MeshStandardMaterial({ color: '#4a3524', roughness: 1, flatShading: true }), DEBRIS_MAX);
@@ -260,6 +263,8 @@ export class Effects {
     const size = Math.min(1.7, Math.max(0.55, radius / 12));       // 1 is a medium blast
     const gy = this.ground(x, z);
     const low = gy == null || y - gy < radius * 0.8 + 1;           // on the ground, not an air burst
+    // (a blast on a steep face lands well above the ground at its own x, z: allow for it)
+    if (radius >= 6 && (gy == null || y - gy < radius * 2 + 4)) this.noteBlast(x, y, z, radius);
 
     // Fireball.
     const fire = this.freeFires.pop() || new THREE.Mesh(this.fireGeo, new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -748,6 +753,66 @@ export class Effects {
     } });
   }
 
+  // Blasts that land together (Scatter, a Ring, MIRV bomblets) overlap into one
+  // big scorch. When a blast comes down within a second and a few radii of
+  // another, each of them gets a ring on the ground for a moment, so the
+  // separate impacts still read.
+  noteBlast(x, y, z, radius) {
+    const now = this.time;
+    const rec = this.recent;
+    let w = 0;
+    for (const b of rec) if (now - b.t < 1) rec[w++] = b;
+    rec.length = w;
+    const me = { x, y, z, r: radius, t: now, marked: false };
+    for (const b of rec) {
+      if (Math.hypot(b.x - x, b.z - z) > 4.5 * Math.max(radius, b.r)) continue;
+      if (!b.marked) { b.marked = true; this.markBlast(b); }
+      if (!me.marked) { me.marked = true; this.markBlast(me); }
+    }
+    rec.push(me);
+    if (rec.length > 14) rec.shift();
+  }
+
+  // A thin ring of light laid on the ground at a blast's edge, draped over the
+  // relief (read at its first frame, when the crater is cut) and fading over
+  // a couple of seconds.
+  markBlast(b) {
+    if (this.live.mark >= 12) return;
+    let m = this.freeMarks.pop();
+    if (!m) {
+      const n = MARK_SEG + 1;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 6), 3).setUsage(THREE.DynamicDrawUsage));
+      const idx = [];
+      for (let i = 0; i < MARK_SEG; i++) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+      geo.setIndex(idx);
+      m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#ffe2a0', transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      m.frustumCulled = false;
+      m.renderOrder = 3;
+    }
+    m.material.opacity = 0;
+    this.scene.add(m);
+    const pos = m.geometry.attributes.position;
+    let draped = false;
+    this.add({ life: 0, max: 2.2, obj: m, pool: this.freeMarks, update: (it, t) => {
+      if (!draped) {
+        draped = true;
+        for (let i = 0; i <= MARK_SEG; i++) {
+          const a = (i / MARK_SEG) * Math.PI * 2;
+          const c = Math.cos(a), s = Math.sin(a);
+          for (let e = 0; e < 2; e++) {
+            const rr = b.r * (e ? 1.06 : 0.9);
+            const px = b.x + c * rr, pz = b.z + s * rr;
+            const g = this.ground(px, pz);
+            pos.setXYZ(i * 2 + e, px, (g ?? b.y) + 0.7, pz);
+          }
+        }
+        pos.needsUpdate = true;
+      }
+      m.material.opacity = 0.8 * Math.min(1, t * 10) * (1 - Math.max(0, (t - 0.5) / (it.max - 0.5))) ** 1.3;
+    } }, 'mark');
+  }
+
   // A teleport: a bright flash that swells and fades, a ring of light that
   // opens out, and sparks that rise off the spot. Sprites only, no lights.
   warp(pos) {
@@ -881,6 +946,7 @@ export class Effects {
   clear() {
     for (const it of this.items) this.release(it);
     this.items = [];
+    this.recent.length = 0;
     this.chunks.length = 0;
     this.debris.count = 0;
     this.debris.visible = false;

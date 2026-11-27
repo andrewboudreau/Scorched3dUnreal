@@ -82,6 +82,15 @@ function inject(material, { ground }) {
   float ny = clamp(normalize(vRidgeN).y, 0.0, 1.0);
   float steep = 1.0 - smoothstep(0.55, 0.92, ny);
   vec3 dust = mix(uDust, rock, 0.18);
+  // Under a low sun (Dawn, Dusk) the dust would go the same red-brown as a
+  // tank standing on it: let it grey toward a cooler sand, so a dark red hull
+  // keeps its edge. The sun's height comes from the scene's light (world y).
+  #if NUM_DIR_LIGHTS > 0
+  float sunY = (transpose(mat3(viewMatrix)) * directionalLights[0].direction).y;
+  float lowSun = 1.0 - smoothstep(0.22, 0.55, sunY);
+  float dl = dot(dust, vec3(0.3, 0.59, 0.11));
+  dust = mix(dust, vec3(dl) * vec3(1.02, 1.0, 0.94) * 1.4, 0.6 * lowSun);
+  #endif
   vec3 c = mix(dust, rock, steep);
   // Ground a blast cut or heaped, and the slopes that slumped from it: loose
   // light sand, except on a crater wall too steep to hold any.
@@ -89,19 +98,21 @@ function inject(material, { ground }) {
   c = mix(c, uLoose, loose * 0.7);
   // Deep down the rock sinks into the haze's dark: a clean gradient into the floor.
   vec3 deep = mix(uDeep, fogColor * 0.25, 0.3);
-  c = mix(deep, c, smoothstep(-44.0, -2.0, vRidgeP.y));
+  float sink = smoothstep(-44.0 - 36.0 * smoothstep(0.8, 1.0, uLit), -2.0, vRidgeP.y);   // Night: the range sinks less, so it still reads
+  c = mix(deep, c, sink);
   diffuseColor.rgb *= c * 0.8;
 }` : `#include <color_fragment>
 {
   vec3 deep = mix(uDeep, fogColor * 0.25, 0.3);
-  diffuseColor.rgb *= 0.8 * mix(deep, strataAt(vRidgeP), smoothstep(-44.0, -2.0, vRidgeP.y));
+  float sink = smoothstep(-44.0 - 36.0 * smoothstep(0.8, 1.0, uLit), -2.0, vRidgeP.y);   // Night: the range sinks less, so it still reads
+  diffuseColor.rgb *= 0.8 * mix(deep, strataAt(vRidgeP), sink);
 }`)
       // A share of the rock's own colour as glow, so faces turned from the sun
       // keep their colour, not a flat shadow.
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 float night = smoothstep(0.8, 1.0, uLit);   // only Night: a Dusk ridge keeps its own red look
-totalEmissiveRadiance += diffuseColor.rgb * 0.18 * (1.0 - 0.4 * night);
-diffuseColor.rgb *= mix(vec3(1.0), vec3(0.8, 0.88, 1.12), night);`)
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.74, 0.86, 1.2), night);
+totalEmissiveRadiance += diffuseColor.rgb * 0.18 * (1.0 + 0.5 * night);`)
       // Far rock fades toward the sky: haze that starts well inside the scene's fog.
       .replace('#include <fog_fragment>', `{
   float haze = smoothstep(400.0, 1500.0, vFogDepth) * 0.3 + smoothstep(14.0, -26.0, vRidgeP.y) * 0.18;
