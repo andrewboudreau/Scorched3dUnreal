@@ -119,7 +119,7 @@ export function conditionsLabel(cfg, edge = null) {
 // ?time=dawn|day|dusk|night,
 // ?edges=open|wall|bounce|wrap|random,
 // ?fixed (the old defaults: Gusty and Hilly; wind or terrain still win),
-// ?sat=1|2|3, ?orbiter=1|2|3, ?decoy=1|2|3 and ?pointdef=1|2|3 (every tank
+// ?sat=1|2|3, ?orbiter=1|2|3, ?decoy=1|2|3, ?pointdef=1|2|3 and ?jammer=1|2|3 (every tank
 // starts with that mod at that level), ?labels=few|some|many (the satellite's labelled cells),
 // ?modifier=rain (any round modifier id: every round is that one).
 // Returns { maxWind?, terrain?, edges?, lab?, modifier? }: only what the string asks for.
@@ -146,7 +146,7 @@ export function parseTestParams(search) {
   const lab = {};
   const level = (k) => { const n = Number(q.get(k)); return [1, 2, 3].includes(n) ? n : 0; };
   if (level('sat')) Object.assign(lab, { satellite: 'all', level: level('sat') });
-  for (const id of ['orbiter', 'decoy', 'pointdef']) if (level(id)) Object.assign(lab, { [id]: 'all', [`${id}Level`]: level(id) });
+  for (const id of ['orbiter', 'decoy', 'pointdef', 'jammer']) if (level(id)) Object.assign(lab, { [id]: 'all', [`${id}Level`]: level(id) });
   const labels = (q.get('labels') || '').toLowerCase();
   if (['few', 'some', 'many'].includes(labels)) lab.labels = labels;
   if (Object.keys(lab).length) out.lab = lab;

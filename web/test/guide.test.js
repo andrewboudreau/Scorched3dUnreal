@@ -42,7 +42,9 @@ test('the rock-paper-scissors marks a family with no mod as coming', () => {
   assert.deepEqual(fams.map((f) => f.id), ['recon', 'defense', 'jamming']);
   assert.deepEqual(fams.map((f) => f.beats), ['defense', 'jamming', 'recon']);
   assert.equal(fams.find((f) => f.id === 'recon').coming, false);
-  assert.equal(fams.find((f) => f.id === 'jamming').coming, true);
+  assert.equal(fams.find((f) => f.id === 'jamming').coming, false, 'the Jammer Drone fills it');
+  assert.deepEqual(fams.find((f) => f.id === 'jamming').mods, ['Jammer Drone']);
+  assert.equal(familyRows(MODS.filter((m) => m.family !== 'jamming')).find((f) => f.id === 'jamming').coming, true);
   assert.equal(familyRows([{ name: 'Jammer', family: 'jamming' }]).find((f) => f.id === 'jamming').coming, false);
 });
 

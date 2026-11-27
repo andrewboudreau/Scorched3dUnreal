@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { orbitPoints, modUp, ORBIT, turretAt } from '../core/mods.js';
+import { orbitPoints, modUp, ORBIT, turretAt, jammerPos, statusLevel } from '../core/mods.js';
 import { buildSatellite } from './satellite.js';
 import { makeDecoy, makeTurret, makeTracer, turretReach } from './groundmods.js';
+import { makeJammer, makeJamRing, pulseJamRing } from './jammer.js';
 
 // Deployed mods, drawn (the rules are in core/mods.js):
 //   - the Gravity Orbiter: a glowing orb (two at level 3) where each well is
@@ -15,6 +16,9 @@ import { makeDecoy, makeTurret, makeTracer, turretReach } from './groundmods.js'
 //   - the decoy and the Point Defense turret (render/groundmods.js): a copy
 //     of the owner's tank (a hologram to its owner) and a small turret beside
 //     the tank, with a tracer and a burst when it shoots a shell down.
+//   - the Jammer Drone (render/jammer.js): it flies out from its owner and
+//     hovers, bobbing, over the tank it jams, which carries a faint ring on
+//     the ground that swells and fades while it is jammed.
 //   - a break-up when one is shot down: a flash and tumbling pieces (a decoy
 //     fizzles out in cyan sparks).
 
@@ -123,6 +127,10 @@ export class ModsView {
         }
         if (modUp(p, 'pointdef')) this.placeTurret(p, live, game, time, dt, mine(p));
       }
+      for (const p of game.players) {
+        if (modUp(p, 'jammer')) this.placeJammer(p, live, game, time, dt, seen, mine(p));
+        if (p.alive && statusLevel(p, 'jammed') && seen(p)) this.placeJamRing(p, live, game, time);
+      }
     }
     for (const key of [...this.items.keys()]) if (!live.has(key)) this.drop(key);
     this.updateBits(dt);
@@ -175,6 +183,48 @@ export class ModsView {
     it.time = time;
   }
 
+  // The Jammer Drone: out from its owner to its spot over the tank it jams,
+  // then hovering there, bobbing and turning slowly. Its owner always sees it.
+  placeJammer(p, live, game, time, dt, seen, mine) {
+    const at = jammerPos(game.players, p);
+    if (!mine && !seen({ ...p, x: at.x, z: at.z })) return;
+    const key = `${p.id}:jammer`;
+    live.add(key);
+    let it = this.items.get(key);
+    if (!it) {
+      it = makeJammer(p.color);
+      it.born = time;
+      it.from = [p.x, p.y + 4, p.z];
+      this.items.set(key, it);
+      this.group.add(it.group);
+    }
+    const k = Math.min(1, (time - it.born) / 1.4);
+    const e = k * k * (3 - 2 * k);
+    const bob = Math.sin(time * 1.7 + p.id) * 0.5;
+    const x = it.from[0] + (at.x - it.from[0]) * e;
+    const z = it.from[2] + (at.z - it.from[2]) * e;
+    const y = it.from[1] + (at.y - it.from[1]) * e + Math.sin(Math.PI * k) * 6 + bob * e;
+    it.group.position.set(x, y, z);
+    it.body.rotation.set(0.08 * Math.sin(time * 1.1 + p.id), time * 0.35 + p.id, 0.08 * Math.cos(time * 1.3));
+    it.glow.material.emissiveIntensity = 1.0 + 0.8 * (0.5 + 0.5 * Math.sin(time * 6 + p.id));
+    it.rotors.rotation.y = time * 0.5;
+    it.group.scale.setScalar(0.4 + 0.6 * Math.min(1, k * 2));
+    it.last = [[x, y, z]];
+  }
+
+  // A jammed tank: the pulse ring on the ground under it, in its jammer's colour.
+  placeJamRing(p, live, game, time) {
+    const key = `${p.id}:jamring`;
+    live.add(key);
+    const src = game.players[(p.status || []).find((s) => s.kind === 'jammed')?.source];
+    const color = src?.color || '#ff8a7a';
+    let it = this.items.get(key);
+    if (it && it.color !== color) { this.drop(key); it = null; }
+    if (!it) { it = makeJamRing(color); it.color = color; this.items.set(key, it); this.group.add(it.group); }
+    it.group.position.set(p.x, p.y + 0.35, p.z);
+    pulseJamRing(it, time + p.id * 0.3);
+  }
+
   // Point Defense shot shell `e.id` down: the turret swings to it, a tracer, a burst.
   intercept(e) {
     const it = this.items.get(`${e.player}:pointdef`);
@@ -224,7 +274,7 @@ export class ModsView {
       return;
     }
     it.group.traverse((o) => {
-      if (o.geometry && o.geometry !== this.coreGeo && o.geometry !== this.haloGeo) o.geometry.dispose();
+      if (o.geometry && o.geometry !== this.coreGeo && o.geometry !== this.haloGeo && o.geometry !== it.shared) o.geometry.dispose();
       if (o.material) o.material.dispose();
     });
     this.items.delete(key);

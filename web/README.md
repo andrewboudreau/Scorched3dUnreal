@@ -40,6 +40,7 @@ page loads and override both Random and what Custom match remembers.
 | `orbiter` | `1`, `2`, `3` | Every tank starts with a Gravity Orbiter at that level. |
 | `decoy` | `1`, `2`, `3` | Every tank starts with a Decoy Beacon at that level. |
 | `pointdef` | `1`, `2`, `3` | Every tank starts with Point Defense at that level. |
+| `jammer` | `1`, `2`, `3` | Every tank starts with a Jammer Drone at that level. |
 | `labels` | `few`, `some`, `many` | How many of the satellite's cells are labelled (default `some`). |
 | `boss` | `1` | Play starts the boss match: you and a CPU ally against the Bulwark (see The boss match below). |
 | `modifier` | a round modifier id: `rain`, `lowgrav`, `gale`, `calm`, `soft`, `goldrush`, `fulltanks`, `clear` | Every round is that modifier. |
@@ -625,15 +626,45 @@ second column beside the first. On a phone the players box sits top right.
   on the ground). CPUs that see it reach for Scatter, Flak and Rollers over
   single heavy shells, and put their own up against an enemy carrying
   Breachers or Guided Missiles, or once they are being hit.
+- **Jammer Drone** (mod, family *jamming*; from perks; 20, 25 or 30 hp;
+  lasts 4, 5 or 6 turns). Deploying it takes your turn (JAM on a phone, B on
+  a desktop: armed, the banner names the tank): a drone flies to hover 13 m
+  over the enemy your turret points nearest, 11 m off toward you (higher
+  where the ground rises), and follows that tank as it drives. In a volley
+  the target is part of the plan (`{ deploy: 'jammer', target }`). The tank
+  under it is **Jammed** (a JAM badge by its name where health shows, a
+  pulse ring on the ground, a JAMMED chip and a banner for its player):
+  - its Survey Satellite labels go dark (and a CPU loses the satellite's help);
+  - its Guided Missiles fly as fired, with no steering ("Jammed" on the hint);
+  - from level 2 its aim arc, side view and Tracer line are blank ("Jammed")
+    and a jammed CPU aims with 1.3 times its usual error;
+  - at level 3 every enemy of yours within 40 m of the drone is jammed too.
+  It is a thing in the sky, so **Flak** brings it down (its 45-damage air
+  burst). **Defense beats it**: an enemy Point Defense with a charge left
+  shoots it down the moment it is in reach (spending the charge; Point
+  Defense on the tank it jams reaches it unless the ground lifts it high),
+  and an enemy Gravity Orbiter within 20 m grinds it, 8, 10 or 12 damage (by the orbiter's level) at the
+  start of each of its target's turns (each volley). If its target dies it
+  moves over the nearest enemy left. Normal and Hard CPUs send theirs over
+  the nearest enemy they can see with a satellite up (not into Point
+  Defense with a charge, nor one they jam already; Easy only now and then),
+  and a jammed Hard CPU with Flak shoots the drone down (a Normal one when
+  the jamming costs it: from level 2, or with a satellite up or Guided
+  Missiles to steer).
+- **Statuses.** Jammed is the first status effect: `p.status` holds
+  `{ kind, source, strength, turns }` (the tank whose mod put it there, that
+  mod's level and turns left). The game works statuses out again from the
+  mods up at fixed points (round start, each turn and volley, a mod going up,
+  down or wearing out), so they travel in snapshots and every screen agrees.
 - **Two mod bays.** A tank holds at most two mods (`MOD_BAYS` in
   `core/mods.js`): once you own two, the other mod branches of the
   skill tree are shut, and only the two you have go deeper.
 - **Mod rules in the config.** The old Lab menu is gone; the core still
   reads `lab` in the match config (`satellite` / `orbiter` / `decoy` /
-  `pointdef`: `perk`, `shop`, `all` or `off`, with a level, and the
+  `pointdef` / `jammer`: `perk`, `shop`, `all` or `off`, with a level, and the
   satellite's `labels`), so old configs and tests keep working. The launch
   screen only ever sends `perk` (or `all` from `?sat=` / `?orbiter=` /
-  `?decoy=` / `?pointdef=`), with labels `some` unless `?labels=` says
+  `?decoy=` / `?pointdef=` / `?jammer=`), with labels `some` unless `?labels=` says
   otherwise. An old saved Custom with the Lab Off unticks that mod's cards.
 - **Settlements round the tanks.** Most tanks have a settlement somewhere
   around them, between about 20 m and 120 m off: a hamlet, a farm (a barn with
@@ -725,6 +756,8 @@ second column beside the first. On a phone the players box sits top right.
   | Hard Light | your Decoy Beacon goes up a level (taken up to twice) |
   | Close-In Gunner | gain Point Defense at level 1 (only offered if you have none and a free mod bay) |
   | Twin Feeds | your Point Defense goes up a level (taken up to twice) |
+  | Signal Spoiler | gain a Jammer Drone at level 1 (only offered if you have none and a free mod bay) |
+  | Wideband | your Jammer Drone goes up a level (taken up to twice) |
   | Long-Life Cells | your mods last 2 turns longer and take 25% more damage (only if you own one) |
 | Double Strike | from round 3 on: queue two shots in one turn (see below) |
 
@@ -917,7 +950,8 @@ second column beside the first. On a phone the players box sits top right.
   projected cell patch and labels (`satellite.js`) and the deployed mods:
   orbiter orbs with their trails, satellites, break-ups (`mods.js`), and the
   mods on the ground: the decoy (a hologram to its owner, a tank to everyone
-  else) and the Point Defense turret with its tracers (`groundmods.js`), and the
+  else) and the Point Defense turret with its tracers (`groundmods.js`), the
+  Jammer Drone and the pulse ring on the tank it jams (`jammer.js`), and the
   City (`cityMesh.js`: merged buildings with canvas window textures, rooftops,
   damage and rubble, instanced street lights and traffic; its streets are
   painted by `terrainMesh.js`). An intact building is one box; once it loses

@@ -24,6 +24,10 @@
 //                  tank (turretAt)
 //     hull, yaw, elev   the decoy: the pose of the tank it copies
 //     charges,     Point Defense: shells it can still shoot down this round
+//     target, lift the Jammer Drone: the id of the enemy it hovers over (it
+//                  goes where that tank goes, jammerPos), and how much higher
+//                  it rides there to clear the ground; x, y, z keep where it
+//                  was last put, for when its target is gone
 //   }
 //
 // Deploying a mod is the owner's whole action for that turn: no shot (in a
@@ -47,9 +51,15 @@
 // sits outside the triangle: it beats being ranged, recon included.
 // A tank holds at most MOD_BAYS mods: with that many, the skill tree shuts
 // the other mod branches (game.skillTree).
-// Status effects (Jammed,
-// Spotted, Uplinked...) will go on `p.status` as { kind, source, strength,
-// turns } and could be listed on a mod as `applies`; nothing uses them yet.
+//
+// Status effects go on the tank they act on, `p.status`, a list of
+// { kind, source, strength, turns }: what it is ('jammed'), the tank whose
+// mod put it there, that mod's level, and the turns the mod has left. They
+// are game state, so they travel in snapshots like the rest of the player.
+// A status is not stepped on its own: the game works it out again from the
+// mods up (game.refreshStatus) at fixed points, each turn or volley and when
+// a mod goes up or down, so every copy of an online game holds the same. The
+// only kind so far is Jammed, from the Jammer Drone (JAM).
 
 import { PERK_BY_ID, perkSum } from './perks.js';
 import { SURVEY } from './survey.js';
@@ -99,6 +109,28 @@ export const POINTDEF = [
 ];
 export const TURRET = { side: 5.5, height: 1.1, r: 1.8 };
 
+// The Jammer Drone. It hovers `height` m over the enemy it is sent to, `side`
+// m off toward its owner (lifted to keep `clear` m over the ground under it:
+// the mod's `lift`, set where it goes up and at each turn), and goes where
+// that tank goes; a shell within `r` m hits it (Flak is the answer: it is a
+// thing in the sky).
+// It puts Jammed on that tank (and from level `fieldFrom` on every enemy of
+// its owner within `field` m of it, across). A jammed tank's Survey Satellite
+// labels go dark and its Guided Missile cannot be steered; from level `arc`
+// its aim arc and side view (and the Tracer perk's line) are blank too. A
+// jammed CPU loses its satellite's help and from level `arc` carries `blur`
+// times its aiming error (ai.planShot `sharpen`).
+// Defense beats it: an enemy Point Defense with a charge left shoots it down
+// as soon as it is in reach (POINTDEF radius, from the middle of that tank),
+// spending the charge; an enemy Gravity Orbiter within `grindReach` m of it
+// (across) grinds it, `grind[orbiter level]` damage at the start of each of
+// its target's turns (or each volley).
+export const JAM = {
+  height: 13, side: 11, r: 2.2, clear: 7,
+  arc: 2, fieldFrom: 3, field: 40, blur: 1.3,
+  grindReach: 20, grind: [0, 8, 10, 12],
+};
+
 // Pay for shooting down an enemy mod.
 export const MOD_PAY = 60;
 
@@ -138,6 +170,16 @@ export const MODS = [
     turns: [5, 6, 7],
     levels: ['stops 1 enemy shell a round, 18 m', 'stops 2 a round', '26 m, and split-shell fragments too'],
     desc: 'A small turret beside your tank shoots down the first enemy shell coming down within 18 m of you, once a round (twice from level 2; at level 3 it reaches 26 m and stops fragments too). Scatter, Flak bursts and Rollers get past it. Deploying it takes your turn; it stays up into later rounds until it is shot down or wears out.',
+  },
+  {
+    // `targeted`: it goes up over an enemy (the one the turret points
+    // nearest, or the plan's `target`), not over its owner.
+    id: 'jammer', name: 'Jammer Drone', tag: 'JAM', family: 'jamming', maxLevel: 3, targeted: true,
+    prices: [160, 200, 240],
+    hp: [20, 25, 30],
+    turns: [4, 5, 6],
+    levels: ['jams one tank: satellite labels and steering', 'blanks its aim arc and side view too', `jams every enemy within ${JAM.field} m`],
+    desc: 'A drone flies to hover over the enemy your turret points nearest and jams it: its Survey Satellite labels go dark and its Guided Missile cannot be steered (from level 2 its aim arc and side view go blank too; at level 3 it jams every enemy within 40 m). Point Defense shoots it down, an orbiter grinds it and Flak brings it down. Deploying it takes your turn; it stays up into later rounds until it is shot down or wears out.',
   },
 ];
 
@@ -303,7 +345,9 @@ export function modUp(p, id) {
 
 // Put a ready mod up (the game spends the owner's turn on it). `ground` as
 // for anchorMod. A decoy stands at `at` ({ x, y, z, hull, yaw, elev }: the
-// tank it copies, where it stood; `p` itself without it). Returns whether it went up.
+// tank it copies, where it stood; `p` itself without it). A jammer goes to
+// the enemy tank `at` (and then follows it); without one it stays ready.
+// Returns whether it went up.
 export function deployMod(p, id, ground = () => null, at = null) {
   const m = p.mods?.[id];
   if (!m || m.state !== 'ready' || !(m.level > 0)) return false;
@@ -313,6 +357,12 @@ export function deployMod(p, id, ground = () => null, at = null) {
   if (id === 'decoy') {
     const t = at || p;
     Object.assign(m, { x: t.x, y: t.y, z: t.z, hull: t.hull ?? 0, yaw: t.yaw ?? 0, elev: t.elev ?? 45 });
+  }
+  if (id === 'jammer') {
+    if (!at) { m.state = 'ready'; delete m.fresh; return false; }
+    m.target = at.id;
+    m.lift = jamLift(p, at, ground);
+    Object.assign(m, jammerAt(p, at, m.lift));
   }
   return true;
 }
@@ -383,13 +433,15 @@ export function turretAt(p) {
 }
 
 // Where one of `p`'s mods is, for effects ([x, y, z]), or null for the
-// orbiter (it is in more than one place).
+// orbiter (it is in more than one place). The jammer: where the game last put
+// it (game.refreshStatus keeps that up to date; jammerPos is where it is now).
 export function modPos(p, id) {
   const m = p.mods?.[id];
   if (!m) return null;
   if (id === 'satellite') return [m.x, m.y, m.z];
   if (id === 'decoy') return [m.x, m.y + TANK.hitCenterY, m.z];
   if (id === 'pointdef') { const q = turretAt(p); return [q.x, q.y, q.z]; }
+  if (id === 'jammer') return [m.x, m.y, m.z];
   return null;
 }
 
@@ -413,6 +465,7 @@ export function modTargets(players, t) {
       out.push({ owner: p.id, mod: 'decoy', x: m.x, y: m.y + TANK.hitCenterY, z: m.z, r: TANK.hitRadius, ground: true });
     }
     if (modUp(p, 'pointdef')) out.push({ owner: p.id, mod: 'pointdef', ...turretAt(p), r: TURRET.r, ground: true });
+    if (modUp(p, 'jammer')) out.push({ owner: p.id, mod: 'jammer', ...jammerPos(players, p), r: JAM.r });
   }
   return out;
 }
@@ -436,4 +489,70 @@ export function interceptsShell(p, pr, w) {
   if (!(w.impact || []).some((x) => x.type === 'blast')) return false;
   const [x, y, z] = pr.pos;
   return (x - p.x) ** 2 + (y - p.y - TANK.hitCenterY) ** 2 + (z - p.z) ** 2 <= lv.radius * lv.radius;
+}
+
+// ---------- the Jammer Drone ----------
+
+// Where `owner`'s jammer hovers over tank `target`: JAM.height over it,
+// JAM.side off toward its owner (or, right on top of it, to a side its id
+// picks), `lift` m higher still. A pure function of the two tanks, so it
+// follows its target.
+export function jammerAt(owner, target, lift = 0) {
+  let dx = owner.x - target.x, dz = owner.z - target.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-6) { const a = owner.id * 2.399963; dx = Math.cos(a); dz = Math.sin(a); } else { dx /= d; dz /= d; }
+  return { x: target.x + dx * JAM.side, y: target.y + JAM.height + lift, z: target.z + dz * JAM.side };
+}
+
+// The lift that keeps a drone over `target` JAM.clear m above the ground
+// under it (`ground(x, z)`, null over open space).
+export function jamLift(owner, target, ground) {
+  const at = jammerAt(owner, target);
+  const g = ground?.(at.x, at.z);
+  return g == null ? 0 : Math.max(0, g + JAM.clear - at.y);
+}
+
+// Where `p`'s up jammer is now: over its target while that tank lives, else
+// where it was last put (m.x, m.y, m.z).
+export function jammerPos(players, p) {
+  const m = p.mods.jammer;
+  const t = players.find((q) => q.id === m.target);
+  return t && t.alive !== false ? jammerAt(p, t, m.lift || 0) : { x: m.x, y: m.y, z: m.z };
+}
+
+// Is `pos` ({ x, y, z }) within reach of `q`'s Point Defense, with a charge
+// left to shoot?
+export function pdReaches(q, pos) {
+  if (!modUp(q, 'pointdef')) return false;
+  const m = q.mods.pointdef;
+  const lv = POINTDEF[m.level];
+  if (!lv || !(m.charges > 0)) return false;
+  return (pos.x - q.x) ** 2 + (pos.y - q.y - TANK.hitCenterY) ** 2 + (pos.z - q.z) ** 2 <= lv.radius * lv.radius;
+}
+
+// The Jammed statuses the up jammers put on the tanks now, by tank id:
+// { id: [{ kind: 'jammed', source, strength, turns }] }. `allied(a, b)` as
+// game.allied. A jammer puts it on its target, and from JAM.fieldFrom on
+// every enemy of its owner within JAM.field m of it, across.
+export function jamStatuses(players, allied = (a, b) => a === b) {
+  const out = {};
+  for (const p of players) {
+    if (!modUp(p, 'jammer')) continue;
+    const m = p.mods.jammer;
+    const at = jammerPos(players, p);
+    for (const q of players) {
+      if (q.alive === false || allied(p, q)) continue;
+      const near = m.level >= JAM.fieldFrom && Math.hypot(q.x - at.x, q.z - at.z) <= JAM.field;
+      if (q.id !== m.target && !near) continue;
+      (out[q.id] ||= []).push({ kind: 'jammed', source: p.id, strength: m.level, turns: m.turns });
+    }
+  }
+  return out;
+}
+
+// The strongest `kind` status on `p` (its strength), or 0 for none.
+export function statusLevel(p, kind) {
+  let n = 0;
+  for (const s of p?.status || []) if (s.kind === kind) n = Math.max(n, s.strength || 1);
+  return n;
 }

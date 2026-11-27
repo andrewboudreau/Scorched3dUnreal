@@ -29,7 +29,7 @@ const settle = (g, max = 12) => {
 const drain = (g) => g.drainEvents();
 
 test('mods: data, Lab options, prices and perks', () => {
-  assert.deepEqual(MODS.map((m) => m.id), ['orbiter', 'satellite', 'decoy', 'pointdef']);
+  assert.deepEqual(MODS.map((m) => m.id), ['orbiter', 'satellite', 'decoy', 'pointdef', 'jammer']);
   for (const m of MODS) {
     assert.equal(m.prices.length, m.maxLevel);
     assert.equal(m.hp.length, m.maxLevel);
@@ -38,7 +38,7 @@ test('mods: data, Lab options, prices and perks', () => {
   }
   // By default mods come from the perk draft; an unknown mode is the default,
   // and the old value 'shop' still means the armory.
-  assert.deepEqual(normalizeModLab(null), { orbiter: 'perk', orbiterLevel: 1, decoy: 'perk', decoyLevel: 1, pointdef: 'perk', pointdefLevel: 1 });
+  assert.deepEqual(normalizeModLab(null), { orbiter: 'perk', orbiterLevel: 1, decoy: 'perk', decoyLevel: 1, pointdef: 'perk', pointdefLevel: 1, jammer: 'perk', jammerLevel: 1 });
   assert.deepEqual(modLab({ orbiter: 'bogus' }, 'orbiter'), { mode: 'perk', level: 1 });
   assert.deepEqual(modLab({ orbiter: 'shop' }, 'orbiter'), { mode: 'shop', level: 1 });
   assert.deepEqual(modLab({ orbiter: 'all', orbiterLevel: 9 }, 'orbiter'), { mode: 'all', level: 3 });

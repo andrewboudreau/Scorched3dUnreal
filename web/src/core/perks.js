@@ -72,6 +72,10 @@ export const PERKS = [
     desc: 'Gain Point Defense (level 1): a turret beside your tank that shoots down the first enemy shell coming down near you each round. Deploying it takes your turn.' },
   { id: 'pdup', tag: 'P+', name: 'Twin Feeds', mods: { pointdef: 1 }, levelUp: true, stack: 2,
     desc: 'Your Point Defense goes up a level: level 2 stops two shells a round, level 3 reaches further and stops split-shell fragments too.' },
+  { id: 'jamwing', tag: 'JD', name: 'Signal Spoiler', mods: { jammer: 1 }, unlock: true,
+    desc: 'Gain a Jammer Drone (level 1): it hovers over the enemy your turret points nearest, darkening its satellite labels and locking its Guided Missile. Deploying it takes your turn.' },
+  { id: 'jamup', tag: 'J+', name: 'Wideband', mods: { jammer: 1 }, levelUp: true, stack: 2,
+    desc: 'Your Jammer Drone goes up a level: level 2 blanks the aim arc and side view too, level 3 jams every enemy within 40 m of it.' },
   { id: 'cells', tag: 'LC', name: 'Long-Life Cells', modTurns: 2, modHp: 0.25, needsMod: true,
     desc: 'Your mods last 2 turns longer and take 25% more damage before they break.' },
 ];

@@ -3,7 +3,7 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, burstNow, hopOver, HOP, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, throwVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, bossMoves, bossHop, planDodge, flakPass, TEMPERS, UTILITY, ARSENAL } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, bossMoves, bossHop, planDodge, flakPass, planFlakAt, TEMPERS, UTILITY, ARSENAL } from './ai.js';
 import { BOSS, bossPhase, fromAbove, weakSpot, freshBossState, bossStarts, buildFort, fortSpots } from './boss.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
@@ -14,7 +14,7 @@ import { SKILL, BRANCHES, ranksHeld, branchOf, forkTaken } from './skills.js';
 import { normalizeLab } from './survey.js';
 import { DEFAULT_TIME, resolveTime } from './timeofday.js';
 import { NAPALM, BURY, napalmParams, burnTime, flowNapalm, scorchNapalm, napalmDose, napalmTick, digOut } from './napalm.js';
-import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell } from './mods.js';
+import { MODS, MOD_BY_ID, MOD_PAY, MOD_BAYS, DECOY, JAM, modLab, modLevel, modPrice, buyLevel, fitMods, readyMods, deployMod, tickMods, hurtMod, modUp, modWells, modTargets, anyUp, perkLevels, normalizeModLab, anchorMod, refitMods, modsOwned, modPos, interceptsShell, jammerAt, jammerPos, jamLift, jamStatuses, statusLevel, pdReaches } from './mods.js';
 
 export const PLAYER_COLORS = ['#e8553f', '#3f8be8', '#f2c230', '#4cc77a', '#b06ce6', '#ef8bc0'];
 
@@ -79,6 +79,16 @@ export const AI_DEPLOY = { yaw: 1.0, power: 0.02, easy: 0.35 };
 // these heavy single shells.
 export const AI_DECOY = { ranged: 60, easy: 0.5, warp: { min: 40, max: 120, tries: 14, edge: 40, clear: 50, far: 560 } };
 const HEAVY = ['breacher', 'guided'];
+
+// The Jammer Drone and the CPUs (core/mods.js JAM). A Normal or Hard CPU
+// sends its jammer over the nearest enemy it can see with a Survey Satellite
+// up (not one whose Point Defense would shoot it straight down, nor one it
+// jams already); an Easy one does `easy` of the time it could. A jammed
+// Normal or Hard CPU with Flak shoots the drone down (ai.planFlakAt): a Hard
+// one whenever it is jammed, a Normal one only when it hurts (from level
+// JAM.arc, or with its satellite up or a Guided Missile to steer), within
+// `power` of the solved charge.
+export const AI_JAM = { easy: 0.35, power: { normal: 0.03, hard: 0.01 } };
 
 // What tank `p` carries out of a match, as plain JSON for Game's `kit`
 // (giveKit): money, ammo (the Shell left out), jets, ranks, unspent points
@@ -185,7 +195,7 @@ export class Game {
       inventory: this.startInventory(),
       jets: START_JETS,
       mods: {},          // equipment: id -> { bought, level, state, hp, turns, ... } (core/mods.js)
-      status: [],        // status effects to come ({ kind, source, strength, turns }); none yet
+      status: [],        // status effects ({ kind, source, strength, turns }): Jammed (core/mods.js)
       pendingArmor: 0,
       pendingFuel: 0,
       perks: [],
@@ -428,6 +438,7 @@ export class Game {
     this.turnsThisRound = 0;
     this.firstShooter = (this.firstShooter + 1) % this.players.length;
     this.startIntel();
+    for (const p of this.players) p.status = [];   // worked out again from the mods up (refreshStatus)
     this.emit({ type: 'roundStart', round: this.round, modifier: mod.id, edge: this.edge });
     this.emit({ type: 'terrain', full: true });
     if (this.volleyMode) this.beginVolley();
@@ -521,7 +532,8 @@ export class Game {
     if (!(p.inventory[p.weapon] > 0)) p.weapon = 'shell';
     const repair = perkSum(p, 'regen');
     if (repair && this.turnsThisRound > 0 && !this.volleyMode) p.hp = Math.min(p.maxHp, p.hp + repair);
-    if (!this.volleyMode) this.refit(p);   // (a volley refits everyone in beginVolley)
+    if (!this.volleyMode) { this.refit(p); this.jamWatch(p); }   // (a volley does everyone in beginVolley)
+    this.refreshStatus();
     this.aiPlan = null;
     this.aiDrive = null;
     this.driveNote = null;
@@ -559,6 +571,7 @@ export class Game {
       }
     }
     for (const p of order) this.refit(p);
+    this.jamWatch('all');
     this.nextPlanner();
   }
 
@@ -635,7 +648,7 @@ export class Game {
         continue;
       }
       const plan = this.planAiShot(p);
-      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.goal ? { goal: plan.goal } : {}), ...(plan.second ? { second: plan.second } : {}), ...(plan.deploy ? { deploy: plan.deploy } : {}) };
+      if (plan) v.plans[p.id] = { yaw: plan.yaw, elev: plan.elev, power: plan.power, weapon: plan.weapon, ...(plan.goal ? { goal: plan.goal } : {}), ...(plan.second ? { second: plan.second } : {}), ...(plan.deploy ? { deploy: plan.deploy } : {}), ...(plan.deploy && plan.target != null ? { target: plan.target } : {}) };
     }
     this.aiPlan = null;
     this.emit({ type: 'volley', players: Object.keys(v.plans).map(Number) });
@@ -656,7 +669,7 @@ export class Game {
       p.reloading = false;   // this volley was its reload, if it had one
       const plan = this.volley.plans[p.id];
       if (!plan || !p.alive || reloaded) continue;
-      if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployFor(p, plan.deploy); continue; }   // its action this volley
+      if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployFor(p, plan.deploy, plan); continue; }   // its action this volley (a jammer: at plan.target)
       const delay = k++ * VOLLEY.stagger;
       if (plan.deploy) { this.deployFor(p, plan.deploy, plan, delay); continue; }   // the decoy's blink, as aimed
       this.aimAt(p, plan);
@@ -730,10 +743,16 @@ export class Game {
     // Found by a ranged enemy: blink away and leave it a decoy.
     const blink = this.aiDecoyAim(p);
     if (blink) return (this.aiPlan = { yaw: blink.yaw, elev: blink.elev, power: blink.power, weapon: p.weapon, deploy: 'decoy', think: 0.6 });
+    // Jammed: Flak at the drone over it.
+    const flak = this.aiFlakJammer(p);
+    if (flak) return (this.aiPlan = { ...flak, weapon: 'flak', think: 0.6 });
     const chosen = chooseTarget(p, this.knownFoes(p), p.ai, this.rng);
     // No good shot yet: spend the turn putting the orbiter up instead.
     const deploy = this.aiWantsDeploy(p, chosen);
-    if (deploy) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy, think: 0.6 });
+    if (deploy) {
+      const target = deploy === 'jammer' ? this.aiJamTarget(p, chosen) : null;
+      return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy, ...(target ? { target: target.id } : {}), think: 0.6 });
+    }
     if (!chosen) return null;
     const target = this.aiDecoyed(p, chosen);
     // Weigh the arsenal by the situation (ai.weaponWeights). A Mound goes at
@@ -869,7 +888,9 @@ export class Game {
 
   // How much of its aiming error a CPU carries into a shot: less while its
   // Survey Satellite is up (ai.satelliteSharpen).
+  // Jammed from level JAM.arc, it carries more (JAM.blur): its arc is blank too.
   aiSharpen(p) {
+    if (this.arcJammed(p)) return JAM.blur;
     const level = this.surveyLevel(p);
     return level ? satelliteSharpen(level, { difficulty: p.ai, windy: Math.hypot(this.wind[0], this.wind[1]) / 1.5 }) : 1;
   }
@@ -889,7 +910,7 @@ export class Game {
     const ctx = {
       difficulty: p.ai, temper: this.aiTemper(p), seen: m?.shots || 0, unsure: !!target.rough || unsureOf(m),
       dist: Math.hypot(target.x - p.x, target.z - p.z), sunk, hits: p.hitsHere, hurt, behind, threat: !!threat,
-      steer: !this.online && p.inventory.guided > 0,
+      steer: !this.online && p.inventory.guided > 0 && !this.jammed(p),
       pit: holeDepth(this.terrain, target.x, target.z, target.y),
       danger: !!threat && threat.id === target.id
         || ((hurt || behind) && target.hp + target.armor >= strongest - 1e-6 && !target.rough),
@@ -988,8 +1009,103 @@ export class Game {
   // The Survey Satellite level `p` owns (deployed or not).
   satelliteLevel(p) { return this.modLevel(p, 'satellite'); }
 
-  // The satellite level working for `p` right now: only while it is up.
-  surveyLevel(p) { return modUp(p, 'satellite') ? p.mods.satellite.level : 0; }
+  // The satellite level working for `p` right now: only while it is up, and
+  // not while `p` is jammed (its labels go dark).
+  surveyLevel(p) { return modUp(p, 'satellite') && !this.jammed(p) ? p.mods.satellite.level : 0; }
+
+  // ---------- statuses (core/mods.js) ----------
+
+  // How badly `p` is jammed: the level of the strongest jammer on it, or 0.
+  jammed(p) { return statusLevel(p, 'jammed'); }
+
+  // Is `p`'s aim arc blank (and its side view, and the Tracer perk's line)?
+  // From a level JAM.arc jammer.
+  arcJammed(p) { return this.jammed(p) >= JAM.arc; }
+
+  // Work every tank's statuses out again from the mods up (core/mods.js
+  // jamStatuses). An up jammer whose target is gone goes over the live enemy
+  // of its owner nearest where it hovers; each one's stored spot is brought up
+  // to date. Called at fixed points only (round start, each turn and volley,
+  // a mod going up, down or wearing out), so every copy of an online game
+  // holds the same. A tank whose jamming starts, changes or ends: a `status` event.
+  refreshStatus() {
+    for (const p of this.players) {
+      if (!modUp(p, 'jammer')) continue;
+      const m = p.mods.jammer;
+      const t = this.players[m.target];
+      if (!t || !t.alive) {
+        let best = null, bd = Infinity;
+        for (const q of this.players) {
+          if (!q.alive || this.allied(q, p)) continue;
+          const d = Math.hypot(q.x - m.x, q.z - m.z);
+          if (d < bd) { bd = d; best = q; }
+        }
+        if (best) { m.target = best.id; this.emit({ type: 'mod', what: 'retarget', player: p.id, mod: 'jammer', target: best.id }); }
+      }
+      const now = this.players[m.target];
+      if (now?.alive) m.lift = jamLift(p, now, (x, z) => this.groundAt(x, z));
+      Object.assign(m, jammerPos(this.players, p));
+    }
+    const jam = jamStatuses(this.players, (a, b) => this.allied(a, b));
+    for (const p of this.players) {
+      const was = this.jammed(p);
+      const wasBy = (p.status || []).find((s) => s.kind === 'jammed')?.source ?? null;
+      p.status = [...(p.status || []).filter((s) => s.kind !== 'jammed'), ...(jam[p.id] || [])];
+      const now = this.jammed(p);
+      if (now !== was) this.emit({ type: 'status', kind: 'jammed', player: p.id, strength: now, by: now ? p.status.find((s) => s.kind === 'jammed').source : wasBy });
+    }
+  }
+
+  // Where `p`'s jammer would hover over tank `q`, clear of the ground.
+  jamSpot(p, q) { return jammerAt(p, q, jamLift(p, q, (x, z) => this.groundAt(x, z))); }
+
+  // The enemy `p`'s jammer would go over with its turret as it is: the live
+  // enemy it knows of nearest the line of its turret (then the nearest), or null.
+  jamTarget(p) {
+    let best = null, score = Infinity;
+    for (const f of this.knownFoes(p)) {
+      const q = this.players[f.id];
+      if (!q?.alive) continue;
+      const bearing = (Math.atan2(f.z - p.z, f.x - p.x) * 180) / Math.PI;
+      const off = Math.abs(((bearing - p.yaw + 540) % 360) - 180);
+      const k = Math.round(off) * 1e6 + Math.hypot(f.x - p.x, f.z - p.z);
+      if (k < score) { score = k; best = q; }
+    }
+    return best;
+  }
+
+  // Defense beats jamming: an enemy Point Defense with a charge left shoots
+  // down a jammer in its reach (spending the charge), and an enemy Gravity
+  // Orbiter within JAM.grindReach of a jammer grinds it (JAM.grind by its
+  // level). Point Defense looks every time this runs: when a jammer goes up and
+  // at the start of each turn and volley. The grind comes at the start of the
+  // jammed tank's turn (`grind`, that tank) or of each volley (`grind` 'all');
+  // with no `grind`, none.
+  jamWatch(grind = null) {
+    for (const p of this.players) {
+      if (!modUp(p, 'jammer')) continue;
+      const m = p.mods.jammer;
+      const at = jammerPos(this.players, p);
+      const pos = [at.x, at.y, at.z];
+      const pd = this.players.find((q) => q.alive && !this.allied(q, p) && pdReaches(q, at));
+      if (pd) {
+        const t = pd.mods.pointdef;
+        t.charges--;
+        Object.assign(m, at);
+        this.emit({ type: 'intercept', pos, player: pd.id, from: modPos(pd, 'pointdef'), by: p.id, charges: t.charges, mod: 'jammer' });
+        this.hurtModOf(p.id, 'jammer', m.hp, pd.id);
+        continue;
+      }
+      if (!grind || (grind !== 'all' && m.target !== grind.id)) continue;
+      for (const q of this.players) {
+        if (!modUp(p, 'jammer')) break;
+        if (!q.alive || this.allied(q, p) || !modUp(q, 'orbiter')) continue;
+        if (Math.hypot(q.x - at.x, q.z - at.z) > JAM.grindReach) continue;
+        const dmg = JAM.grind[q.mods.orbiter.level] || 0;
+        if (dmg > 0) { Object.assign(m, at); this.hurtModOf(p.id, 'jammer', dmg, q.id); }
+      }
+    }
+  }
 
   // Every Gravity Orbiter well up now, at the game clock, as moon-shaped wells
   // ({ x, y, z, r, mu }, plus soft and owner) for the renderer (gravity lines).
@@ -1017,8 +1133,17 @@ export class Game {
       if (aim) { p.yaw = ((aim.yaw % 360) + 360) % 360; p.elev = aim.elev; p.power = aim.power; clampAim(p); }
       return this.launchBlink(p, delay);
     }
-    if (!deployMod(p, id, (x, z) => this.groundAt(x, z))) return false;
-    this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: id });
+    const def = MOD_BY_ID[id];
+    let at;
+    if (def?.targeted) {
+      // The jammer goes over the plan's target (a live enemy), else the one the turret points nearest.
+      const t = aim?.target != null ? this.players[aim.target] : null;
+      at = t && t.alive && !this.allied(t, p) ? t : this.jamTarget(p);
+      if (!at) return false;
+    }
+    if (!deployMod(p, id, (x, z) => this.groundAt(x, z), at)) return false;
+    this.emit({ type: 'mod', what: 'deploy', player: p.id, mod: id, ...(at ? { target: at.id, pos: modPos(p, id) } : {}) });
+    if (def?.targeted) { this.jamWatch(); this.refreshStatus(); }
     return true;
   }
 
@@ -1027,22 +1152,29 @@ export class Game {
   // ends; in a volley it is the locked-in plan and goes up as the volley
   // fires (launchVolley). The decoy goes with the tank's aim now: taking
   // turns, its blink flies at once. Returns the id, or null.
-  deploy(id = null) {
+  // A jammer goes over `target` (a tank id), else the enemy the turret points nearest (jamTarget).
+  deploy(id = null, target = null) {
     const p = this.current;
     if (!this.canDeploy(p)) return null;
     const which = id || readyMods(p)[0];
     if (!readyMods(p).includes(which)) return null;
+    let aim = null;
+    if (MOD_BY_ID[which]?.targeted) {
+      const t = target != null ? this.players[target] : this.jamTarget(p);
+      if (!t || !t.alive || this.allied(t, p)) return null;
+      aim = { target: t.id };
+    }
     this.strike = null;
     this.blink = null;
     if (this.volleyMode) {
-      this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy: which };
+      this.volley.plans[p.id] = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, deploy: which, ...(aim || {}) };
       this.volley.done.push(p.id);
       Object.assign(p, this.volley.shown);
       this.emit({ type: 'locked', player: p.id, deploy: which });
       this.nextPlanner();
       return which;
     }
-    this.deployTurn(p, which);
+    this.deployTurn(p, which, aim);
     return which;
   }
 
@@ -1128,7 +1260,8 @@ export class Game {
     const ready = readyMods(p);
     if (ready.includes('orbiter') && this.aiWantsOrbiter(p, target)) return 'orbiter';
     if (ready.includes('pointdef') && this.aiWantsPointDef(p)) return 'pointdef';
-    if (ready.includes('satellite') && wantsSatellite({ me: p, target, memory: p.aim, difficulty: p.ai, temper: this.aiTemper(p), rng: this.rng })) return 'satellite';
+    if (ready.includes('jammer') && this.aiJamTarget(p, target, true)) return 'jammer';
+    if (ready.includes('satellite') && !this.jammed(p) && wantsSatellite({ me: p, target, memory: p.aim, difficulty: p.ai, temper: this.aiTemper(p), rng: this.rng })) return 'satellite';
     return null;
   }
 
@@ -1157,6 +1290,40 @@ export class Game {
     const style = this.aiDeployStyle(p);
     if (style === 'early') return true;
     return p.hp < p.maxHp || shelled;
+  }
+
+  // The enemy a CPU sends its jammer over (AI_JAM), or null. `draw`: the
+  // Easy CPU's roll of the dice for whether it goes now (once a turn, in
+  // aiWantsDeploy); without it, the tank it would go over.
+  aiJamTarget(p, chosen = null, draw = false) {
+    const mine = (q) => (q.status || []).some((s) => s.kind === 'jammed' && s.source === p.id);
+    const foes = this.knownFoes(p).filter((f) => f.aloft && !mine(this.players[f.id]) && !pdReaches(this.players[f.id], this.jamSpot(p, this.players[f.id])));
+    if (!foes.length) return null;
+    if (p.ai === 'easy' && draw && this.rng.next() >= AI_JAM.easy) return null;
+    const near = (f) => Math.hypot(f.x - p.x, f.z - p.z);
+    const pick = foes.find((f) => f.id === chosen?.id) && p.ai === 'easy' ? chosen : foes.reduce((a, b) => (near(b) < near(a) ? b : a));
+    return this.players[pick.id];
+  }
+
+  // A jammed CPU's Flak at the drone over it (AI_JAM): { yaw, elev, power }, or null.
+  aiFlakJammer(p) {
+    if (p.ai === 'easy' || !this.jammed(p) || !(p.inventory.flak > 0)) return null;
+    const w = this.weaponOf(p, 'flak');
+    const burst = (w?.flight || []).find((f) => f.type === 'airburst');
+    if (!burst?.air) return null;
+    const hurts = this.arcJammed(p) || modUp(p, 'satellite') || p.inventory.guided > 0;
+    if (p.ai !== 'hard' && !hurts) return null;
+    const drones = (p.status || []).filter((s) => s.kind === 'jammed').map((s) => this.players[s.source]).filter((q) => modUp(q, 'jammer'));
+    for (const q of drones) {
+      const at = jammerPos(this.players, q);
+      const aim = planFlakAt({ shooter: p, point: [at.x, at.y, at.z], r: JAM.r, air: burst.air, wind: this.wind, terrain: this.terrain,
+        gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p) });
+      if (!aim) continue;
+      const k = AI_JAM.power[p.ai] ?? AI_JAM.power.normal;
+      aim.power = Math.min(TANK.maxPower, Math.max(TANK.minPower, aim.power * (1 + this.rng.gauss() * k)));
+      return aim;
+    }
+    return null;
   }
 
   // Does the CPU `p` fall for `target`'s decoy this shot? Only for a decoy it
@@ -1196,6 +1363,7 @@ export class Game {
   wearMods(p) {
     if (!p.alive) return;
     for (const id of tickMods(p)) this.emit({ type: 'mod', what: 'expire', player: p.id, mod: id });
+    if (p.mods?.jammer) this.refreshStatus();   // its turns left, or it ran out
   }
 
   // A destroyed tank's mods go with it.
@@ -1206,6 +1374,7 @@ export class Game {
       m.state = 'down';
       m.hp = 0;
       this.emit({ type: 'mod', what: 'down', player: p.id, mod: def.id, hp: 0, by: null, pos: modPos(p, def.id), tank: true });
+      if (def.id === 'jammer') this.refreshStatus();
     }
   }
 
@@ -1219,6 +1388,7 @@ export class Game {
     const pos = modPos(p, mod);
     this.emit({ type: 'mod', what: r, player: owner, mod, hp: m.hp, by: from ?? null, pos });
     if (r === 'down' && from != null && from !== owner) this.earn(this.players[from], 'mod', Math.round(MOD_PAY * (this.modifier.pay || 1)));
+    if (r === 'down' && mod === 'jammer') this.refreshStatus();
     if (r === 'down' && mod === 'decoy' && m.level >= DECOY.boom) {
       this.fizzles.push({ owner, pos: [m.x, m.y, m.z] });
       this.runFizzles();   // at once, unless a blast is still being worked through
@@ -1778,7 +1948,9 @@ export class Game {
     if (drag) pr.drag = drag;   // children (split, flak, bomblets) come through here too
     if (this.terrain.wells.length) pr.wells = this.terrain.wells;
     const steer = (this.weaponOf(owner, weaponId).flight || []).find((f) => f.type === 'steer');
-    if (steer) pr.steer = { rate: steer.rate, fuel: steer.fuel, input: 0 };
+    // A jammed tank's Guided Missile flies as fired: no steering fuel.
+    const jammed = owner != null && this.jammed(this.players[owner]) > 0;
+    if (steer) pr.steer = { rate: steer.rate, fuel: jammed ? 0 : steer.fuel, input: 0, ...(jammed ? { jammed: true } : {}) };
     this.projectiles.push(pr);
     this.emit({ type: 'projectile', id: pr.id, weapon: weaponId, owner, shot });
     return pr;
@@ -1831,7 +2003,7 @@ export class Game {
     const plan = this.aiPlan;
     p.weapon = p.inventory[plan.weapon] > 0 ? plan.weapon : 'shell';
     if (this.phaseTime < plan.think) return;
-    if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployTurn(p, plan.deploy); return; }   // this turn goes on a mod
+    if (plan.deploy && !MOD_BY_ID[plan.deploy]?.aimed) { this.deployTurn(p, plan.deploy, plan); return; }   // this turn goes on a mod
     if (this.swingToward(p, plan, dt)) {
       if (plan.deploy) { this.deployTurn(p, plan.deploy, plan); return; }   // the decoy's blink
       p.yaw = ((plan.yaw % 360) + 360) % 360;

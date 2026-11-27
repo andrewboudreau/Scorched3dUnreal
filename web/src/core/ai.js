@@ -509,6 +509,45 @@ export function planPlace({ shooter, point, wind, terrain, rng, difficulty = 'no
   return { yaw: ((yaw % 360) + 360) % 360, elev: sol.elev, power: Math.min(TANK.maxPower, Math.max(TANK.minPower, power)) };
 }
 
+// ---------- Flak at something in the sky ----------
+
+// A Flak shot at a point in the air (a Jammer Drone, core/mods.js JAM): the
+// turret on the point, and for a grid of elevations and charges (`elev`,
+// `power`: from, to, step) the shell flown out until it would burst by it as
+// weapons.airburstNearMod does (`air` m and `fuse` s, or within `r` + 2 m;
+// a shell that reaches it before the fuse is live does not count).
+// Returns { yaw, elev, power } of the burst nearest the point (ties to the
+// lower charge) if it is within `ok` m, else null. No dice: the caller adds
+// its own error.
+export const FLAK_AT = { elev: [30, 86, 4], power: [14, 80, 2], fuse: 0.4, ok: 6, time: 4 };
+export function planFlakAt({ shooter, point, r = 2, air = 18, wind = [0, 0], terrain, gravity = GRAVITY, windK = 1, drag = 0 }) {
+  const F = FLAK_AT;
+  const yaw = ((Math.atan2(point[2] - shooter.z, point[0] - shooter.x) * RAD) % 360 + 360) % 360;
+  const dist = (q) => Math.hypot(q[0] - point[0], q[1] - point[1], q[2] - point[2]);
+  let best = null;
+  for (let elev = F.elev[0]; elev <= F.elev[1]; elev += F.elev[2]) {
+    const from = muzzleOrigin(shooter, yaw, elev);
+    for (let power = F.power[0]; power <= F.power[1]; power += F.power[2]) {
+      const pr = makeProjectile(from, launchVelocity(yaw, elev, power), terrain);
+      pr.g = gravity;
+      pr.windK = windK;
+      if (drag) pr.drag = drag;
+      let burst = null;
+      while (pr.time < F.time) {
+        stepProjectile(pr, wind);
+        const d = dist(pr.pos);
+        if (pr.time < F.fuse && d <= r) break;   // it would strike it before the fuse is live: a dud's small blast
+        if (pr.time >= F.fuse && d <= air && (d > dist(pr.prev) || d < r + 2)) { burst = d; break; }
+        const [x, y, z] = pr.pos;
+        if (pr.vel[1] < 0 && y < point[1] - air) break;   // fell past it
+        if (terrain.inBounds(x, z) && y < terrain.heightAt(x, z)) break;
+      }
+      if (burst != null && (!best || burst < best.d - 1e-9)) best = { d: burst, yaw, elev, power };
+    }
+  }
+  return best && best.d <= F.ok ? { yaw: best.yaw, elev: best.elev, power: best.power } : null;
+}
+
 // How a CPU steers its Guided Missile, every step: toward the spot it aimed
 // at (`goal`, [x, z]). It reacts `delay` s into the flight, holds straight
 // while the missile heads within `deadband` degrees of the goal, and lets go

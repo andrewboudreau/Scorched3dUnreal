@@ -203,8 +203,16 @@ labels and an enemy's aim history point at the decoy); a blast that catches
 both still finds you. Point Defense beats single heavy shells; Scatter, Flak
 bursts, Double Strike's second shell and Rollers get past it.
 
-More mod ideas for later: a recon drone that reveals fog, a jammer drone
-(jamming family), a shield bubble that soaks one blast, a repair drone, a
+The Jammer Drone (built, jamming family; from Signal Spoiler, then Wideband)
+flies to hover over the enemy your turret points nearest and puts Jammed on
+it for 4 to 6 turns: satellite labels dark and no Guided Missile steering;
+from level 2 the aim arc and side view go blank too; at level 3 every enemy
+within 40 m of it is jammed. Point Defense shoots it down as it arrives,
+an enemy orbiter nearby grinds it, and Flak brings it down. Normal and Hard
+CPUs send it over a tank with a satellite up, and a jammed CPU with Flak
+shoots it down (the README has the numbers).
+
+More mod ideas for later: a recon drone that reveals fog, a shield bubble that soaks one blast, a repair drone, a
 mine layer.
 
 ## Variants, the run and the boss (plan, #15)
@@ -455,6 +463,13 @@ other mods. A status has a kind, a source, a strength and a duration in
 turns, and it shows as a small icon on the tank's mark (only in the views that
 show health; see the HUD rules). Statuses are game state, so they travel online.
 
+Built: `p.status` holds `{ kind, source, strength, turns }`. A status is
+not stepped on its own: the game works it out again from the mods up at fixed
+points (round start, each turn or volley, a mod going up, down or wearing
+out), so there is one rule for both turn modes and nothing to drift online.
+Jammed is the first one (from the Jammer Drone); its mark is a blinking JAM
+badge on the tank's label and a pulse ring on the ground under it.
+
 Buffs (ideas):
 - **Uplinked:** your recon mods reach further or label more (from a comms
   relay).
@@ -463,9 +478,9 @@ Buffs (ideas):
   shows it).
 
 Debuffs (ideas):
-- **Jammed:** your Survey Satellite's labels scramble or go dark, your aim arc
-  is hidden, and a Guided Missile can't be steered. This comes from a jamming
-  drone or pulse.
+- **Jammed** (built): your Survey Satellite's labels go dark and a Guided
+  Missile can't be steered; from a level 2 jammer your aim arc and side view
+  are hidden too. This comes from the Jammer Drone (later a pulse too).
 - **Spotted:** you show through fog of war to everyone, from a recon drone
   or satellite.
 - **Shaken:** turret slew is slower for a turn, after a near miss.
@@ -510,7 +525,7 @@ If it beats everything, it's a perk number, not a mod.
 | Point Defense (was Missile Defense) | Defense | Built: from perks (Close-In Gunner, then Twin Feeds), 25–35 hp, lasts 5–7 turns | Shoots down the first enemy shell coming down near you; charges refill each round; Flak and Rollers pass. CPUs answer it with Scatter, Flak and Rollers (see "Mods and their levels") |
 | Decoy Beacon | Deception | Built: from perks (Smoke and Mirrors, then Hard Light), 20–35 hp, lasts the round at most | Blink away and leave a decoy that soaks a ranged shot; CPUs fall for it on the seeded rng (see "Mods and their levels"). At most two mods a tank (mod bays) |
 | Recon drone | Recon | Idea | Flies to a spot and hovers for N turns; reveals fog and applies Spotted; can be shot down |
-| Jammer drone | Jamming | Idea | Hovers over an enemy and applies Jammed to its recon; Defense's prey |
+| Jammer Drone (L1–3) | Jamming | Built: from perks (Signal Spoiler, then Wideband), 20–30 hp, lasts 4–6 turns | Hovers over an enemy and applies Jammed (satellite dark, no steering; L2 no aim arc; L3 a 40 m field). Point Defense shoots it down, orbiters grind it, Flak downs it. Normal/Hard CPUs jam a tank with a satellite up and Flak a drone that jams them |
 | Comms uplink ("satcom") | Recon (support) | Idea | Buffs your other mods (Uplinked); could share recon with an ally in team play |
 | Signal jam pulse | Jamming (ability) | Idea | A one-shot area pulse from your tank, on a cooldown |
 
