@@ -78,11 +78,11 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 22, damage: 70, depth: 0.7 }],
     variants: [
       { id: 'bunker', name: 'Bunker Buster', style: 'careful',
-        desc: 'A narrower blast (18 m) that digs half as deep again and hits a buried or dug-in tank in full.',
-        patch: { impact: [{ type: 'blast', radius: 18, damage: 70, depth: 1.05, pierce: true }] } },
+        desc: 'A narrower blast (19 m) that digs half as deep again and hits a buried or dug-in tank in full.',
+        patch: { impact: [{ type: 'blast', radius: 19, damage: 70, depth: 1.05, pierce: true }] } },
       { id: 'splitter', name: 'Splitter', style: 'bold',
-        desc: 'A smaller blast (16 m, 50) that throws three bomblets outward, about 14 m each way.',
-        patch: { impact: [{ type: 'blast', radius: 16, damage: 50, depth: 0.6 }, { type: 'throw', count: 3, speed: 7, up: 10, child: 'splitlet' }] } },
+        desc: 'A smaller blast (18 m, 55) that throws three bomblets outward, about 14 m each way.',
+        patch: { impact: [{ type: 'blast', radius: 18, damage: 55, depth: 0.6 }, { type: 'throw', count: 3, speed: 7, up: 10, child: 'splitlet' }] } },
     ],
     upgrade: { name: 'Wider Charge', desc: 'Its blast reaches 15% wider.', radius: 1.15 },
   },
@@ -92,16 +92,16 @@ export const WEAPONS = [
   },
   {
     id: 'scatter', name: 'Scatter', price: 220, bundle: 2, role: 'Damage', tier: 'advanced',
-    desc: 'Splits into five shells at the top of its arc.',
-    flight: [{ type: 'split', count: 5, spread: 9, child: 'scatterlet' }],
+    desc: 'Splits into five shells at the top of its arc, landing in a row across the line of flight: a shot a little to one side still hits.',
+    flight: [{ type: 'split', count: 5, spread: 3.5, child: 'scatterlet' }],
     impact: [{ type: 'blast', radius: 10, damage: 30, depth: 0.55 }],
     variants: [
       { id: 'line', name: 'Line', style: 'careful',
-        desc: 'Five shells in a tight row along the aim: more of them on one tank, less ground covered.',
-        patch: { flight: [{ type: 'split', count: 5, spread: 3, shape: 'along', child: 'scatterlet', share: 0.7 }] } },
+        desc: 'Five shells in a row along the line of flight instead of across it: a shot a little long or short still hits, one off to the side does not.',
+        patch: { flight: [{ type: 'split', count: 5, spread: 4, shape: 'along', child: 'scatterlet', share: 0.7 }] } },
       { id: 'ring', name: 'Ring', style: 'bold',
         desc: 'Five bigger shells (12 m) in a ring round the aim point: a near miss still hits, but dead on only the edges reach.',
-        patch: { flight: [{ type: 'split', count: 5, spread: 3.5, shape: 'ring', child: 'ringlet', share: 0.55 }] } },
+        patch: { flight: [{ type: 'split', count: 5, spread: 2.25, shape: 'ring', child: 'ringlet', share: 0.55 }] } },
     ],
     upgrade: { name: 'Sixth Shell', desc: 'It splits into one more shell.', count: 1 },
   },
@@ -118,18 +118,20 @@ export const WEAPONS = [
     desc: 'Proximity fuse: bursts as it passes over an enemy and rains fragments on it. A near miss still hits. Anti-air: it also bursts by an enemy orbiter or satellite and can bring it down. Passing nobody, it bursts just above the ground.',
     // On the way down it bursts at its nearest pass over an enemy tank (within
     // `range` across, `low`..`high` above it), or `floor` over the ground.
-    // Fragments keep `carry` of the shell's sideways speed and fan out `spread`
-    // m/s, so a burst 20 m up lands a pattern about 15 m across, under it.
+    // Fragments keep `carry` of the shell's sideways speed and `fall` of its
+    // speed down (plus 3 m/s), and fan out `spread` m/s, so a burst 14 m up
+    // lands a pattern about 20 m across, just past the point under it.
+    // (tools/balance.mjs flak: dead over a tank about 45, a Normal CPU's shot about 18, Scatter's about 18.)
     // It is anti-air too: it also bursts on its nearest pass within `air` m of an
     // enemy mod (core/mods.js), and the burst itself hurts every enemy mod in
     // reach, up to `airDamage` right on it.
-    flight: [{ type: 'airburst', range: 22, low: 4, high: 40, floor: 14, count: 12, spread: 7, carry: 0.35, child: 'flaklet', air: 18, airDamage: 45 }],
+    flight: [{ type: 'airburst', range: 22, low: 4, high: 40, floor: 14, count: 12, spread: 11, carry: 0.1, fall: 0.1, child: 'flaklet', air: 18, airDamage: 45 }],
     // Only if it strikes before it can burst (a flat shot into a hill): a small blast.
     impact: [{ type: 'blast', radius: 8, damage: 18, depth: 0.4 }],
   },
   {
     id: 'flaklet', name: 'Flak fragment', hidden: true,
-    impact: [{ type: 'blast', radius: 7, damage: 13, depth: 0.1 }],
+    impact: [{ type: 'blast', radius: 7, damage: 10, depth: 0.1 }],
   },
   {
     id: 'bomblet', name: 'Bomblet', hidden: true,   // thrown by the Shrapnel perk
@@ -144,8 +146,8 @@ export const WEAPONS = [
         desc: 'Leans toward the nearest enemy tank within 50 m as it rolls. A smaller blast (12 m, 46).',
         patch: { impact: [{ type: 'roll', seek: { accel: 1.5, range: 50 }, then: [{ type: 'blast', radius: 12, damage: 46, depth: 0.55 }] }] } },
       { id: 'hopper', name: 'Hopper', style: 'bold',
-        desc: 'Hops once over a bump instead of stopping against it, and rolls on. A little less damage (48).',
-        patch: { impact: [{ type: 'roll', hop: 1, then: [{ type: 'blast', radius: 14, damage: 48, depth: 0.6 }] }] } },
+        desc: 'Hops once over a bump instead of stopping against it, and rolls on. A little less damage (53).',
+        patch: { impact: [{ type: 'roll', hop: 1, then: [{ type: 'blast', radius: 14, damage: 53, depth: 0.6 }] }] } },
     ],
     upgrade: { name: 'Long Roll', desc: 'It rolls half as far again.', reach: 1.5 },
   },
@@ -187,11 +189,11 @@ export const WEAPONS = [
     impact: [{ type: 'napalm' }],
     variants: [
       { id: 'sticky', name: 'Sticky', style: 'careful',
-        desc: 'Thick: it runs about half as far and lies deeper where it lands, and burns about 2 s longer (up to 62).',
-        patch: { impact: [{ type: 'napalm', params: { film: 0.22, ticks: 11, damage: 62 } }] } },
+        desc: 'Thick: it runs about half as far and lies deeper where it lands, so it burns a tank on open ground too, and burns about 2 s longer (up to 56).',
+        patch: { impact: [{ type: 'napalm', params: { film: 0.22, ticks: 11, damage: 56 } }] } },
       { id: 'flood', name: 'Flood', style: 'bold',
-        desc: 'Thin: more of it, running about half as far again and spreading wide, but shallower and shorter (up to 50).',
-        patch: { impact: [{ type: 'napalm', params: { iters: 96, reach: 40, fuel: 9, film: 0.07, ticks: 5, damage: 50 } }] } },
+        desc: 'Thin: more of it, running about half as far again and spreading wide, so it finds a hollow and burns hotter there (up to 60), but shallow and short on open ground.',
+        patch: { impact: [{ type: 'napalm', params: { iters: 96, reach: 40, fuel: 9, film: 0.07, ticks: 5, damage: 60 } }] } },
     ],
     upgrade: { name: 'Wet Burn', desc: 'It burns through rain and over shallow water (up to 1.5 m deep).', napalm: { wade: 1.5, rainproof: true } },
   },
@@ -201,8 +203,8 @@ export const WEAPONS = [
     impact: [{ type: 'blast', radius: 30, damage: 95, depth: 0.75 }],
     variants: [
       { id: 'deep', name: 'Deep Strike', style: 'careful',
-        desc: 'A narrower blast (25 m) that hits harder at the centre (110) and digs a deeper crater.',
-        patch: { impact: [{ type: 'blast', radius: 25, damage: 110, depth: 1.1 }] } },
+        desc: 'A narrower blast (25 m) that hits harder at the centre (104) and digs a deeper crater.',
+        patch: { impact: [{ type: 'blast', radius: 25, damage: 104, depth: 1.1 }] } },
       { id: 'airburst', name: 'Airburst', style: 'bold',
         desc: 'Goes off 8 m up: no crater and a little less damage (90), but the whole blast reaches across the ground, even under a Dirt Bomb dome.',
         patch: { flight: [{ type: 'burst', height: 8 }], impact: [{ type: 'blast', radius: 30, damage: 90, depth: 0, flat: true }] } },
@@ -441,7 +443,7 @@ export function airburstNearMod(pr, burst, mods) {
 
 // The fragments of an airburst: a downward fan under the burst point.
 export function airburstVelocities(vel, burst) {
-  const base = [vel[0] * burst.carry, Math.min(vel[1] * 0.4, 0) - 3, vel[2] * burst.carry];
+  const base = [vel[0] * burst.carry, Math.min(vel[1] * (burst.fall ?? 0.4), 0) - 3, vel[2] * burst.carry];
   return splitVelocities(base, burst.count, burst.spread, 'disc');
 }
 

@@ -86,20 +86,20 @@ test('the boss moves up a phase as it is hurt, announced once each, and never ba
   const b = boss(g);
   const me = g.players[0];
   g.drainEvents();
-  g.damage(b, 150, me.id);   // 250 of 400: still phase 1
+  g.damage(b, 140, me.id);   // 230 of 370: still phase 1
   assert.equal(b.boss.phase, 1);
   assert.equal(drain(g, 'bossPhase').length, 0);
-  g.damage(b, 20, me.id);    // 230: phase 2
+  g.damage(b, 20, me.id);    // 210: phase 2
   assert.equal(b.boss.phase, 2);
   assert.deepEqual(drain(g, 'bossPhase').map((e) => e.phase), [2]);
-  g.damage(b, 140, me.id);   // 90: phase 3
+  g.damage(b, 140, me.id);   // 70: phase 3
   assert.equal(b.boss.phase, 3);
   assert.deepEqual(drain(g, 'bossPhase').map((e) => e.phase), [3]);
   b.hp = 300;                // a repair would not take it back
   g.damage(b, 1, me.id);
   assert.equal(b.boss.phase, 3);
   assert.equal(drain(g, 'bossPhase').length, 0);
-  assert.equal(Math.round(b.boss.hurt[me.id]), 311, 'it remembers who hurt it');
+  assert.equal(Math.round(b.boss.hurt[me.id]), 301, 'it remembers who hurt it');
 });
 
 test('phase 1: Point Defense goes up on its turn and refills; Scatter or Breacher at either foe', () => {

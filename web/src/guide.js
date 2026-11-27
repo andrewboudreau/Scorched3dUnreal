@@ -14,6 +14,7 @@ import * as weaponData from './core/weapons.js';
 import * as modData from './core/mods.js';
 import * as perkData from './core/perks.js';
 import * as gameData from './core/game.js';
+import { BOSS } from './core/boss.js';
 
 // ---------------------------------------------------------------- helpers
 
@@ -146,7 +147,7 @@ export function modifierRows(modifiers) {
 
 // The Custom match options, one row each.
 export const BUILDER_ROWS = [
-  { name: 'Match', text: '**Every tank for itself**, or **Boss: two against one**: you and the next tank in the list (a CPU, or a friend on this screen) against the **Bulwark**, a big tank (400 hp) on a fort at the far end of a walled arena, in one round. It fights in three phases as it loses health, marks its big shots a turn ahead (move out of the red ring), and takes a quarter more from above: an Airburst, or a shell that comes down steeply. Rounds, Terrain, Edges and the checkbox groups do not apply.' },
+  { name: 'Match', text: `**Every tank for itself**, or **Boss: two against one**: you and the next tank in the list (a CPU, or a friend on this screen) against the **Bulwark**, a big tank (${BOSS.hp} hp) on a fort at the far end of a walled arena, in one round. It fights in three phases as it loses health, marks its big shots a turn ahead (move out of the red ring), and takes a quarter more from above: an Airburst, or a shell that comes down steeply. Rounds, Terrain, Edges and the checkbox groups do not apply.` },
   { name: 'Tanks', text: 'Two to six: you, more humans on this screen (they pass it round), or CPUs at Easy, Normal or Hard.' },
   { name: 'Rounds', text: 'How many rounds the match lasts.' },
   { name: 'Wind', text: '**Random** (the default) picks Calm, Breezy, Gusty or Gale when the match starts, and the round banner says which. Or choose one.' },

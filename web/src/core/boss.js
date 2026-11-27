@@ -18,7 +18,7 @@
 export const BOSS = {
   name: 'Bulwark',
   team: 1,
-  hp: 400,
+  hp: 370,              // tools/balance.mjs boss: allies win about 55% in either firing mode
   size: 1.5,             // drawn and hit as a tank this many times the size
   ai: 'normal',          // how well it aims (ai.DIFFICULTY)
   // Health shares where phases 2 and 3 begin.

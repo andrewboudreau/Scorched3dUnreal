@@ -48,10 +48,10 @@ test('a variant resolves to the base weapon with its patch, the upgrade on top, 
   const bb = resolveWeapon(base, 'bunker');
   assert.equal(bb.id, 'breacher', 'it fires and is stocked as the base weapon');
   assert.equal(bb.label, 'Breacher · Bunker Buster');
-  assert.deepEqual(bb.impact, [{ type: 'blast', radius: 18, damage: 70, depth: 1.05, pierce: true }]);
+  assert.deepEqual(bb.impact, [{ type: 'blast', radius: 19, damage: 70, depth: 1.05, pierce: true }]);
   assert.equal(bb.price, base.price, 'same price and bundle');
   const up = resolveWeapon(base, 'bunker', true);
-  assert.equal(up.impact[0].radius, 20.7, 'Wider Charge: 15% on the blast');
+  assert.equal(up.impact[0].radius, 21.8, 'Wider Charge: 15% on the blast');
   assert.ok(up.upgraded);
   assert.equal(resolveWeapon(base, 'bunker', true), up, 'memoized: the same object each time');
   assert.equal(JSON.stringify(base), before, 'the base weapon is untouched');
@@ -60,7 +60,7 @@ test('a variant resolves to the base weapon with its patch, the upgrade on top, 
   const p = { perks: ['napalm:sticky', 'napalm:up'] };
   const n = weaponFor(p, 'napalm');
   assert.equal(weaponLabel(p, 'napalm'), 'Napalm · Sticky');
-  assert.deepEqual(n.impact[0].params, { film: 0.22, ticks: 11, damage: 62, wade: 1.5, rainproof: true });
+  assert.deepEqual(n.impact[0].params, { film: 0.22, ticks: 11, damage: 56, wade: 1.5, rainproof: true });
   assert.equal(weaponFor(p, 'breacher'), WEAPON_BY_ID.breacher, 'other weapons as they are');
   assert.equal(weaponFor(p, 'shell'), WEAPON_BY_ID.shell);
   assert.equal(weaponLabel({ perks: [] }, 'napalm'), 'Napalm');
@@ -71,7 +71,7 @@ test('a variant resolves to the base weapon with its patch, the upgrade on top, 
     const r = resolveWeapon(w, v.id, true);
     for (const part of [...(r.flight || []), ...(r.impact || [])]) if (part.child) assert.ok(WEAPON_BY_ID[part.child]?.hidden, `${v.id}: ${part.child}`);
   }
-  assert.equal(weaponStats(resolveWeapon(base, 'splitter')), '50 dmg · 16 m + 3 × 22');
+  assert.equal(weaponStats(resolveWeapon(base, 'splitter')), '55 dmg · 18 m + 3 × 22');
   // The guide lists them from the data: two sides and the upgrade a family.
   const rows = variantRows(WEAPONS);
   assert.equal(rows.length, 15);
@@ -197,8 +197,8 @@ test('Scatter: the Line lays its shells down the line of flight, the Ring evenly
   for (const v of line) assert.ok(Math.abs(v[2]) < 1e-9, 'no spread across');
   const xs = line.map((v) => v[0]);
   assert.ok(Math.max(...xs) - Math.min(...xs) > 4, 'a row along the flight');
-  const ring = splitVelocities(vel, 5, 3.5, 'ring');
-  for (const v of ring) assert.ok(Math.abs(Math.hypot(v[0] - 20, v[2]) - 3.5) < 1e-9, 'all on the circle');
+  const ring = splitVelocities(vel, 5, 2.25, 'ring');
+  for (const v of ring) assert.ok(Math.abs(Math.hypot(v[0] - 20, v[2]) - 2.25) < 1e-9, 'all on the circle');
   assert.ok(Math.abs(ring[0][2]) < 1e-9 && ring[0][0] > 20, 'the first straight ahead');
   // In a game, the Ring leaves a ring of craters round a middle it misses.
   const g = arena({ perks: ['scatter:ring'] });
@@ -287,7 +287,7 @@ test('Napalm: Sticky stays put and burns long, Flood runs far and burns short; W
   const base = burn([]), st = burn(['napalm:sticky']);
   assert.ok(st.dmg > base.dmg, `Sticky ${st.dmg.toFixed(1)} > ${base.dmg.toFixed(1)}`);
   assert.ok(st.burn > base.burn);
-  assert.deepEqual(st.op[3], { film: 0.22, ticks: 11, damage: 62 }, 'the ground op keeps its params');
+  assert.deepEqual(st.op[3], { film: 0.22, ticks: 11, damage: 56 }, 'the ground op keeps its params');
   assert.equal(base.op.length, 3, 'a plain spill as before');
   const wet = burn([], true), proof = burn(['napalm:sticky', 'napalm:up'], true), dry = burn(['napalm:sticky', 'napalm:up']);
   assert.ok(Math.abs(wet.dmg - base.dmg * NAPALM.rain) < 1, `rain damps it: ${wet.dmg.toFixed(1)}`);

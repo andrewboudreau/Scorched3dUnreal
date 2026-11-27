@@ -245,11 +245,14 @@ second column beside the first. On a phone the players box sits top right.
   human's missile answers the same keys.
 - **Flak.** A proximity fuse. On the way down it bursts at its nearest pass
   over an enemy tank (within 22 m across and 4 to 40 m above it) and rains 12
-  fragments on it, each a shallow 7 m blast worth 13; passing nobody, it bursts
-  14 m over the ground. So a near miss still hurts: a pass 20 or 30 m short does
-  about 15 to 30 damage, a burst right overhead about 40. Over open space (the
-  isles) it only bursts over a tank. 220 for two. CPU tanks use it, and shop
-  for it.
+  fragments on it, each a shallow 7 m blast worth 10, in a pattern about 20 m
+  across just past the point under the burst; passing nobody, it bursts 14 m
+  over the ground. So a near miss still hurts, and the best shot passes about
+  10 m over the tank rather than at it: a burst right overhead does about 45,
+  a shot aimed at the tank itself goes off short and does a little less. Over
+  open space (the isles) it only bursts over a tank. 200 for two. CPU tanks
+  use it and shop for it; Normal and Hard CPUs aim it to pass over the target
+  (`ai.flakPass`), Easy ones aim it like a shell.
 - **Teleport.** No damage. Your tank moves to where the shell lands, snapped to
   the ground and nudged clear of water, houses, tanks and the map edge. Shells
   already in the air still land where they were aimed, so you may have left
@@ -701,11 +704,11 @@ second column beside the first. On a phone the players box sits top right.
 
   | Weapon | Careful | Bold | Rank 2 |
   | --- | --- | --- | --- |
-  | Breacher (22 m, 70) | **Bunker Buster**: 18 m, 70, digs half again as deep; a tank that is buried, or lower than the blast, is hit by the distance across, so a buried or dug-in tank takes it all | **Splitter**: 16 m, 50, and three bomblets (9 m, 22) thrown out in a star | Wider Charge: blast 15% wider |
-  | Scatter (5 × 28) | **Line**: the five shells land in a row along the line of flight | **Ring**: five bigger shells (12 m, 30) in an even ring round the aim point; none lands in the middle, so a tank dead centre takes only the edges of the five blasts | Sixth Shell |
-  | Roller (14 m, 55) | **Seeker**: leans toward the nearest enemy tank within 50 m as it rolls; 12 m, 46 | **Hopper**: hops once over a bump (0.4 to 8 m high) in its path and rolls on; 14 m, 48 | Long Roll: rolls half as far again |
-  | Napalm (56) | **Sticky**: thick, runs about half as far and lies deeper, burns 11 ticks (about 5 s) for up to 62 | **Flood**: more and thinner fuel that runs about half as far again and spreads wide, five ticks for up to 50 | Wet Burn: burns through rain and over water up to 1.5 m deep |
-  | Thunderhead (30 m, 95) | **Deep Strike**: 25 m, 110, a deeper crater | **Airburst**: goes off 8 m over the ground (`ballistics.burstNow`), 30 m and 90 by the distance across, no crater, so it hits a tank under a Dirt Bomb's dome in full | Wider Charge: blast 15% wider |
+  | Breacher (22 m, 70) | **Bunker Buster**: 19 m, 70, digs half again as deep; a tank that is buried, or lower than the blast, is hit by the distance across, so a buried or dug-in tank takes it all | **Splitter**: 18 m, 55, and three bomblets (9 m, 22) thrown out in a star | Wider Charge: blast 15% wider |
+  | Scatter (5 × 28, in a tight row across the line of flight) | **Line**: the five shells land in a longer row along the line of flight, for a shot long or short | **Ring**: five bigger shells (12 m, 30) in an even ring round the aim point; none lands in the middle, so a tank dead centre takes only the edges of the five blasts | Sixth Shell |
+  | Roller (14 m, 55) | **Seeker**: leans toward the nearest enemy tank within 50 m as it rolls; 12 m, 46 | **Hopper**: hops once over a bump (0.4 to 8 m high) in its path and rolls on; 14 m, 53 | Long Roll: rolls half as far again |
+  | Napalm (56) | **Sticky**: thick, runs about half as far and lies deeper, burns 11 ticks (about 5 s) for up to 56: the better pick on open ground | **Flood**: more and thinner fuel that runs about half as far again and spreads wide, five ticks for up to 60, and it pools: the better pick at a tank in a hollow | Wet Burn: burns through rain and over water up to 1.5 m deep |
+  | Thunderhead (30 m, 95) | **Deep Strike**: 25 m, 104, a deeper crater | **Airburst**: goes off 8 m over the ground (`ballistics.burstNow`), 30 m and 90 by the distance across, no crater, so it hits a tank under a Dirt Bomb's dome in full | Wider Charge: blast 15% wider |
 
   The choice is a perk id like `napalm:sticky` (`VARIANT_PERKS` in
   `src/core/perks.js`), so it travels in snapshots and online like any rank.
@@ -730,7 +733,7 @@ second column beside the first. On a phone the players box sits top right.
   `?boss=1` with Play; `src/core/boss.js`). You and an ally (the next tank
   row: a CPU, or a second human on this screen) are one team against the
   **Bulwark**, one round in a walled meadow. The Bulwark is half as large
-  again as a tank, has 400 hp, and sits on a flat-topped fort at the east end
+  again as a tank, has 370 hp, and sits on a flat-topped fort at the east end
   with two lower ledges; you start side by side at the west end with 40 armor,
   three extra jump jets, a little more ammunition and the Thunderhead's
   Airburst. Its health bar is top centre, with ticks where its phases begin:
@@ -850,6 +853,11 @@ second column beside the first. On a phone the players box sits top right.
   (`jets.test.js`), whole CPU-only matches, and
   online matches between several simulated screens with deliberate drift,
   including screens reloading at every stage of a match (`netplay.test.js`).
+- `tools/balance.mjs` runs headless balance sims on the seeded dice, so the
+  same command prints the same numbers: `variants` (each weapon variant against
+  its base, fired by a CPU; `--pit` puts the target in a crater), `flak` (Flak
+  against the Shell and Scatter per CPU difficulty) and `boss` (whole all-CPU
+  boss matches in each firing mode). The header comment lists the options.
 
 The ballistics, crater falloff and AI solver follow the Unreal project's
 `CraterMath`, `TankAiming` and the legacy aim-guesser loop. The AI aims with
