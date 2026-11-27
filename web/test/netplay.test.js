@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/core/game.js';
-import { Session } from '../src/core/netplay.js';
+import { Session, lobbyCpuList } from '../src/core/netplay.js';
 import { makeRng } from '../src/core/rng.js';
 
 // A room's log as the server keeps it. Messages go through JSON on the way,
@@ -289,4 +289,23 @@ test('netplay: a screen that reloads after hopping keeps its hop and charge', ()
   const done = play(clients, 60000, () => clients.every((c) => c.session.game?.phase === 'matchOver'));
   assert.ok(done > 0, 'match finished');
   assert.equal(summary(clients[1].session.game), summary(clients[0].session.game));
+});
+
+test('netplay: a guest reads the host lobby CPUs; only the host list counts, and not once the match is on', () => {
+  const guest = new Session({ seat: 1, send() {}, onStart: () => null });
+  guest.receive({ n: 0, seat: -1, msg: { t: 'join', seat: 0, name: 'Host' } });
+  guest.receive({ n: 1, seat: 0, msg: { t: 'lobby', cpus: [{ name: 'Rook', ai: 'hard' }, { name: 'Vex', ai: 'normal' }] } });
+  guest.receive({ n: 2, seat: 1, msg: { t: 'lobby', cpus: [{ name: 'Forged', ai: 'easy' }] } });
+  guest.pump();
+  assert.deepEqual(guest.cpus, [{ name: 'Rook', ai: 'hard' }, { name: 'Vex', ai: 'normal' }]);
+});
+
+test('netplay: lobbyCpuList keeps at most five tanks, short names and known difficulties', () => {
+  assert.deepEqual(lobbyCpuList(null), []);
+  assert.deepEqual(lobbyCpuList({ cpus: 'x' }), []);
+  const l = lobbyCpuList({ cpus: [{ name: 'A'.repeat(30), ai: 'godlike' }, {}, 1, 2, 3, 4] });
+  assert.equal(l.length, 5);
+  assert.equal(l[0].name.length, 14);
+  assert.equal(l[0].ai, 'normal');
+  assert.equal(l[1].name, 'CPU 2');
 });

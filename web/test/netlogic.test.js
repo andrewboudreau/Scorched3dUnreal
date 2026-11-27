@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  NET_CLOCK, clockFor, clockStep, clockShows, clockText, waitText, joinError, startLabel, lobbyNote, roomsHtml, openRoomsCount, menuLine,
+  NET_CLOCK, clockFor, clockStep, clockShows, clockText, waitText, joinError, startLabel, lobbyNote, roomsHtml, openRoomsCount, menuLine, lobbyMessage, lobbyCpuRows,
 } from '../src/netlogic.js';
 
 const game = (o = {}) => ({ phase: 'aim', current: { id: 2, ai: null }, volleyKey: '1:3', round: 1, isLocal: () => true, ...o });
@@ -66,4 +66,24 @@ test('the room list', () => {
   assert.equal(menuLine(data), 'Also on the menu: Di, Ed, 2 more');
   assert.equal(menuLine({ rooms: [], menu: { count: 0, names: [] } }), '');
   assert.equal(menuLine(null), '');
+});
+
+test('the host lobby message lists its CPU tanks, and says nothing when they have not changed', () => {
+  const rows = [{ name: 'Me', type: 'human' }, { name: 'Rook', type: 'normal' }, { name: ' ', type: 'hard' }];
+  const msg = lobbyMessage(rows);
+  assert.deepEqual(msg, { t: 'lobby', cpus: [{ name: 'Rook', ai: 'normal' }, { name: 'CPU 2', ai: 'hard' }] });
+  assert.equal(lobbyMessage(rows, JSON.stringify(msg)), null);
+  rows[1].type = 'easy';
+  assert.equal(lobbyMessage(rows, JSON.stringify(msg)).cpus[0].ai, 'easy');
+  assert.deepEqual(lobbyMessage([{ name: 'Me', type: 'human' }]), { t: 'lobby', cpus: [] });
+});
+
+test('a guest lobby shows the CPUs the host sent, and counts them in the Start label', () => {
+  const rows = [{ name: 'Me', type: 'human' }, { name: 'Rook', type: 'normal' }];
+  assert.deepEqual(lobbyCpuRows(true, rows, []), [{ name: 'Rook', type: 'normal' }]);
+  const sent = [{ name: 'Vex', ai: 'hard' }, { name: 'Ivo', ai: 'easy' }];
+  const cpus = lobbyCpuRows(false, rows, sent);
+  assert.deepEqual(cpus, [{ name: 'Vex', type: 'hard' }, { name: 'Ivo', type: 'easy' }]);
+  assert.equal(startLabel(2 + cpus.length), 'Start online match · 4 tanks');   // two people and two CPUs
+  assert.deepEqual(lobbyCpuRows(false, rows, []), []);   // nothing sent yet
 });

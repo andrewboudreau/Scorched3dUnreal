@@ -42,6 +42,19 @@ export const joinError = (err) => (err.message === 'Failed to fetch' ? 'Could no
 // The lobby's Start button, for `n` tanks (people and CPUs).
 export const startLabel = (n) => `Start online match · ${n} tank${n === 1 ? '' : 's'}`;
 
+// The `lobby` message the host sends so every guest sees its CPU tanks: from
+// the setup rows (everything that is not a human), or null when the list is
+// the same as `last` (the JSON of the message last sent; '' for none yet).
+export function lobbyMessage(rows, last = '') {
+  const cpus = rows.filter((r) => r.type !== 'human').map((r, i) => ({ name: r.name.trim() || `CPU ${i + 1}`, ai: r.type }));
+  const msg = { t: 'lobby', cpus };
+  return JSON.stringify(msg) === last ? null : msg;
+}
+
+// The lobby's CPU rows ({ name, type }, as the setup card has them): the
+// host's own rows, or, on a guest, the list the host sent (session.cpus).
+export const lobbyCpuRows = (isHost, rows, sent) => (isHost ? rows.filter((r) => r.type !== 'human') : sent.map((c) => ({ name: c.name, type: c.ai })));
+
 // The note under the lobby: what to do next, for the host or a guest.
 export function lobbyNote({ isHost, seats, touch }) {
   const chat = touch ? '' : ' Press Enter to chat.';

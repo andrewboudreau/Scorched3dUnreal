@@ -20,6 +20,8 @@
 //   shop   one human's perk pick and purchases between rounds
 //   close  once everyone has shopped, the host's state again: the next round
 //          starts the same everywhere
+//   lobby  the host's CPU tanks (name and difficulty) while the room waits, so
+//          a guest's lobby lists them and counts them; the last one counts
 //   cpu    the host hands a player who left to the computer
 //   say    a chat line; shown as it arrives, outside the game's order
 //   stop   the match cannot go on (a message the server refused, see net.js):
@@ -65,6 +67,16 @@ export function winnerSeat(game, seatOf) {
   }
   const [top] = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
   return seatOf[top?.id] ?? null;
+}
+
+// The CPU tanks a `lobby` message lists, made safe to show: at most five
+// (a room seats six), a name of up to 14 characters, a known difficulty.
+export function lobbyCpuList(msg) {
+  if (!msg || !Array.isArray(msg.cpus)) return [];
+  return msg.cpus.slice(0, 5).map((c, i) => ({
+    name: String(c?.name || `CPU ${i + 1}`).slice(0, 14),
+    ai: ['easy', 'normal', 'hard'].includes(c?.ai) ? c.ai : 'normal',
+  }));
 }
 
 const copy = (o) => JSON.parse(JSON.stringify(o));
@@ -151,6 +163,7 @@ export class Session {
     this.echo = new Set();      // log entries from this seat before the reload
     this.inbox = [];
     this.seats = [];            // { seat, name, gone } in joining order
+    this.cpus = [];             // the host's CPU tanks in the lobby, { name, ai } (lobbyCpuList)
     this.game = null;
     this.seatOf = [];           // player id -> seat (null for CPUs)
     this.sent = new Set();      // plans already sent, by volley and tank
@@ -199,7 +212,7 @@ export class Session {
     this.send = () => {};       // all of this was said the first time round
     all.forEach((e, i) => {
       const t = e.msg.t;
-      if (t === 'join' || t === 'gone' || t === 'start' || t === 'cpu') { this.apply(e); return; }
+      if (t === 'join' || t === 'gone' || t === 'lobby' || t === 'start' || t === 'cpu') { this.apply(e); return; }
       if (t === 'snap') this.snapped.add(e.msg.key);
       if (t === 'end') this.ended.add(e.msg.key);
       if (i < last) return;
@@ -324,12 +337,15 @@ export class Session {
   playersOf(seat) { return this.seatOf.map((s, id) => (s === seat ? id : -1)).filter((id) => id >= 0); }
 
   // Take one message on. False: not yet, try again next frame.
-  apply({ msg, n }) {
+  apply({ msg, n, seat }) {
     const g = this.game;
     const echo = this.echo.has(n);
     switch (msg.t) {
       case 'join':
         if (!this.seats.some((s) => s.seat === msg.seat)) this.seats.push({ seat: msg.seat, name: msg.name, gone: false });
+        return true;
+      case 'lobby':
+        if (seat === 0 && !g) this.cpus = lobbyCpuList(msg);
         return true;
       case 'gone': {
         const s = this.seats.find((q) => q.seat === msg.seat);

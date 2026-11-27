@@ -5,7 +5,7 @@ import { profile } from './profile.js';
 import { showLaunchTab } from './launch.js';
 import { escapeHtml } from './hudlogic.js';
 import {
-  NET_CLOCK, clockFor, clockStep, clockShows, clockText, waitText, joinError, startLabel, lobbyNote, roomsHtml, openRoomsCount, menuLine,
+  NET_CLOCK, clockFor, clockStep, clockShows, clockText, waitText, joinError, startLabel, lobbyNote, roomsHtml, openRoomsCount, menuLine, lobbyMessage, lobbyCpuRows,
 } from './netlogic.js';
 
 // Online play on screen: a room on the server (net.js RoomLink, `link`) and
@@ -118,7 +118,8 @@ export class Online {
   }
 
   lobbySeats() { return this.session ? this.session.seats.filter((s) => !s.gone) : []; }
-  lobbyCpus() { return this.d.setup.rows.filter((r) => r.type !== 'human'); }
+  // The CPU tanks in the lobby: the host's own rows, or the list the host sent a guest.
+  lobbyCpus() { return lobbyCpuRows(!this.session || this.session.isHost, this.d.setup.rows, this.session?.cpus || []); }
   netName() { return ($('net-name').value.trim() || this.d.setup.rows.find((r) => r.type === 'human')?.name || 'Player').slice(0, 14); }
 
   async goOnline(how) {
@@ -162,6 +163,8 @@ export class Online {
     link.onLost = () => this.ended('The connection to the room was lost (it may have expired, or the server restarted).');
     history.replaceState(null, '', `?room=${link.code}`);
     this.lobbySig = '';
+    this.lobbySent = '';
+    this.lobbyPend = null;
     this.renderLobby();
   }
 
@@ -169,7 +172,7 @@ export class Online {
   update() {
     if (this.session) {
       this.session.pump();
-      if (!this.session.game) this.renderLobby();
+      if (!this.session.game) { this.renderLobby(); this.sendLobby(performance.now()); }
       this.updateWait();
       this.syncScreens();
       this.updateClock();
@@ -283,7 +286,7 @@ export class Online {
     const rows = this.d.setup.rows;
     const seats = this.lobbySeats();
     const cpus = this.lobbyCpus();
-    const sig = JSON.stringify([seats, cpus.map((r) => r.type), session.isHost, cpus.length]);
+    const sig = JSON.stringify([seats, cpus.map((r) => [r.type, session.isHost ? '' : r.name]), session.isHost, cpus.length]);
     if (sig === this.lobbySig) return;
     this.lobbySig = sig;
     document.body.classList.add('net-lobby');
@@ -299,7 +302,7 @@ export class Online {
       <span>${escapeHtml(s.name)}${s.seat === link.seat ? ' (you)' : ''}</span>
       <span class="online-tag">${s.seat === 0 ? 'host' : 'online'}</span>
     </div>`);
-    const cpuRows = rows.map((r, i) => (r.type === 'human' ? '' : `
+    const cpuRows = cpus.map((r) => { const i = rows.indexOf(r); return `
     <div class="player-row">
       <span class="swatch" style="background:${PLAYER_COLORS[seats.length + cpus.indexOf(r)]};width:18px;height:18px"></span>
       ${session.isHost ? `<input data-i="${i}" class="pname" value="${escapeHtml(r.name)}" maxlength="14" />` : `<span>${escapeHtml(r.name)}</span>`}
@@ -307,8 +310,8 @@ export class Online {
         ${[['easy', 'CPU · Easy'], ['normal', 'CPU · Normal'], ['hard', 'CPU · Hard']]
           .map(([v, l]) => `<option value="${v}" ${r.type === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>` : `<span class="online-tag">CPU</span>`}
-    </div>`));
-    $('setup-players').innerHTML = people.join('') + (session.isHost ? cpuRows.join('') : '');
+    </div>`; });
+    $('setup-players').innerHTML = people.join('') + cpuRows.join('');
     document.querySelectorAll('.pname').forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].name = el.value; }));
     document.querySelectorAll('.ptype').forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].type = el.value; this.lobbySig = ''; }));
     $('add-player').textContent = '+ Add CPU';
@@ -321,7 +324,21 @@ export class Online {
     $('net-note').textContent = lobbyNote({ isHost: session.isHost, seats: seats.length, touch: this.d.touch });
   }
 
+  // The host tells the room its CPU tanks (a `lobby` message) once the list has
+  // held still for a moment, so typing a name sends one message, not one a key.
+  sendLobby(now) {
+    const { session } = this;
+    if (!session.isHost) return;
+    const msg = lobbyMessage(this.d.setup.rows, this.lobbySent);
+    const json = JSON.stringify(msg);
+    if (!msg) { this.lobbyPend = null; return; }
+    if (this.lobbyPend?.json !== json) this.lobbyPend = { json, at: now };
+    else if (now - this.lobbyPend.at > 500) { this.link.send(msg); this.lobbySent = json; this.lobbyPend = null; }
+  }
+
   leave() {
+    this.lobbySent = '';
+    this.lobbyPend = null;
     sessionStorage.removeItem(ROOM_KEY);
     if (this.link && !this.link.closed) this.link.leave();
     this.closeChat();
