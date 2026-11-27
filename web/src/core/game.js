@@ -3,7 +3,8 @@ import { Heightfield, ISLES } from './terrain.js';
 import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, makeRoller, stepRoller, burstNow, hopOver, HOP, ROLL, SIM_DT, MAX_FLIGHT, GRAVITY, EDGE_KINDS } from './ballistics.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, startKit, opensOnVisit, impactEffects, rollPart, blastDamage, splitVelocities, throwVelocities, rangeProbes, airburstNow, airburstNearMod, airburstVelocities } from './weapons.js';
 import { TANK, JET, muzzleOrigin, hitSphere, clampAim, driveStep, planHop, findSpot } from './tank.js';
-import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, TEMPERS, UTILITY, ARSENAL } from './ai.js';
+import { planShot, planDrive, planJump, chooseTarget, chooseWeapon, chooseSecondWeapon, wantsDouble, misjudgeField, holeDepth, unsureOf, planHeap, findWarp, planPlace, readRange, steerGuided, satelliteSharpen, wantsSatellite, cpuTemper, bossMoves, bossHop, planDodge, TEMPERS, UTILITY, ARSENAL } from './ai.js';
+import { BOSS, bossPhase, fromAbove, weakSpot, freshBossState, bossStarts, buildFort, fortSpots } from './boss.js';
 import { Scenery, standing } from './scenery.js';
 import { City } from './city.js';
 import { generateRidgeline, keepCrust, rowStarts, slump, RIDGE } from './ridgeline.js';
@@ -120,6 +121,9 @@ export class Game {
     // The time of day (core/timeofday.js): 'dawn', 'day', 'dusk', 'night' or
     // 'random' (picked from the seed). Render-only: nothing in the rules reads it.
     time = DEFAULT_TIME,
+    // A boss match (core/boss.js): the last player is the boss, team 1, and
+    // everyone else is on team 0 against it. One walled meadow with its fort.
+    boss = false,
   }) {
     const known = (list, all) => (Array.isArray(list) ? list.filter((id) => all.some((x) => x.id === id)) : null);
     const noTwists = twists === false;
@@ -132,7 +136,9 @@ export class Game {
       lab: { ...normalizeLab(lab), ...normalizeModLab(lab) },
       modifier: MODIFIER_BY_ID[modifier] ? modifier : null,
       time: resolveTime(time, seed),
+      boss: !!boss,
     };
+    if (boss) { this.cfg.edges = 'wall'; this.cfg.world = 'meadow'; }
     this.cfg.twists = this.draftOn || MODIFIERS.some((m) => this.modifierOn(m.id));   // kept for anything that still reads it
     this.reveals = [];                          // fog: live scout bursts { owner, x, z, r, until }
     this.intel = [];                            // fog: viewer id -> { target id: { x, z, r, at } }
@@ -150,6 +156,9 @@ export class Game {
       name: p.name || `Player ${i + 1}`,
       color: p.color || PLAYER_COLORS[i % PLAYER_COLORS.length],
       ai: p.ai || null,
+      // Teams: tanks on the same team are allies (allied). Everyone is their
+      // own team unless the config says otherwise (a boss match: see below).
+      team: boss ? (i === players.length - 1 ? BOSS.team : 0) : (Number.isInteger(p.team) ? p.team : i),
       money: 0,
       score: 0,
       wins: 0,
@@ -176,6 +185,7 @@ export class Game {
       // bomblets) that hurt someone else; `longest` is the furthest such hit, in metres.
       stats: { shots: 0, hits: 0, damage: 0, taken: 0, kills: 0, longest: 0, probes: 0, lastHit: 0 },
     }));
+    if (boss) this.setUpBoss();
     this.round = 0;
     this.terrain = new Heightfield({ size: terrainSize, resolution });
     this.scenery = new Scenery(this.terrain);
@@ -217,6 +227,36 @@ export class Game {
   get volleyKey() { return `${this.round}.${this.turnsThisRound}`; }
   get volleyMode() { return this.cfg.firing === 'volley'; }
   alivePlayers() { return this.players.filter((p) => p.alive); }
+  // Are tanks `a` and `b` (players or ids) on the same side? A tank is its own ally.
+  allied(a, b) {
+    const p = typeof a === 'number' ? this.players[a] : a;
+    const q = typeof b === 'number' ? this.players[b] : b;
+    return !!p && !!q && (p === q || p.team === q.team);
+  }
+  // How many sides still have a tank alive.
+  aliveTeams() { return new Set(this.alivePlayers().map((p) => p.team)).size; }
+  // The boss of a boss match, or null.
+  get bossTank() { return this.cfg.boss ? this.players.find((p) => p.boss) || null : null; }
+
+  // A boss match's tanks (core/boss.js), once, at the start: the boss gets its
+  // size, its arsenal, its jets and the mod ranks it fights with; its foes a
+  // fuller kit, more jets, armour for the first round and the Thunderhead's
+  // Airburst (their way to hit it from above).
+  setUpBoss() {
+    const boss = this.players[this.players.length - 1];
+    boss.boss = freshBossState();
+    boss.size = BOSS.size;
+    boss.jets = BOSS.jets;
+    boss.perks = ['pdturret', 'orbital', 'orbitalup'];
+    for (const [id, n] of Object.entries(BOSS.kit)) if (this.weaponOn(id)) boss.inventory[id] = n;
+    for (const p of this.players) {
+      if (p === boss) continue;
+      for (const [id, n] of Object.entries(BOSS.allyKit)) if (this.weaponOn(id)) p.inventory[id] = (p.inventory[id] || 0) + n;
+      p.jets += BOSS.allyJets;
+      p.pendingArmor += BOSS.allyArmor;
+      if (this.weaponOn('thunderhead')) p.perks.push(...BOSS.allyPerks);
+    }
+  }
 
   // ---------- what this match uses (cfg.weapons, cfg.perks, cfg.modifiers) ----------
 
@@ -292,8 +332,9 @@ export class Game {
       p.y = t.heightAt(p.x, p.z);
       p.aim = {};
       p.shots = [];
-      p.maxHp = TANK.maxHp + perkSum(p, 'maxHp');
+      p.maxHp = p.boss ? BOSS.hp : TANK.maxHp + perkSum(p, 'maxHp');
       p.hp = p.maxHp;
+      if (p.boss) p.boss = freshBossState();
       p.armor = p.pendingArmor + perkSum(p, 'roundArmor');
       p.pendingArmor = 0;
       p.fuelMax = Math.round((TANK.fuel + perkSum(p, 'fuel') + p.pendingFuel) * (mod.fuel || 1));
@@ -348,6 +389,7 @@ export class Game {
       [order[i], order[j]] = [order[j], order[i]];
     }
     this.padOrder = order;   // pads are flattened in this order; overlaps depend on it
+    if (this.cfg.boss) return bossStarts(this.players, t.half);   // the boss on its fort, its foes facing it
     if (this.ridgeline) return rowStarts(order, t, this.rng);   // a row from west to east
     if (this.island) return islandStarts(order, islandShape(this.groundSeed(this.round), t.half), this.rng);   // round the island
     return order.map((pi, k) => {
@@ -374,6 +416,13 @@ export class Game {
     else if (this.ridgeline) generateRidgeline(t, { seed, amplitude: this.cfg.hills, pads: starts.map(([, x, z, lift]) => [x, z, lift]) });
     else if (this.city) t.generate({ seed, amplitude: Math.min(this.cfg.hills, 9), frequency: 0.0022 });   // a gentle grade
     else t.generate({ seed, amplitude: this.cfg.hills });
+    // A boss match: the boss's fort goes up before the pads are flattened.
+    this.fort = null;
+    for (const [i, x, z] of starts) {
+      if (!this.players[i].boss) continue;
+      buildFort(t, x, z);
+      this.fort = [x, z];
+    }
     for (const [i, x, z] of starts) {
       const p = this.players[i];
       p.x = x; p.z = z;
@@ -555,7 +604,7 @@ export class Game {
       const delay = k++ * VOLLEY.stagger;
       if (plan.deploy) { this.deployFor(p, plan.deploy, plan, delay); continue; }   // the decoy's blink, as aimed
       this.aimAt(p, plan);
-      if (plan.second && hasPerk(p, 'doubleStrike')) this.launchDouble(p, plan.second, delay);
+      if (plan.second && (hasPerk(p, 'doubleStrike') || p.boss)) this.launchDouble(p, plan.second, delay);
       else this.launch(p, delay);
     }
     this.volley.plans = {};
@@ -592,6 +641,9 @@ export class Game {
   // jump } or null.
   aiWantsToDrive(p) {
     if (p.buried) return null;   // it digs out first
+    if (p.boss) return this.bossWantsToHop(p);
+    const dodge = this.aiDodge(p);
+    if (dodge) return dodge;
     return planDrive({
       me: p, terrain: this.terrain, rng: this.rogue, difficulty: p.ai,
       tryDrive: (heading, budget) => this.previewDrive(p, heading, budget),
@@ -607,9 +659,9 @@ export class Game {
   // the others misread them, the more the higher the level (ai.misjudgeField).
   orbitField(p, later = 0) {
     if (p.ai === 'easy') return {};   // easy CPUs fire blind
-    const level = Math.max(0, ...this.players.filter((q) => q !== p && modUp(q, 'orbiter')).map((q) => q.mods.orbiter.level));
+    const level = Math.max(0, ...this.players.filter((q) => !this.allied(q, p) && modUp(q, 'orbiter')).map((q) => q.mods.orbiter.level));
     if (!level) return {};
-    return misjudgeField({ field: (t) => modWells(this.players, t, p.id), t0: this.clock + later, level, difficulty: p.ai, rng: this.rng });
+    return misjudgeField({ field: (t) => modWells(this.players, t, p.id).filter((w) => !this.allied(w.owner, p.id)), t0: this.clock + later, level, difficulty: p.ai, rng: this.rng });
   }
 
   planAiShot(p) {
@@ -617,6 +669,8 @@ export class Game {
     if (p.reloading) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: p.weapon, pass: true, think: 0.6 });
     // Buried by a Dirt Bomb: any shot only digs it out, so it fires one as it stands.
     if (p.buried) return (this.aiPlan = { yaw: p.yaw, elev: p.elev, power: p.power, weapon: 'shell', dig: true, think: 0.6 });
+    // The boss fights by its phase (core/boss.js).
+    if (p.boss) return (this.aiPlan = this.planBossShot(p));
     // Found by a ranged enemy: blink away and leave it a decoy.
     const blink = this.aiDecoyAim(p);
     if (blink) return (this.aiPlan = { yaw: blink.yaw, elev: blink.elev, power: blink.power, weapon: p.weapon, deploy: 'decoy', think: 0.6 });
@@ -665,6 +719,97 @@ export class Game {
   // match seed and its id, like its deploy style.
   aiTemper(p) { return cpuTemper(this.cfg.seed, p.id); }
 
+  // ---------- the boss (core/boss.js) ----------
+
+  // The boss's turn: its mods go up for free (Point Defense in phase 1, the
+  // Gravity Orbiter from phase 2), then it fires as ai.bossMoves says: a shot
+  // it marked last turn goes at the marked spot, and a new mark is set (and
+  // announced) for next turn. The mark it fires stays shown (`firing`) until
+  // the turn is over (bossTurnOver).
+  planBossShot(p) {
+    const b = p.boss;
+    b.turns++;
+    if (b.phase >= 2) b.phaseTurns++;
+    this.bossGear(p);
+    const foes = this.knownFoes(p);
+    const moves = bossMoves({ state: b, foes, rng: this.rng, dirtEvery: BOSS.dirtEvery });
+    if (!moves) return null;
+    const conds = { wind: this.wind, terrain: this.terrain, gravity: this.gravity, windK: this.windShare(p), drag: this.shellDrag(p) };
+    const aim = (s, later = 0) => {
+      const foe = foes.find((f) => f.id === s.target);
+      const target = s.at ? { ...foe, x: s.at[0], y: s.at[1], z: s.at[2] } : foe;
+      const a = planShot({ shooter: p, target, rng: this.rng, difficulty: p.ai, memory: p.aim, ...conds,
+        ...this.orbitField(p, later), burst: this.burstHeight(p, s.weapon) });
+      return { yaw: a.yaw, elev: a.elev, power: a.power, weapon: s.weapon };
+    };
+    const [one, two] = moves.shots;
+    const plan = { ...aim(one), target: one.target, think: 0.6 };
+    if (two) plan.second = aim(two, STRIKE.gap);
+    if (one.marked) { b.firing = b.mark; b.mark = null; }
+    if (moves.mark) {
+      const t = this.players[moves.mark.target];
+      b.mark = { weapon: moves.mark.weapon, target: t.id, x: t.x, y: t.y, z: t.z, at: this.turnsThisRound };
+      if (moves.mark.weapon === 'thunderhead') b.thunder = true;
+      this.emit({ type: 'bossMark', player: p.id, target: t.id, weapon: b.mark.weapon, pos: [t.x, t.y, t.z] });
+    }
+    return plan;
+  }
+
+  // The boss's mods, as free actions on its turn. In phase 1 its Point
+  // Defense is topped up to BOSS.charges every turn.
+  bossGear(p) {
+    const ready = readyMods(p);
+    if (p.boss.phase === 1) {
+      if (ready.includes('pointdef')) this.deployFor(p, 'pointdef');
+      if (modUp(p, 'pointdef')) p.mods.pointdef.charges = Math.max(p.mods.pointdef.charges || 0, BOSS.charges);
+    } else if (ready.includes('orbiter')) this.deployFor(p, 'orbiter');
+  }
+
+  // From phase 2 the boss hops to another flat top of its fort every
+  // BOSS.hopEvery turns (its next turn is b.turns + 1).
+  bossWantsToHop(p) {
+    const b = p.boss;
+    if (b.phase < 2 || !this.fort || (b.turns + 1) % BOSS.hopEvery !== 0) return null;
+    return bossHop({ me: p, spots: fortSpots(...this.fort), rng: this.rogue, tryHop: (h) => this.previewHop(p, h) });
+  }
+
+  // A CPU under a boss's mark gets out from under it (ai.planDodge). Easy CPUs don't notice.
+  aiDodge(p) {
+    if (p.ai === 'easy') return null;
+    for (const q of this.players) {
+      const m = q.boss?.mark;
+      if (!m || !q.alive || this.allied(q, p)) continue;
+      const w = this.weaponOf(q, m.weapon);
+      const part = (w?.impact || [])[0];
+      const reach = part ? (part.type === 'blast' ? part.radius * 1.25 : part.radius) + TANK.hitRadius : 30;
+      const go = planDodge({ me: p, mark: m, reach, tryDrive: (heading, budget) => this.previewDrive(p, heading, budget), tryHop: (heading) => this.previewHop(p, heading) });
+      if (go) return go;
+    }
+    return null;
+  }
+
+  // The boss took `dealt` from `from` (an enemy, or null): it remembers who
+  // hurts it, and its phase only ever goes up.
+  bossHurt(p, from, dealt) {
+    const b = p.boss;
+    if (from && dealt > 0) b.hurt[from.id] = (b.hurt[from.id] || 0) + dealt;
+    const phase = bossPhase(p.hp, p.maxHp);
+    if (phase > b.phase && p.hp > 0) {
+      b.phase = phase;
+      b.phaseTurns = 0;
+      this.emit({ type: 'bossPhase', player: p.id, phase });
+    }
+  }
+
+  // A turn (or volley) is over: a marked shot that went is done with.
+  bossTurnOver() {
+    for (const p of this.players) {
+      if (!p.boss?.firing) continue;
+      p.boss.firing = null;
+      this.emit({ type: 'bossMark', player: p.id, clear: true });
+    }
+  }
+
   // How much of its aiming error a CPU carries into a shot: less while its
   // Survey Satellite is up (ai.satelliteSharpen).
   aiSharpen(p) {
@@ -682,7 +827,7 @@ export class Game {
     const threat = p.hitBy != null ? foes.find((q) => q.id === p.hitBy) : null;
     const sunk = holeDepth(this.terrain, p.x, p.z, p.y);
     const hurt = p.hp < p.maxHp * A.hurt;
-    const strongest = Math.max(0, ...this.players.filter((q) => q !== p && q.alive).map((q) => q.hp + q.armor));
+    const strongest = Math.max(0, ...this.players.filter((q) => !this.allied(q, p) && q.alive).map((q) => q.hp + q.armor));
     const behind = p.hp + p.armor < strongest * A.behind;
     const ctx = {
       difficulty: p.ai, temper: this.aiTemper(p), seen: m?.shots || 0, unsure: !!target.rough || unsureOf(m),
@@ -718,11 +863,11 @@ export class Game {
   // `shielded` (orbiter), `aloft` (satellite), `guarded` (Point Defense).
   knownFoes(p) {
     const flags = (q) => ({ shielded: modUp(q, 'orbiter'), aloft: modUp(q, 'satellite'), guarded: modUp(q, 'pointdef') });
-    if (!this.cfg.fog) return this.players.filter((q) => q !== p && q.alive).map((q) => (['orbiter', 'satellite', 'pointdef'].some((id) => modUp(q, id)) ? { ...q, ...flags(q) } : q));
+    if (!this.cfg.fog) return this.players.filter((q) => !this.allied(q, p) && q.alive).map((q) => (['orbiter', 'satellite', 'pointdef'].some((id) => modUp(q, id)) ? { ...q, ...flags(q) } : q));
     const out = [];
     for (const q of this.players) {
       const i = this.intel[p.id]?.[q.id];
-      if (q === p || !q.alive || !i) continue;
+      if (this.allied(q, p) || !q.alive || !i) continue;
       const t = this.terrain;
       const y = t.inBounds(i.x, i.z) ? t.heightAt(i.x, i.z) : q.y;
       const f = flags(q);
@@ -948,7 +1093,7 @@ export class Game {
   // shells are landing on it. Easy CPUs just do it now and then; the others
   // as their style says (DEPLOY_STYLES).
   aiWantsPointDef(p) {
-    const heavy = this.players.some((q) => q !== p && q.alive && HEAVY.some((w) => q.inventory?.[w] > 0));
+    const heavy = this.players.some((q) => !this.allied(q, p) && q.alive && HEAVY.some((w) => q.inventory?.[w] > 0));
     const shelled = p.hitsHere >= 1;
     if (!heavy && !shelled) return false;
     if (p.ai === 'easy') return this.rng.next() < AI_DEPLOY.easy;
@@ -1030,7 +1175,7 @@ export class Game {
     if (!anyUp(this.players)) return;
     const worst = new Map();   // one hit per mod, from its nearest part
     for (const m of modTargets(this.players, this.clock)) {
-      if (m.owner === owner || (air && m.ground)) continue;
+      if (m.owner === owner || (owner != null && this.allied(m.owner, owner)) || (air && m.ground)) continue;
       const d = struck && struck.owner === m.owner && struck.mod === m.mod ? 0
         : Math.max(0, Math.hypot(m.x - point[0], m.y - point[1], m.z - point[2]) - m.r * 0.5);
       const k = `${m.owner}:${m.mod}`;
@@ -1141,10 +1286,10 @@ export class Game {
     // Up mods wear down by the turn that just ended (every tank's, after a volley).
     if (this.volleyMode) for (const p of this.players) this.wearMods(p);
     else if (this.current) this.wearMods(this.current);
-    const alive = this.alivePlayers();
+    this.bossTurnOver();
     this.turnsThisRound++;
     const limit = this.cfg.maxTurnsPerRound * (this.volleyMode ? 1 : this.players.length);
-    if (alive.length <= 1 || this.turnsThisRound >= limit) {
+    if (this.aliveTeams() <= 1 || this.turnsThisRound >= limit) {
       this.endRound();
       return;
     }
@@ -1159,16 +1304,19 @@ export class Game {
     this.beginTurn(i);
   }
 
+  // The last side standing wins the round (at the turn limit, the side of the
+  // healthiest tank): every tank of it still alive gets the win. With teams,
+  // the one named the winner is a human of it if there is one.
   endRound() {
     const alive = this.alivePlayers();
-    let winner = null;
-    if (alive.length === 1) winner = alive[0];
-    else if (alive.length > 1) winner = alive.reduce((a, b) => (b.hp > a.hp ? b : a));
+    const top = alive.length ? alive.reduce((a, b) => (b.hp > a.hp ? b : a)) : null;
+    const winners = top ? alive.filter((p) => p.team === top.team) : [];
+    const winner = winners.find((p) => !p.ai) || top;
     const payK = this.modifier.pay || 1;
     for (const p of this.players) this.earn(p, 'stipend', PAY.stipend * payK);
     for (const p of alive) this.earn(p, 'survive', PAY.survive * payK);
-    if (winner) { winner.wins++; this.earn(winner, 'win', PAY.roundWin * payK); winner.score += 1; }
-    this.lastRoundResult = { round: this.round, winner: winner ? winner.id : null };
+    for (const w of winners) { w.wins++; this.earn(w, 'win', PAY.roundWin * payK); w.score += 1; }
+    this.lastRoundResult = { round: this.round, winner: winner ? winner.id : null, ...(this.cfg.boss ? { team: top ? top.team : null } : {}) };
     this.phase = this.round >= this.cfg.rounds ? 'matchOver' : 'roundOver';
     this.phaseTime = 0;
     this.turn = -1;
@@ -1479,7 +1627,7 @@ export class Game {
   launchDouble(p, second, delay = 0) {
     if (!this.launch(p, delay)) return false;
     this.followUps.push({ owner: p.id, plan: second, at: this.simStep + Math.round(STRIKE.gap / SIM_DT), delay });
-    p.reloading = true;
+    if (!p.boss) p.reloading = true;   // the boss fires twice a turn in its last phase, with no reload
     this.emit({ type: 'double', player: p.id });
     return true;
   }
@@ -1655,7 +1803,7 @@ export class Game {
     const extraFor = new Map();
     const extra = (owner) => {
       if (!extraFor.has(owner)) {
-        const w = wells.filter((x) => x.owner !== owner);
+        const w = wells.filter((x) => x.owner !== owner && !this.allied(x.owner, owner));
         extraFor.set(owner, w.length ? w : null);
       }
       return extraFor.get(owner);
@@ -1704,8 +1852,8 @@ export class Game {
         const ground = t.inBounds(bx, bz) && t.solidAt(bx, bz) ? t.heightAt(bx, bz) : null;
         // Mods on the ground are no anti-air business; a decoy bursts it like a tank.
         const nearMod = targets.length ? airburstNearMod(pr, burst, targets.filter((m) => !m.ground)) : null;
-        const below = spheres.map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id }));
-        for (const m of targets) if (m.mod === 'decoy') below.push({ x: m.x, y: m.y - TANK.hitCenterY, z: m.z, owner: m.owner });
+        const below = spheres.filter((s) => !this.allied(s.tank, pr.owner)).map((s) => ({ x: s.x, y: s.tank.y, z: s.z, owner: s.tank.id }));
+        for (const m of targets) if (m.mod === 'decoy' && !this.allied(m.owner, pr.owner)) below.push({ x: m.x, y: m.y - TANK.hitCenterY, z: m.z, owner: m.owner });
         if (nearMod || airburstNow(pr, burst, below, ground)) {
           pr.dead = true;
           pr.splitDone = true;
@@ -1726,7 +1874,7 @@ export class Game {
       // Into a mod: it goes off there, in the air.
       let struck = null;
       for (const m of targets) {
-        if (m.owner === pr.owner) continue;
+        if (this.allied(m.owner, pr.owner)) continue;   // a friendly mod lets it by
         if ((x - m.x) ** 2 + (y - m.y) ** 2 + (z - m.z) ** 2 <= m.r * m.r) { struck = m; break; }
       }
       if (struck) {
@@ -1779,7 +1927,7 @@ export class Game {
   intercept(pr, w) {
     if (pr.roller || (w.flight || []).some((f) => f.type === 'airburst')) return false;
     for (const q of this.players) {
-      if (!q.alive || !interceptsShell(q, pr, w)) continue;
+      if (!q.alive || this.allied(q, pr.owner) || !interceptsShell(q, pr, w)) continue;
       q.mods.pointdef.charges--;
       pr.dead = true;
       this.emit({ type: 'intercept', id: pr.id, pos: [...pr.pos], player: q.id, from: modPos(q, 'pointdef'), by: pr.owner, charges: q.mods.pointdef.charges });
@@ -1805,9 +1953,11 @@ export class Game {
     }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point, ...(aloft ? { aloft: true } : {}) });
+    // From above (core/boss.js fromAbove): the boss's weak spot. Not a roller's run.
+    const above = !pr.roller && fromAbove(pr.vel, aloft);
     for (const fx of impactEffects(w, point)) {
-      const more = { ...(struck ? { struck } : {}), ...(pr.decoy ? { decoy: pr.decoy } : {}) };
-      this.applyEffect(struck || pr.decoy ? { ...fx, ...more } : fx, pr.owner, directHit, pr.shot);
+      const more = { ...(struck ? { struck } : {}), ...(pr.decoy ? { decoy: pr.decoy } : {}), ...(above ? { above } : {}) };
+      this.applyEffect(struck || pr.decoy || above ? { ...fx, ...more } : fx, pr.owner, directHit, pr.shot);
     }
     if (pr.weapon === 'shell' && !directHit && !moon && !struck && !wall) this.throwShrapnel(pr, point);
     // The Splitter: bomblets lobbed outward from where it went off.
@@ -1819,7 +1969,8 @@ export class Game {
   throwBomblets(pr, point, part, directHit = null) {
     const t = this.terrain;
     // Off a tank it hit square on, they leave from over it, not inside it.
-    const y = directHit ? directHit.y + TANK.hitCenterY + TANK.hitRadius + 0.5
+    const hs = directHit ? hitSphere(directHit) : null;
+    const y = hs ? hs.y + hs.r + 0.5
       : (t.inBounds(point[0], point[2]) && t.solidAt(point[0], point[2]) ? Math.max(point[1], t.heightAt(point[0], point[2])) : point[1]) + 0.8;
     for (const v of throwVelocities(pr.vel, part)) {
       const child = this.spawnProjectile([point[0], y, point[2]], v, part.child, pr.owner, pr.shot);
@@ -1848,7 +1999,7 @@ export class Game {
   // A roller on the ground: follow the surface until it stops, runs out of
   // road or bumps into a tank (its owner included).
   stepRolling(pr, spheres, dt) {
-    if (pr.roller.seek) pr.roller.targets = spheres.map((s) => ({ x: s.x, z: s.z, owner: s.tank.id }));   // the Seeker leans toward these
+    if (pr.roller.seek) pr.roller.targets = spheres.filter((s) => s.tank.id === pr.owner || !this.allied(s.tank, pr.owner)).map((s) => ({ x: s.x, z: s.z, owner: s.tank.id }));   // the Seeker leans toward these
     const end = stepRoller(pr.roller, this.terrain, dt);
     const r = pr.roller;
     if (pr.hops > 0 && (end === 'stopped' || (!end && r.vel[0] * r.dir[0] + r.vel[1] * r.dir[1] < HOP.slow))) {
@@ -1943,8 +2094,11 @@ export class Game {
         // A flat blast (the Airburst) counts only the distance across; a
         // piercing one (the Bunker Buster) does for a tank buried or lower than it.
         const across = Math.abs(s.y - by) < radius && (fx.flat || (fx.pierce && (p.buried || s.y < by)));
-        const dist = p === directHit ? 0 : Math.max(0, (across ? Math.hypot(s.x - bx, s.z - bz) : Math.hypot(s.x - bx, s.y - by, s.z - bz)) - TANK.hitRadius * 0.5);
-        const dmg = blastDamage(dist, radius, damage);
+        const dist = p === directHit ? 0 : Math.max(0, (across ? Math.hypot(s.x - bx, s.z - bz) : Math.hypot(s.x - bx, s.y - by, s.z - bz)) - s.r * 0.5);
+        let dmg = blastDamage(dist, radius, damage);
+        // The boss's weak spot: hit from above, it takes more (core/boss.js).
+        const weak = dmg > 0 && owner != null && !this.allied(p, owner) ? weakSpot(p, fx.above) : 1;
+        if (weak !== 1) { dmg *= weak; this.emit({ type: 'weakSpot', player: p.id, by: owner, pos: [s.x, s.y, s.z] }); }
         if (dmg > 0) this.damage(p, dmg, owner, shot);
       }
       this.settleDecoys();   // on the ground as it is now
@@ -1965,7 +2119,8 @@ export class Game {
     const dealt = before - p.hp - p.armor;   // what it really took off, for the match stats
     const attacker = from != null ? this.players[from] : null;
     const payK = this.modifier.pay || 1;
-    if (attacker && attacker !== p) {
+    const foe = !!attacker && !this.allied(attacker, p);   // a hit on an ally hurts it, but earns nothing
+    if (foe) {
       this.earn(attacker, 'damage', Math.round(amount * PAY.perDamage * (1 + perkSum(attacker, 'pay')) * payK));
       attacker.roundDamage = (attacker.roundDamage || 0) + amount;
       p.hitsHere++;
@@ -1978,9 +2133,10 @@ export class Game {
     }
     p.stats.taken += dealt;
     this.emit({ type: 'damage', player: p.id, amount, hp: p.hp, by: attacker ? attacker.id : null });
+    if (p.boss && p.alive) this.bossHurt(p, foe ? attacker : null, dealt);
     if (p.hp <= 0 && p.alive) {
       p.alive = false;
-      if (attacker && attacker !== p) { this.earn(attacker, 'kill', PAY.kill * payK); attacker.stats.kills++; }
+      if (foe) { this.earn(attacker, 'kill', PAY.kill * payK); attacker.stats.kills++; }
       this.emit({ type: 'destroyed', player: p.id, by: from, pos: [p.x, p.y, p.z] });
       this.dropMods(p);
       // The wreck cooks off: a small crater of its own.

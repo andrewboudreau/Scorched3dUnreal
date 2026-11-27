@@ -128,6 +128,7 @@ export function parseTestParams(search) {
   const out = {};
   const on = (k) => q.has(k) && !['0', 'false', 'no'].includes(q.get(k));
   if (on('fixed')) { out.maxWind = 1.5; out.terrain = '45'; }
+  if (on('boss')) out.boss = true;   // Play starts the boss match (core/boss.js)
   const wind = (q.get('wind') || '').toLowerCase();
   if (wind) {
     const w = WIND.find((x) => x.id === wind);

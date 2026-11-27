@@ -530,3 +530,91 @@ export function chooseSecondWeapon(me, first, rng) {
   if (left('breacher') > 0 && rng.next() < 0.5) return 'breacher';
   return 'shell';
 }
+
+// ---------- the boss (core/boss.js) ----------
+
+// The boss's moves this turn, by its phase (`state`, its p.boss): the shots it
+// fires (one, or two in phase 3), each { weapon, target id, at? } with `at` the
+// spot a marked shot goes to, and the mark it sets for next turn ({ weapon,
+// target id }) or null. `foes` are the live enemies it knows of; `state.hurt`
+// is the damage each has done it. Seeded dice only.
+//   phase 1: Scatter or Breacher at either foe
+//   phase 2: the same; every `dirtEvery` turns it marks whoever hurt it most
+//            for a Dirt Bomb, fired the turn after
+//   phase 3: two shots a turn, and once a Thunderhead, marked a turn ahead
+// A marked shot from last turn always goes first, at the spot it marked.
+export function bossMoves({ state, foes, rng, dirtEvery = 3 }) {
+  if (!foes.length) return null;
+  const weakest = foes.reduce((a, b) => (b.hp + (b.armor || 0) < a.hp + (a.armor || 0) ? b : a));
+  const pick = () => (rng.next() < 0.5 ? weakest : rng.pick(foes));
+  const heavy = () => (rng.next() < 0.55 ? 'scatter' : 'breacher');
+  const topHurt = () => {
+    let best = null;
+    for (const f of foes) {
+      const d = state.hurt?.[f.id] || 0;
+      if (!best || d > best.d) best = { f, d };
+    }
+    return best && best.d > 0 ? best.f : weakest;
+  };
+  const shots = [];
+  const m = state.mark;
+  if (m) {
+    const t = foes.find((f) => f.id === m.target) || weakest;
+    shots.push({ weapon: m.weapon, target: t.id, at: [m.x, m.y, m.z], marked: true });
+  } else shots.push({ weapon: heavy(), target: pick().id });
+  if (state.phase >= 3) {
+    const first = shots[0].weapon;
+    shots.push({ weapon: first === 'scatter' ? 'breacher' : 'scatter', target: pick().id });
+  }
+  let mark = null;
+  if (state.phase >= 3 && !state.thunder) mark = { weapon: 'thunderhead', target: topHurt().id };
+  else if (state.phase === 2 && state.phaseTurns % dirtEvery === 1) mark = { weapon: 'dirtbomb', target: topHurt().id };
+  return { shots, mark };
+}
+
+// The boss hops to another of its fort's flat tops (`spots`, [x, z, r] each):
+// toward one it is not on, if a jet hop lands on it. `tryHop(heading)` as
+// game.previewHop. { heading, budget: 0, jump: true } or null.
+export function bossHop({ me, spots, rng, tryHop }) {
+  const here = spots.reduce((a, b) => (Math.hypot(b[0] - me.x, b[1] - me.z) < Math.hypot(a[0] - me.x, a[1] - me.z) ? b : a));
+  const options = [];
+  for (const s of spots) {
+    if (s === here) continue;
+    const heading = (((Math.atan2(s[1] - me.z, s[0] - me.x) * 180) / Math.PI) + 360) % 360;
+    const hop = tryHop(heading);
+    if (hop.ok && Math.hypot(hop.x - s[0], hop.z - s[1]) <= s[2]) options.push({ heading, budget: 0, jump: true });
+  }
+  return options.length ? rng.pick(options) : null;
+}
+
+// A CPU under an enemy's mark (a boss's telegraphed shot, landing at `mark`
+// x/z and reaching `reach` m): get out from under it. A drive along whichever
+// heading ends furthest from the mark, if that gets clear; else a jet hop that
+// does; else the drive that gets furthest. `tryDrive` and `tryHop` as for
+// planDrive and planJump. { heading, budget, jump? }, or null when it is not under one.
+export function planDodge({ me, mark, reach, tryDrive, tryHop }) {
+  const off = (x, z) => Math.hypot(x - mark.x, z - mark.z);
+  if (off(me.x, me.z) > reach) return null;
+  let drive = null;
+  if (me.fuel > 2) {
+    for (let k = 0; k < 8; k++) {
+      const heading = k * 45;
+      const end = tryDrive(heading, me.fuel);
+      const d = off(end.x, end.z);
+      if (end.moved > 2 && (!drive || d > drive.d)) drive = { heading, budget: me.fuel, d };
+    }
+  }
+  if (drive && drive.d > reach) return { heading: drive.heading, budget: drive.budget };
+  if (me.jets > 0) {
+    let hop = null;
+    for (let k = 0; k < 8; k++) {
+      const heading = k * 45;
+      const h = tryHop(heading);
+      if (!h.ok) continue;
+      const d = off(h.x, h.z);
+      if (!hop || d > hop.d) hop = { heading, budget: 0, jump: true, d };
+    }
+    if (hop && hop.d > reach) return { heading: hop.heading, budget: 0, jump: true };
+  }
+  return drive ? { heading: drive.heading, budget: drive.budget } : null;
+}

@@ -170,17 +170,21 @@ export function driveStep(tank, terrain, dir, dt, others = []) {
   return 'ok';
 }
 
+// A tank's `size` (the boss's, core/boss.js) scales its turret, barrel and
+// hit sphere; an ordinary tank has none.
 export function muzzleOrigin(tank, yawDeg = tank.yaw, elevDeg = tank.elev) {
   const d = muzzleDirection(yawDeg, elevDeg);
+  const s = tank.size || 1;
   return [
-    tank.x + d[0] * TANK.barrelLength,
-    tank.y + TANK.turretHeight + d[1] * TANK.barrelLength,
-    tank.z + d[2] * TANK.barrelLength,
+    tank.x + d[0] * TANK.barrelLength * s,
+    tank.y + TANK.turretHeight * s + d[1] * TANK.barrelLength * s,
+    tank.z + d[2] * TANK.barrelLength * s,
   ];
 }
 
 export function hitSphere(tank) {
-  return { x: tank.x, y: tank.y + TANK.hitCenterY, z: tank.z, r: TANK.hitRadius, tank };
+  const s = tank.size || 1;
+  return { x: tank.x, y: tank.y + TANK.hitCenterY * s, z: tank.z, r: TANK.hitRadius * s, tank };
 }
 
 export function clampAim(t) {
