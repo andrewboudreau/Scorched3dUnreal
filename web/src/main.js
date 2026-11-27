@@ -1,12 +1,11 @@
 import * as THREE from 'three';
-import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS, FOG } from './core/game.js';
-import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
+import { WEAPONS, WEAPON_BY_ID, ITEMS } from './core/weapons.js';
 import { Session } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
-import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
-import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity, groundContact, burstNow } from './core/ballistics.js';
+import { TANK, JET, muzzleOrigin } from './core/tank.js';
+import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
 import { PERK_BY_ID, perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
 import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
@@ -30,7 +29,7 @@ import { AimArc, Gunner } from './gunner.js';
 import { SatelliteView } from './render/satellite.js';
 import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
-import { setRidgeWorld, overviewGoal } from './render/ridgeline.js';
+import { setRidgeWorld } from './render/ridgeline.js';
 import { AngleDials } from './render/dials.js';
 import { SidePanel } from './render/sidepanel.js';
 import { Sound } from './audio.js';
@@ -47,7 +46,7 @@ import { BossMarkView } from './render/bossMark.js';
 import { bossMatch, fortSpots, ARENA } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
-import { clampCameraY } from './camlimit.js';
+import { CameraRig } from './camera.js';
 import { RunUI } from './runui.js';
 import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
@@ -75,17 +74,6 @@ const moons = new Moons(scene);   // the floating isles' moons
 const gravityLines = new GravityLines(scene);   // flux lines while a well pulls a shell
 if (coarsePointer) mobilePerf(renderer, sky);   // phones and tablets: fewer pixels, smaller shadow map
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 6000);
-camera.position.set(0, 420, 520);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.maxPolarAngle = Math.PI * 0.495;
-controls.minDistance = 12;
-controls.maxDistance = 1400;
-controls.target.set(0, 20, 0);
-
 // A desert floor far below the slab so it never floats in a void.
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), new THREE.MeshStandardMaterial({ color: '#8f7a5c', roughness: 1 }));
 floor.rotation.x = -Math.PI / 2;
@@ -100,6 +88,13 @@ const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot
 const dials = new AngleDials(scene);             // turret and elevation gauges on your tank while you aim
 const sideView = new SidePanel($('hud'), { touch: wantTouch() });   // the planned shot, side on (Settings > Graphics)
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
+// The camera, its orbit controls and its modes (camera.js; the rules: cameramode.js).
+const rig = new CameraRig(renderer, {
+  game: () => game, planner: () => planning(), hero: () => heroId, fogFor: () => fogFor,
+  seen: (p) => seen(p), believed: (p) => believed(p), shellPos, shellHidden, gunner,
+  field: () => (game ? game.terrain : menuField.terrain), floorY: () => floor.position.y,
+});
+const { camera, controls } = rig;
 const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
 const sound = new Sound();
@@ -136,20 +131,6 @@ const pips = [];
 const hops = new Map();         // tank id -> the jump jet hop being drawn: { from, to, t, dur, puff }
 const ranges = new Map();       // tank id -> its last rangefinder shot: { probes, elev, at, wind }
 let locators = [];              // per tank: edge arrow pointing at it when off screen
-let peek = null;                // { id, until }: a quick look at another tank while planning
-let followShell = true;
-let overview = false;
-let pinned = false;
-let shake = 0;
-const lastShake = new THREE.Vector3();
-// Desired camera offset from the orbit target, eased in spherical coordinates
-// so a turn change swings around instead of cutting overhead.
-let camGoal = null;
-let userCam = false;              // the player has dragged or zoomed this turn; leave the camera alone
-const _sCur = new THREE.Spherical();
-const _sGoal = new THREE.Spherical();
-const _off = new THREE.Vector3();
-const camTarget = new THREE.Vector3(0, 20, 0);
 let shopQueue = [];
 let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
@@ -162,14 +143,8 @@ const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
 const arenaView = new ArenaView(scene, { effects, sound, camDist });
 const bossMark = new BossMarkView(scene);   // the boss's telegraph on the ground   // the Edges curtains and the Island's sea
-// Scratch objects for per-frame work. Nothing may keep one past the call that filled it
-// (except camGoal, which deliberately points at _killGoal / _menuGoal and only reads them).
+// Scratch objects for per-frame work. Nothing may keep one past the call that filled it.
 const _lblV = new THREE.Vector3();       // projecting labels and popups
-const _shellC = new THREE.Vector3();     // centre of the shells in flight
-const _camBefore = new THREE.Vector3();
-const _camDelta = new THREE.Vector3();
-const _killGoal = new THREE.Vector3();
-const _menuGoal = new THREE.Vector3();
 
 // ---- DOM write helpers: touching the DOM with the value it already has still costs
 // style work, so every per-frame write goes through one of these.
@@ -327,11 +302,11 @@ function startMatch(config) {
     el.style.setProperty('--c', p.color);
     el.innerHTML = `<i></i><b>${escapeHtml(p.name)}</b><small></small>`;
     el.style.display = 'none';
-    el.addEventListener('click', () => peekAt(p));
+    el.addEventListener('click', () => rig.peekAt(p));
     $('labels').appendChild(el);
     return el;
   });
-  peek = null;
+  rig.modes.endLook();
   buildScoreboard();
   $('help-fire').textContent = game.volleyMode ? 'lock in your shot' : 'fire';
   // The boss's fort: coloured ground (before the round builds) and rim props, drawn only.
@@ -360,8 +335,7 @@ function banner(text, sub = '', ms = 1600) {
 }
 
 function addShake(pos, power) {
-  const d = camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
-  shake = Math.max(shake, power * Math.max(0, 1 - d / 900));
+  rig.shake(pos, power);
 }
 
 const fellInVoid = new Set();   // players whose 'void' banner is up, so their death banner stays quiet
@@ -386,9 +360,7 @@ function handleEvents() {
         pips.length = 0;
         ranges.clear();
         hops.clear();
-        killCam = null;
-        timeScale = 1;
-        document.body.classList.remove('killcam');
+        rig.cutKill();
         effects.clear();
         napalmView.clear();
         day = (e.round - 1) / game.cfg.rounds;
@@ -418,8 +390,7 @@ function handleEvents() {
         break;
       case 'turn': {
         const p = game.players[e.player];
-        userCam = false;   // a new planner gets the camera back
-        if (!overview && seen(p, fogView())) aimCameraAt(p);
+        rig.turn(p, seen(p, fogView()));   // a new planner gets the camera back
         // In a volley a "turn" is one tank's go at planning (or a CPU driving).
         // On a phone the "tap Lock in" line is taught the first few turns, then the banner is just the title (hints.js).
         const coach = !(touch && e.plan && !p.ai) || useHint('lockin', 6);
@@ -447,7 +418,7 @@ function handleEvents() {
         closeHandoff();
         const alive = game.localHumans.filter((h) => h.alive && e.players.includes(h.id));
         heroId = alive.length === 1 ? alive[0].id : null;
-        if (heroId != null && followShell && !overview) aimCameraAt(game.players[heroId]);
+        if (heroId != null) rig.volley(game.players[heroId]);
         banner('Fire!', `${e.players.length} tanks, all together`, 1300);
         break;
       }
@@ -826,7 +797,7 @@ function updatePips() {
 // While you plan, every opponent that is off screen gets an arrow on the
 // screen edge with its name and range. Click one, or press F, to look.
 function updateLocators() {
-  const me = game.phase === 'aim' && !handoffOpen && !overview && !gunner.active && game.current && !game.current.ai ? game.current : null;   // the sight draws its own markers
+  const me = game.phase === 'aim' && !handoffOpen && !rig.modes.overview && rig.mode !== 'sight' && game.current && !game.current.ai ? game.current : null;   // the sight draws its own markers
   const placed = [];
   game.players.forEach((p, i) => {
     const el = locators[i];
@@ -838,47 +809,6 @@ function updateLocators() {
     place(el, s);
     setText(el._small || (el._small = el.querySelector('small')), `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`);
   });
-}
-
-// A look at another tank: three seconds (a click on its mark), or held until
-// Find moves on or is pressed past the last enemy (hold).
-function peekAt(p, hold = false) {
-  if (!game || game.phase !== 'aim' || !p.alive || p === game.current) { peek = null; return; }
-  if (!seen(p)) { const b = believed(p); if (b) peekSpot([b.x, b.y, b.z], hold); return; }
-  peek = { id: p.id, who: game.current?.id, until: hold ? Infinity : performance.now() + 3000 };
-  camGoal = null;
-  overview = false;
-}
-
-// A look at a spot on the ground (the rangefinder card's click: three seconds).
-function peekSpot(pos, hold = false) {
-  if (!game || game.phase !== 'aim') return;
-  peek = { id: null, who: game.current?.id, x: pos[0], y: pos[1], z: pos[2], until: hold ? Infinity : performance.now() + 3000 };
-  camGoal = null;
-  overview = false;
-}
-
-// Whether a look is on: it ends when its time is up, the planning ends, or the turn passes.
-function peekLive() {
-  if (peek && (!game || game.phase !== 'aim' || peek.who !== game.current?.id || performance.now() >= peek.until)) peek = null;
-  return !!peek;
-}
-
-// F / Find: hold the camera on the next opponent, nearest first. Pressed on the
-// last one (or the only one, 1v1) it lets go and the camera returns to you.
-function peekNext() {
-  const me = game.current;
-  if (!me) return;
-  const where = (p) => believed(p) || { x: 1e6, z: 1e6 };
-  const foes = game.players.filter((p) => p.alive && p !== me && believed(p))
-    .sort((a, b) => Math.hypot(where(a).x - me.x, where(a).z - me.z) - Math.hypot(where(b).x - me.x, where(b).z - me.z));
-  if (!foes.length) return;
-  const at = peekLive() && peek.until === Infinity ? foes.findIndex((p) => p.id === (peek.id ?? peek.fogId)) : -1;
-  if (at === foes.length - 1) { peek = null; syncFind(); return; }
-  const next = foes[at + 1];
-  peekAt(next, true);
-  if (peek && peek.id == null) peek.fogId = next.id;
-  syncFind();
 }
 
 // ---------------------------------------------------------------- rangefinder card
@@ -897,7 +827,7 @@ function rangeOwner() {
 }
 
 let rcSpot = null;              // where a click on the card looks
-$('range-card').addEventListener('click', () => rcSpot && peekSpot(rcSpot));
+$('range-card').addEventListener('click', () => rcSpot && rig.peekSpot(rcSpot));
 
 const signed = (v, digits = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
 
@@ -1072,110 +1002,7 @@ window.addEventListener('pointerdown', (e) => {
 }, { capture: true });
 for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => steerTouch.delete(e.pointerId), { capture: true });
 
-// ---------------------------------------------------------------- kill cam
-
-// When a shell in the air is about to end the round (its blast would leave at
-// most one tank standing), time slows, the frame letterboxes and the camera
-// swings round to watch it land from the side.
-let killCam = null; let lastDt = 0;             // { id, victim, side: [x, z], end }
-let timeScale = 1;
-const KILLCAM = { lead: 1.1, slow: 0.28, after: 1.6 };
-
-// Where a projectile comes down within `horizon` seconds if nothing changes.
-// `burst`: the Airburst's height, where it goes off over the ground (ballistics.burstNow).
-function forecast(pr, horizon, burst = 0) {
-  const c = { pos: [...pr.pos], prev: [...pr.pos], vel: [...pr.vel], time: 0, g: pr.g, windK: pr.windK, drag: pr.drag, edge: pr.edge };
-  const t = game.terrain;
-  const step = 1 / 30;
-  for (let s = step; s <= horizon; s += step) {
-    stepProjectile(c, game.wind, step);
-    if (c.crossed?.kind === 'wall') return { t: s, pos: c.crossed.point, direct: null };
-    if (!t.inBounds(c.pos[0], c.pos[2])) return null;
-    if (burst && burstNow(c, t, burst)) return { t: s, pos: [...c.pos], direct: null };
-    for (const p of game.players) {
-      if (!p.alive || (p.id === pr.owner && pr.time + s < 0.5)) continue;   // the shooter's grace, as in the game
-      const h = hitSphere(p);
-      if ((c.pos[0] - h.x) ** 2 + (c.pos[1] - h.y) ** 2 + (c.pos[2] - h.z) ** 2 <= h.r * h.r) return { t: s, pos: [...c.pos], direct: p };
-    }
-    const g = groundContact(c, t);
-    if (g) return g.sea ? null : { t: s, pos: g, direct: null };
-  }
-  return null;
-}
-
-// The shell that will decide the round, if one is about to.
-function decidingShot() {
-  const alive = game.players.filter((p) => p.alive);
-  if (alive.length < 2) return null;
-  const dying = new Set();
-  let pick = null;
-  for (const pr of game.projectiles) {
-    if (pr.dead || pr.probe || pr.roller) continue;
-    const w = game.weaponOf(pr.owner, pr.weapon);
-    const blast = w.impact?.find((i) => i.type === 'blast');
-    if (!blast || rollPart(w) || (!pr.splitDone && w.flight?.some((f) => f.type === 'split' || f.type === 'airburst'))) continue;
-    const hit = forecast(pr, KILLCAM.lead, game.burstHeight(pr.owner, pr.weapon));
-    if (!hit) continue;
-    const o = game.players[pr.owner];
-    const radius = blast.radius * (1 + perkSum(o, 'blastRadius'));
-    const damage = blast.damage * (1 + perkSum(o, 'blastDamage'));
-    for (const p of alive) {
-      const h = hitSphere(p);
-      const d = p === hit.direct ? 0 : Math.max(0, Math.hypot(h.x - hit.pos[0], blast.flat ? 0 : h.y - hit.pos[1], h.z - hit.pos[2]) - TANK.hitRadius * 0.5);
-      if (blastDamage(d, radius, damage) < p.hp + p.armor) continue;
-      dying.add(p.id);
-      if (!pick || hit.t < pick.t) pick = { id: pr.id, victim: p.id, t: hit.t, from: pr.owner };
-    }
-  }
-  return pick && alive.length - dying.size <= 1 ? pick : null;
-}
-
-function updateKillCam(dt) {
-  const now = performance.now();
-  if (!killCam && game && game.phase === 'flight' && followShell && !overview && !pinned) {
-    const k = decidingShot();
-    if (k) {
-      const pr = game.projectiles.find((q) => q.id === k.id);
-      const v = game.players[k.victim];
-      // Watch from the side of the incoming line, on the side the camera is already on.
-      let dx = v.x - pr.pos[0], dz = v.z - pr.pos[2];
-      const n = Math.hypot(dx, dz) || 1;
-      dx /= n; dz /= n;
-      let side = [-dz, dx];
-      if ((camera.position.x - v.x) * side[0] + (camera.position.z - v.z) * side[1] < 0) side = [dz, -dx];
-      killCam = { id: k.id, victim: k.victim, side, dir: [dx, dz], end: null };
-      const by = game.players[k.from];
-      $('killcam-cap').textContent = by.id === v.id ? `${v.name}…` : `${by.name} → ${v.name}`;
-      document.body.classList.add('killcam');
-    }
-  }
-  if (killCam) {
-    if (killCam.end == null && !game.projectiles.some((q) => q.id === killCam.id)) killCam.end = now + KILLCAM.after * 1000;
-    if (killCam.end != null && now > killCam.end) { killCam = null; document.body.classList.remove('killcam'); }
-  }
-  // Ease into the slow motion over a few tenths of a second and back out more
-  // gently, on the real clock so it feels the same at any frame rate.
-  const goal = killCam && killCam.end == null ? KILLCAM.slow : killCam ? 0.55 : 1;
-  const tau = goal < timeScale ? 0.22 : 0.45;
-  timeScale += (goal - timeScale) * (1 - Math.exp(-dt / tau));
-  if (Math.abs(goal - timeScale) < 0.002) timeScale = goal;
-}
-
-// Camera for the kill cam: off to the side, low, looking at the target with
-// the shell coming in.
-function killCamView() {
-  const v = game.players[killCam.victim];
-  const pr = game.projectiles.find((q) => q.id === killCam.id);
-  // Look between the target and the incoming shell; once it has landed, let
-  // the pull fade instead of snapping back onto the tank.
-  if (pr) { const s = shellPos(pr); killCam.shell = [s[0], s[1], s[2]]; }
-  const pull = killCam.pull = pr ? 0.3 : (killCam.pull ?? 0) * Math.exp(-lastDt * 3);
-  camTarget.set(v.x, v.y + 3, v.z);
-  if (killCam.shell && pull > 0.001) camTarget.lerp(_v.set(...killCam.shell), pull);
-  const [sx, sz] = killCam.side, [dx, dz] = killCam.dir;
-  // camGoal is an offset from the target.
-  camGoal = _killGoal.set(sx * 40 - dx * 16 + (v.x - camTarget.x), 24, sz * 40 - dz * 16 + (v.z - camTarget.z));
-}
+let lastDt = 0;                 // the last frame's dt (the aim aids ease by it)
 
 // ---------------------------------------------------------------- inset
 
@@ -1187,7 +1014,7 @@ let insetFor = null;            // player id shown in the inset this frame
 const _back = new THREE.Vector3();
 
 function insetPlayer() {
-  if (!game || overview || !followShell || pinned || killCam) return null;
+  if (!game || !rig.modes.insetAllowed()) return null;
   if (game.phase !== 'flight' && game.phase !== 'settle') return null;
   const hs = game.localHumans;
   if (hs.length !== 1) return null;
@@ -1257,28 +1084,13 @@ function planning() {
   return p && p.alive && game.isLocal(p) ? p : null;
 }
 
-// The sight drives the camera only while you plan; it comes back each turn.
-function gunnerFor() {
-  return gunner.on && !overview && !pinned && !killCam ? planning() : null;
-}
-
+// G / SIGHT. The sight drives the camera only while you plan (camera.js); the
+// choice stays from turn to turn.
 function toggleGunner() {
-  gunner.on = !gunner.on;
-  $('gunner-btn')?.classList.toggle('on', gunner.on);
-  document.querySelector('#touch [data-key=g]')?.classList.toggle('on', gunner.on);
-  if (gunner.on) overview = false;
-  banner(gunner.on ? 'Sight on' : 'Sight off', gunner.on ? (touch ? 'drag to aim, pinch to zoom' : 'drag to aim, wheel to zoom') : '', 900);
-}
-
-// Hand the camera back to the orbit controls from wherever the sight left it,
-// looking the same way, so nothing jumps.
-function leaveGunner() {
-  gunner.active = false;
-  gunner.hide();
-  controls.enabled = true;
-  camera.fov = 55;
-  camera.updateProjectionMatrix();
-  controls.target.copy(camera.position).add(_v.set(0, 0, -100).applyQuaternion(camera.quaternion));
+  const on = rig.toggleSight();
+  $('gunner-btn')?.classList.toggle('on', on);
+  document.querySelector('#touch [data-key=g]')?.classList.toggle('on', on);
+  banner(on ? 'Sight on' : 'Sight off', on ? (touch ? 'drag to aim, pinch to zoom' : 'drag to aim, wheel to zoom') : '', 900);
 }
 
 // Where a tank's shot came down, kept for its next turn. Only the first
@@ -1321,156 +1133,20 @@ function lastShotText(p) {
 
 function updateAimAids() {
   const p = planning();
-  aimArc.update(game, p, camera, { quiet: gunner.active });
-  dials.update({ game, p: killCam || overview || gunner.active ? null : p, camera, dt: lastDt });
+  const sight = rig.mode === 'sight', { kill, overview } = rig.modes;
+  aimArc.update(game, p, camera, { quiet: sight });
+  dials.update({ game, p: kill || overview || sight ? null : p, camera, dt: lastDt });
   const enemies = [];
   for (const q of p ? game.players : []) {
     if (q === p || !q.alive) continue;
     const b = believed(q);
     if (b) enemies.push({ name: b.r > 0 ? `${q.name}?` : q.name, color: q.color, x: b.x, y: b.y, z: b.z });
   }
-  sideView.update(game, killCam || overview ? null : p, enemies, { sight: gunner.active });
-  satView.update({ game, p: killCam ? null : p, level: p ? game.surveyLevel(p) : 0, at: p ? modsUi.satAt(p) : null, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
-  if (!gunner.active || !p) { gunner.hide(); return; }
+  sideView.update(game, kill || overview ? null : p, enemies, { sight });
+  satView.update({ game, p: kill ? null : p, level: p ? game.surveyLevel(p) : 0, at: p ? modsUi.satAt(p) : null, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
+  if (!sight || !p) { gunner.hide(); return; }
   gunner.hud(camera, p, enemies, lastShotText(p));
 }
-
-// In the sight, a drag aims: across turns the turret by as much as the view
-// moves under the finger, up and down raises the barrel. Wheel or pinch zooms.
-const aimDrag = new Map();     // pointer id -> last [x, y]
-renderer.domElement.addEventListener('pointerdown', (e) => { if (gunner.active) aimDrag.set(e.pointerId, [e.clientX, e.clientY]); });
-renderer.domElement.addEventListener('pointermove', (e) => {
-  const was = aimDrag.get(e.pointerId);
-  if (!was || !gunner.active) return;
-  const now = [e.clientX, e.clientY];
-  if (aimDrag.size >= 2) {
-    // Pinch: the change in spread between the first two fingers.
-    const [[ia, qa], [ib, qb]] = [...aimDrag.entries()];
-    const a = ia === e.pointerId ? now : qa;
-    const b = ib === e.pointerId ? now : qb;
-    const before = Math.hypot(qa[0] - qb[0], qa[1] - qb[1]);
-    const after = Math.hypot(a[0] - b[0], a[1] - b[1]);
-    if (before > 0 && after > 0) gunner.zoom(Math.log(before / after) / 0.12);
-  } else {
-    const perPx = camera.fov / window.innerHeight;     // degrees of view per pixel
-    game.adjustAim((now[0] - was[0]) * perPx, -(now[1] - was[1]) * perPx * 0.5, 0);
-  }
-  aimDrag.set(e.pointerId, now);
-});
-for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => aimDrag.delete(e.pointerId));
-renderer.domElement.addEventListener('wheel', (e) => { if (gunner.active) gunner.zoom(Math.sign(e.deltaY)); }, { passive: true });
-
-// ---------------------------------------------------------------- camera
-
-function aimCameraAt(p) {
-  if (pinned) return;
-  camTarget.set(p.x, p.y + 4, p.z);
-  const back = new THREE.Vector3(-Math.cos(p.yaw * DEG), 0, -Math.sin(p.yaw * DEG));
-  camGoal = back.multiplyScalar(70).add(new THREE.Vector3(0, 28, 0));
-  // On a ridgeline the spot behind a tank can be up a mountain: stand above it.
-  if (game?.ridgeline) camGoal.y = Math.max(camGoal.y, game.terrain.heightAt(p.x + camGoal.x, p.z + camGoal.z) + 14 - camTarget.y);
-}
-
-const _box = new THREE.Box3();
-
-function updateCamera(dt) {
-  camera.position.sub(lastShake);
-  const gp = gunnerFor();
-  if (gp) {
-    if (!gunner.active) { controls.enabled = false; camGoal = null; }
-    gunner.pose(camera, gp, game.terrain, dt);
-    lastShake.set(0, 0, 0);
-    return;
-  }
-  if (gunner.active) leaveGunner();
-  let frame = 0;                // a volley asks for this much distance
-  if (game) {
-    if (pinned) {
-      // Debug camera: hold still.
-    } else if (killCam) {
-      killCamView();
-    } else if (overview) {
-      camTarget.set(0, 10, 0);
-    } else if (heroId != null && game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
-      // Your volley: ride your own shell. Once it is down, hold on where it
-      // landed; the others' landings show as pips.
-      const hero = game.players[heroId];
-      const mine = game.projectiles.filter((pr) => pr.owner === heroId);
-      if (game.phase === 'volley') camTarget.set(hero.x, hero.y + 4, hero.z);
-      else if (mine.length) {
-        camTarget.set(0, 0, 0);
-        mine.forEach((pr) => camTarget.add(_v.fromArray(shellPos(pr))));
-        camTarget.divideScalar(mine.length);
-      }
-    } else if (game.volleyMode && followShell && (game.phase === 'volley' || (game.phase === 'flight' && game.projectiles.length))) {
-      // A shared-screen volley: stand back far enough to see every shell (or, in the beat
-      // before, every tank about to fire).
-      _box.makeEmpty();
-      if (game.phase === 'volley') game.players.forEach((p) => { if (p.alive && seen(p)) _box.expandByPoint(_v.set(p.x, p.y, p.z)); });
-      else game.projectiles.forEach((pr) => { if (!shellHidden(pr)) _box.expandByPoint(_v.set(pr.pos[0], pr.pos[1], pr.pos[2])); });
-      if (_box.isEmpty()) _box.expandByPoint(controls.target);
-      _box.getCenter(camTarget);
-      frame = Math.min(1300, Math.max(130, (_box.getSize(_v).length() * 0.62) / Math.tan((camera.fov * DEG) / 2)));
-      camGoal = null;
-    } else if (game.phase === 'flight' && followShell && game.projectiles.some((pr) => !shellHidden(pr))) {
-      let n = 0;
-      _shellC.set(0, 0, 0);
-      for (const pr of game.projectiles) {
-        if (shellHidden(pr)) continue;
-        _shellC.add(_v.fromArray(shellPos(pr)));
-        n++;
-      }
-      camTarget.copy(_shellC.divideScalar(n));
-    } else if (game.phase === 'aim' && game.current) {
-      const look = peekLive() ? (peek.id != null ? game.players[peek.id] : peek) : null;
-      const p = look || (seen(game.current) ? game.current : fogFor?.[0] || game.current);
-      camTarget.set(p.x, p.y + 4, p.z);
-      // Left far out (e.g. by the volley framing) with nobody steering: come back in.
-      if (!look && !camGoal && !userCam && camera.position.distanceTo(controls.target) > 300) aimCameraAt(p);
-    }
-  }
-  _camBefore.copy(controls.target);
-  controls.target.lerp(camTarget, 1 - Math.exp(-dt * 3.2));
-  camera.position.add(_camDelta.copy(controls.target).sub(_camBefore));
-  if (frame) {
-    // Back off (or close in) to the framing distance, looking down enough to see over the hills.
-    const k = 1 - Math.exp(-dt * 2.2);
-    _sCur.setFromVector3(_off.subVectors(camera.position, controls.target));
-    _sCur.radius += (frame - _sCur.radius) * k;
-    _sCur.phi += (Math.min(_sCur.phi, 1.0) - _sCur.phi) * k;
-    camera.position.copy(controls.target).add(_off.setFromSpherical(_sCur));
-  }
-  if (camGoal) {
-    const k = 1 - Math.exp(-dt * 2.6);
-    _sCur.setFromVector3(_off.subVectors(camera.position, controls.target));
-    _sGoal.setFromVector3(camGoal);
-    let dTheta = _sGoal.theta - _sCur.theta;
-    dTheta = Math.atan2(Math.sin(dTheta), Math.cos(dTheta));
-    _sCur.theta += dTheta * k;
-    _sCur.phi += (_sGoal.phi - _sCur.phi) * k;
-    _sCur.radius += (_sGoal.radius - _sCur.radius) * k;
-    camera.position.copy(controls.target).add(_off.setFromSpherical(_sCur));
-    if (Math.abs(dTheta) < 0.01 && Math.abs(_sGoal.phi - _sCur.phi) < 0.01 && Math.abs(_sGoal.radius - _sCur.radius) < 1) camGoal = null;
-  }
-  controls.update();
-  // Never let the camera sink into the hills (under an isle it stays below it).
-  const field = game ? game.terrain : menuField.terrain;
-  camera.position.y = clampCameraY(field, camera.position.x, camera.position.y, camera.position.z, 4, floor.position.y + 4);
-  shake *= Math.exp(-dt * 5);
-  lastShake.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-  camera.position.add(lastShake);
-}
-
-// Only a real drag or a wheel zoom takes the camera over; a plain click (e.g. to
-// focus the page) must not strand it halfway through a fly-in.
-let dragFrom = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointermove', (e) => {
-  if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { camGoal = null; dragFrom = null; userCam = true; }
-});
-for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, () => { dragFrom = null; });
-
-renderer.domElement.addEventListener('wheel', () => { camGoal = null; userCam = true; }, { passive: true });
 
 // ---------------------------------------------------------------- input
 
@@ -1491,14 +1167,11 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'tab') { game.cycleWeapon(e.shiftKey ? -1 : 1); sound.click(); }
   else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
   else if (k === 'j') doJump();
-  else if (k === 'f') peekNext();
+  else if (k === 'f') { rig.peekNext(); syncFind(); }
   else if (k === 'g') toggleGunner();
-  else if (k === 'c') { followShell = !followShell; banner(followShell ? 'Follow cam on' : 'Follow cam off', '', 700); }
-  else if (k === 'v') {
-    overview = !overview;
-    if (overview) camGoal = overviewGoal(game, camera);
-    else if (game.current) aimCameraAt(game.current);
-  } else if (k === 'm') toggleMute();
+  else if (k === 'c') { const on = rig.toggleFollow(); banner(on ? 'Follow cam on' : 'Follow cam off', '', 700); }
+  else if (k === 'v') rig.toggleOverview();
+  else if (k === 'm') toggleMute();
   else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
   else if (k === 'n') { sound.ensure(); const t = music.next(); settings.render(); banner(`Music: ${t.name}`, t.mood || '', 900); }
 });
@@ -1620,8 +1293,7 @@ function applyHeldKeys(dt) {
   const go = (held.has('arrowup') ? 1 : 0) - (held.has('arrowdown') ? 1 : 0);
   const turn = (held.has('arrowright') ? 1 : 0) - (held.has('arrowleft') ? 1 : 0);
   if ((go || turn) && !hops.has(game.current.id)) {
-    // Driving with the camera far away (or zoomed right out) brings it back to the tank.
-    if (!camGoal && !overview && !pinned && camera.position.distanceTo(controls.target) > 260) aimCameraAt(game.current);
+    rig.driveBack(game.current);   // driving with the camera far away (or zoomed right out) brings it back
     const r = game.drive(go, turn, dt);
     const why = r === 'edge' && game.isles ? 'Edge of the isle' : DRIVE_NOTES[r];
     if (why) driveNote = { text: why, until: performance.now() + 1200 };
@@ -1720,7 +1392,7 @@ function buildScoreboard() {
     </div>`).join('');
   sbRows.clear();
   $('scoreboard').querySelectorAll('.sb-row').forEach((row) => {
-    row.onclick = () => game && peekAt(game.players[Number(row.dataset.id)]);
+    row.onclick = () => game && rig.peekAt(game.players[Number(row.dataset.id)]);
     sbRows.set(Number(row.dataset.id), { row, fill: row.querySelector('.fill'), wins: row.querySelector('.wins'), perks: row.querySelector('.sb-perks') });
   });
 }
@@ -1816,31 +1488,21 @@ function updateHud() {
   setText(E['round-desc'], mod.id === 'clear' ? '' : mod.desc);
 }
 
-// How much the marks over the tanks say, by view, to keep the field clear:
-// health only where you are sizing the field up (the sight, the overview, a
-// Find look), faint while a shell is followed, names alone otherwise.
-function labelMode() {
-  if (killCam) return 'name';
-  if (gunner.active || overview || peekLive()) return 'full';
-  if (game.phase !== 'aim' && followShell) return 'faint';
-  return 'name';
-}
-
 let labelModeWas = '';
 let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
 function syncFind() {
-  const finding = !!peek && peek.until === Infinity && peekLive();
+  const finding = rig.finding();
   if (finding !== findingWas) { document.querySelector('#touch [data-key="f"]')?.classList.toggle('on', finding); findingWas = finding; }
 }
 function updateLabels() {
-  const mode = labelMode();
+  const mode = rig.labelMode(game.phase);   // how much the marks say, by view (cameramode.js labelMode)
   if (mode !== labelModeWas) { $('labels').className = `lb-${mode}`; labelModeWas = mode; }
   syncFind();
   game.players.forEach((p, i) => {
     const el = labels[i];
     const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
     const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1
-      && !(gunner.active && p === game.current);   // in the sight your own label would sit on the turret line
+      && !(rig.mode === 'sight' && p === game.current);   // in the sight your own label would sit on the turret line
     setDisplay(el, visible ? 'block' : 'none');
     if (!visible) return;
     moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
@@ -2219,9 +1881,7 @@ function toMenuScene() {
   showHud(false);
   disposeMatch();
   game = null;
-  killCam = null;
-  timeScale = 1;
-  document.body.classList.remove('killcam');
+  rig.cutKill();
   scene.add(menuMesh.group, menuScenery.group);
   tracer.visible = false;
   sky.fit(menuField.terrain.half);
@@ -2599,9 +2259,9 @@ function tick(dt, draw = true) {
   }
   if (session?.over && game?.phase !== 'matchOver') netEnded(session.over);
   if (game) {
-    updateKillCam(dt);
+    rig.updateKill(dt);
     lastDt = dt;
-    const sdt = dt * timeScale;   // game time: slowed for the kill cam
+    const sdt = dt * rig.timeScale;   // game time: slowed for the kill cam
     applyHeldKeys(dt);
     applySteering();
     game.update(sdt);
@@ -2638,12 +2298,9 @@ function tick(dt, draw = true) {
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;
   } else {
-    // Idle orbit behind the menu.
+    // The menu's field; the camera orbits it (camera.js, 'menu').
     menuField.scenery.update(dt);
     menuScenery.sync(elapsed);
-    const t = performance.now() * 0.00005;
-    camTarget.set(0, 0, 0);
-    camGoal = _menuGoal.set(Math.cos(t) * 600, 300, Math.sin(t) * 600);
   }
   day = dayLock ?? day + Math.max(-dt * 0.5, Math.min(dt * 0.012, dayGoal - day));
   // Rain while a Rain round is being played; it stops when the round ends.
@@ -2655,16 +2312,16 @@ function tick(dt, draw = true) {
   sky.update(dt, game ? game.wind : [0.4, 0.2]);
   moons.update(performance.now() / 1000);
   const orbWells = game?.projectiles.length ? game.orbiterWells().map((w, i) => ({ ...w, id: `orb${w.owner}:${i}` })) : [];
-  gravityLines.update(dt * timeScale, game ? game.projectiles : [], orbWells, (pr) => (shellHidden(pr) ? null : shellPos(pr)));
+  gravityLines.update(dt * rig.timeScale, game ? game.projectiles : [], orbWells, (pr) => (shellHidden(pr) ? null : shellPos(pr)));
   birds.update(dt);
   craft.update(dt);
   soundScape(dt);
-  music.update(dt, game ? timeScale : 1);
+  music.update(dt, game ? rig.timeScale : 1);
   if (game) effects.wind = game.wind;
-  effects.update(dt * timeScale);
-  updateCamera(dt);
+  effects.update(dt * rig.timeScale);
+  rig.update(dt);
   updateAimAids();
-  setHudView(game ? hudView({ phase: game.phase, sight: gunner.active, overview, killCam: !!killCam }) : 'menu');   // what each HUD element shows (hudview.js)
+  setHudView(hudView({ phase: game?.phase, mode: rig.mode }));   // what each HUD element shows (hudview.js), by the camera's mode
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   if (!draw) return;
   renderer.render(scene, camera);
@@ -2703,14 +2360,14 @@ frame();
 
 // Exposed for debugging from the console.
 window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
-  get tanks() { return tanks; }, get camGoal() { return camGoal; },
-  lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
-  release() { pinned = false; },
-  get killCam() { return killCam; },
-  get peek() { return peek; },
+  get tanks() { return tanks; }, get camGoal() { return rig.goal; }, rig, get cameraMode() { return rig.mode; },
+  lookAt(x, y, z, from) { rig.lookAt(x, y, z, from); },
+  release() { rig.release(); },
+  get killCam() { return rig.modes.kill; },
+  get peek() { return rig.modes.peek; },
   get session() { return session; },
   netClock: NET_CLOCK,
-  get timeScale() { return timeScale; },
+  get timeScale() { return rig.timeScale; },
   audioLatency() { return sound.ctx ? { base: sound.ctx.baseLatency, output: sound.ctx.outputLatency } : null; },
   setDay(k) { dayLock = k; } };
 if (touch) window.craterfall.touch = touch;

@@ -10,7 +10,8 @@
 // It is phone first: the rules apply under body.touch (a coarse pointer or
 // ?mobile=1). A desktop screen has room for the HUD and is left alone.
 //
-// No three.js, no game state: hudView() takes plain flags, so it is testable.
+// No three.js, no game state: hudView() takes the phase and the camera's mode
+// (src/cameramode.js), so it is testable.
 
 export const VIEWS = ['plan', 'sight', 'flight', 'kill', 'overview', 'between'];
 
@@ -20,18 +21,21 @@ export const HIDDEN = 'hidden';
 export const MOVED = 'moved';
 const CODES = { S: SHOWN, F: FAINT, H: HIDDEN, M: MOVED };
 
-// Which view the game is in. In order of priority:
+// Which view the game is in, from the game's phase and the camera's mode
+// (cameramode.js MODES). In order of priority:
+//   menu      no match (the camera's 'menu' mode): outside the table
 //   between   a round or match has ended (results, skills, armory cards cover the screen)
-//   kill      the deciding shot's slow-motion replay
-//   overview  the View button's map
-//   sight     the gunner's sight, while you plan
+//   kill      the deciding shot's slow-motion replay (the 'kill' mode)
+//   overview  the View button's map (the 'overview' mode)
+//   sight     the gunner's sight, while you plan (the 'sight' mode)
 //   flight    shells are in the air (or being fired, or waiting on the others)
-//   plan      setting up a shot (also the CPUs' turns, and a hand-off screen)
-export function hudView({ phase = '', sight = false, overview = false, killCam = false } = {}) {
+//   plan      setting up a shot (also the CPUs' turns, a look, and a hand-off screen)
+export function hudView({ phase = '', mode = 'plan' } = {}) {
+  if (mode === 'menu') return 'menu';
   if (phase === 'roundOver' || phase === 'matchOver' || phase === 'shop') return 'between';
-  if (killCam) return 'kill';
-  if (overview) return 'overview';
-  if (sight && phase === 'aim') return 'sight';
+  if (mode === 'kill') return 'kill';
+  if (mode === 'overview') return 'overview';
+  if (mode === 'sight' && phase === 'aim') return 'sight';
   if (phase === 'volley' || phase === 'flight' || phase === 'settle' || phase === 'wait') return 'flight';
   return 'plan';
 }
