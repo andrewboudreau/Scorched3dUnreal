@@ -10,8 +10,6 @@
 // over the right thumb's cluster; on a desktop both go in the player card.
 // It reads the game each frame and talks to it only through toggleDouble.
 
-const KEY = 'x';
-
 export class StrikeUI {
   // game() is the live Game (or null); blocked() is true while input is held
   // off (a hand-off card); banner(text, sub, ms) and click() are main.js's.
@@ -46,13 +44,9 @@ export class StrikeUI {
       e.preventDefault();
       if (!this.blocked()) this.toggle();
     });
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat || e.key.toLowerCase() !== KEY) return;
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || this.blocked()) return;
-      this.toggle();
-    });
   }
 
+  // The ×2 button, or X (routed here by input.js / inputmap.js).
   toggle() {
     const g = this.game();
     if (!g) return;

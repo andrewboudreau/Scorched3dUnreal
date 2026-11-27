@@ -4,7 +4,7 @@ import { WEAPONS, WEAPON_BY_ID, ITEMS } from './core/weapons.js';
 import { Session, winnerSeat } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
-import { TANK, JET, muzzleOrigin } from './core/tank.js';
+import { JET, muzzleOrigin } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
 import { perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
@@ -47,6 +47,7 @@ import { bossMatch, fortSpots, ARENA } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, parseTestParams } from './builder.js';
 import { CameraRig } from './camera.js';
+import { Input } from './input.js';
 import { RunUI } from './runui.js';
 import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
@@ -54,7 +55,7 @@ import { Hud } from './hud.js';
 import { Labels } from './labels.js';
 import { RangeCard } from './rangecard.js';
 import { Inset } from './inset.js';
-import { escapeHtml, whose, ownedWeapons, rangeOwner } from './hudlogic.js';
+import { escapeHtml, whose, rangeOwner } from './hudlogic.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -540,17 +541,6 @@ function flushDirty() {
 
 // ---------------------------------------------------------------- jump jets
 
-const JUMP_NOTES = { buried: 'Buried: your next shot digs you out', nojets: 'No jump jets left', edge: 'Edge of the arena', water: 'Water ahead', blocked: 'No room to land that way' };
-
-// J: use a charge. The core has already moved the tank; this draws the arc.
-function doJump() {
-  const p = game.current;
-  if (!p || p.ai || game.phase !== 'aim' || hops.has(p.id)) return;
-  const r = game.jump();
-  const why = r === 'edge' && game.isles ? 'No ground to land on' : JUMP_NOTES[r];
-  if (why) hud.note(why, 1400);
-}
-
 function startHop(e) {
   hops.set(e.player, { from: e.from, to: e.to, t: 0, dur: e.flight || JET.flight, puff: 0 });
   if (!seen(game.players[e.player])) return;
@@ -600,7 +590,7 @@ function retireShell(id, at) {
 // More than one human is planning: cover the field until the next one is ready.
 function openHandoff(p) {
   handoffOpen = true;
-  held.clear();
+  input.held.clear();
   $('handoff-card').style.borderTopColor = p.color;
   $('handoff-swatch').style.background = p.color;
   $('handoff-title').textContent = `${p.name}, plan your shot`;
@@ -615,36 +605,6 @@ function closeHandoff() {
   $('handoff').classList.add('hidden');
 }
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
-$('gunner-btn').onclick = (e) => { e.currentTarget.blur(); sound.click(); toggleGunner(); };   // blur: Space must fire, not press it again
-
-// ---------------------------------------------------------------- steering
-
-// A / D (or the side arrows) turn every human's guided missile while it flies;
-// on a touch screen, a finger held on the left or right half of the view does.
-// On a shared screen they all answer the same keys; with one human, only yours.
-let steerFuel = -1;                 // the most guidance fuel left on a local guided missile, -1 for none
-const steerTouch = new Map();       // pointer id -> -1 | 1, fingers steering
-function applySteering() {
-  if (!game || game.phase !== 'flight') { hud.steer(null); steerFuel = -1; steerTouch.clear(); return; }
-  let finger = 0;
-  for (const d of steerTouch.values()) finger += d;
-  const dir = Math.sign((held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0) + finger);
-  let fuel = -1, jam = false;
-  for (const p of game.localHumans) {
-    game.steer(p.id, dir);
-    for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) { fuel = Math.max(fuel, pr.steer.fuel); jam ||= !!pr.steer.jammed; }
-  }
-  steerFuel = fuel;
-  hud.steer({ fuel, jam, dir });   // the hint (hud.js)
-}
-// Caught before the camera's own handlers, so a steering finger does not also orbit.
-window.addEventListener('pointerdown', (e) => {
-  if (!touch || steerFuel <= 0 || e.target !== renderer.domElement) return;
-  steerTouch.set(e.pointerId, e.clientX < window.innerWidth / 2 ? -1 : 1);
-  touch.buzz?.(8);
-  e.stopPropagation();
-}, { capture: true });
-for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => steerTouch.delete(e.pointerId), { capture: true });
 
 let lastDt = 0;                 // the last frame's dt (the aim aids ease by it)
 
@@ -655,15 +615,6 @@ function planning() {
   if (!game || handoffOpen || game.phase !== 'aim') return null;
   const p = game.current;
   return p && p.alive && game.isLocal(p) ? p : null;
-}
-
-// G / SIGHT. The sight drives the camera only while you plan (camera.js); the
-// choice stays from turn to turn.
-function toggleGunner() {
-  const on = rig.toggleSight();
-  $('gunner-btn')?.classList.toggle('on', on);
-  document.querySelector('#touch [data-key=g]')?.classList.toggle('on', on);
-  banner(on ? 'Sight on' : 'Sight off', on ? (touch ? 'drag to aim, pinch to zoom' : 'drag to aim, wheel to zoom') : '', 900);
 }
 
 // Where a tank's shot came down, kept for its next turn. Only the first
@@ -721,44 +672,6 @@ function updateAimAids() {
   gunner.hud(camera, p, enemies, lastShotText(p));
 }
 
-// ---------------------------------------------------------------- input
-
-const held = new Set();
-window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (session && e.key === 'Enter' && !handoffOpen) { e.preventDefault(); openChat(); return; }
-  const k = e.key.toLowerCase();
-  if (k === 'tab' || k.startsWith('arrow')) e.preventDefault();
-  held.add(k);
-  if (e.repeat || !game) return;
-  if (handoffOpen) {
-    if (k === ' ' || k === 'enter') { e.preventDefault(); closeHandoff(); }
-    held.clear();
-    return;
-  }
-  if (k === ' ') { e.preventDefault(); if (game.current && !game.current.ai && game.fire()) { /* fired */ } }
-  else if (k === 'tab') { game.cycleWeapon(e.shiftKey ? -1 : 1); sound.click(); }
-  else if (k >= '1' && k <= '9') selectWeaponSlot(Number(k) - 1);
-  else if (k === 'j') doJump();
-  else if (k === 'f') { rig.peekNext(); syncFind(); }
-  else if (k === 'g') toggleGunner();
-  else if (k === 'c') { const on = rig.toggleFollow(); banner(on ? 'Follow cam on' : 'Follow cam off', '', 700); }
-  else if (k === 'v') rig.toggleOverview();
-  else if (k === 'm') toggleMute();
-  else if (k === '-' || k === '=' || k === '+') setVolume(sound.volume + (k === '-' ? -0.1 : 0.1), true);
-  else if (k === 'n') { sound.ensure(); const t = music.next(); settings.render(); banner(`Music: ${t.name}`, t.mood || '', 900); }
-});
-
-// Master level, from - / =.
-function setVolume(v, announce = false) {
-  sound.ensure();
-  sound.setVolume(Math.round(v * 10) / 10);
-  settings.render();
-  if (announce) banner(`Volume ${Math.round(sound.volume * 100)}%`, '', 700);
-}
-window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
-window.addEventListener('blur', () => held.clear());
-window.addEventListener('pointerdown', () => sound.ensure(), { once: true });
 // On-screen controls on phones and tablets (or ?mobile=1): they press the same keys and feed the same aim.
 const touch = wantTouch() ? new TouchControls({ parent: $('hud'), unlockAudio: () => sound.ensure(), weaponBar: $('weapon-bar'), online: () => !!session }) : null;
 if (touch) {
@@ -775,12 +688,6 @@ const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => so
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
 const bossUi = new BossUI({ game: () => game, touch, banner });
 const modsUi = new ModsUI({ game: () => game, scene, camera, touch, banner, click: () => sound.click(), blocked: () => handoffOpen, seen: (p) => seen(p) });
-
-function toggleMute() {
-  sound.ensure();
-  banner(sound.toggleMute() ? 'Muted' : 'Sound on', '', 700);
-  settings.render();
-}
 
 // Settings (the gear): the three sound levels and the music track, full screen,
 // and the resource packs where they are served (added with the packs, below).
@@ -819,52 +726,15 @@ settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', 
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
 
-function selectWeaponSlot(i) {
-  const p = game.current;
-  if (!p || p.ai || game.phase !== 'aim' || handoffOpen) return;
-  const list = ownedWeapons(game, p);
-  if (list[i]) { p.weapon = list[i].id; sound.click(); }
-}
+// ---------------------------------------------------------------- input
 
-$('weapon-bar').addEventListener('click', (e) => {
-  const b = e.target.closest('.wb-item');
-  if (b && game) selectWeaponSlot(Number(b.dataset.i));
+// Keys, the touch controls, drags, pinches and the wheel on the view, routed by
+// the camera's mode and the game's phase (src/input.js; the table: src/inputmap.js).
+const input = new Input({
+  el: renderer.domElement, rig, gunner, touch, sound, music, settings, hud, banner,
+  game: () => game, handoff: () => handoffOpen, online: () => !!session, hopping: (id) => hops.has(id),
+  openChat, closeHandoff, strike: () => strikeUi.toggle(), deploy: () => modsUi.deployKey(),
 });
-
-const holding = { x: 0, y: 0, p: 0 };   // seconds each aim axis has been held
-function holdRamp(axis, on, dt) {
-  const t = holding[axis] = on ? holding[axis] + dt : 0;
-  return t < 0.12 ? 0.25 : Math.min(1, 0.25 + (t - 0.12) * 3);
-}
-
-function applyHeldKeys(dt) {
-  const live = game && !handoffOpen && game.phase === 'aim' && game.current && !game.current.ai;
-  const pad = touch?.take(dt, live ? game.current : null);   // touch aim pad and power strip
-  if (!live) return;
-  if (pad) game.adjustAim(pad.yaw, pad.elev, pad.power);
-  const ax = (held.has('d') ? 1 : 0) - (held.has('a') ? 1 : 0);
-  const ay = (held.has('w') ? 1 : 0) - (held.has('s') ? 1 : 0);
-  const ap = (held.has('e') || held.has('pageup') ? 1 : 0) - (held.has('q') || held.has('pagedown') ? 1 : 0);
-  // A short tap moves a little (fine); holding ramps up to full speed in about
-  // a third of a second; Shift is three times as fast, for the big turns.
-  const fast = held.has('shift') ? 3 : 1;
-  const kx = holdRamp('x', ax, dt) * fast, ky = holdRamp('y', ay, dt) * fast, kp = holdRamp('p', ap, dt) * fast;
-  if (ax || ay || ap) game.adjustAim(ax * TANK.turretSpeed * dt * kx, ay * TANK.elevationSpeed * dt * ky, ap * TANK.powerSpeed * dt * kp);
-  // The arrow keys drive: up and down along the hull, left and right swing it.
-  const go = (held.has('arrowup') ? 1 : 0) - (held.has('arrowdown') ? 1 : 0);
-  const turn = (held.has('arrowright') ? 1 : 0) - (held.has('arrowleft') ? 1 : 0);
-  if ((go || turn) && !hops.has(game.current.id)) {
-    rig.driveBack(game.current);   // driving with the camera far away (or zoomed right out) brings it back
-    const r = game.drive(go, turn, dt);
-    const why = r === 'edge' && game.isles ? 'Edge of the isle' : DRIVE_NOTES[r];
-    if (why) hud.note(why, 1200);
-  }
-}
-
-const DRIVE_NOTES = {
-  buried: 'Buried: your next shot digs you out',
-  empty: 'Out of fuel', steep: 'Too steep to climb', water: 'Water ahead', edge: 'Edge of the arena', blocked: 'Something is in the way',
-};
 
 function updateTracer() {
   const p = game.current;
@@ -939,13 +809,6 @@ function soundScape(dt) {
     fire: effects.fireLevel(camera.position.x, camera.position.y, camera.position.z), rain: rain.amount, city: game?.town ? 1 : 0, orbit });
 }
 
-// ---------------------------------------------------------------- HUD
-
-let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
-function syncFind() {
-  const finding = rig.finding();
-  if (finding !== findingWas) { document.querySelector('#touch [data-key="f"]')?.classList.toggle('on', finding); findingWas = finding; }
-}
 // ---------------------------------------------------------------- fog of war
 
 const RING = new THREE.RingGeometry(0.92, 1, 56);
@@ -1450,7 +1313,7 @@ function openChat() {
   const el = $('chat-input');
   el.classList.remove('hidden');
   el.focus();
-  held.clear();
+  input.held.clear();
 }
 
 function closeChat() {
@@ -1685,8 +1548,8 @@ function tick(dt, draw = true) {
     rig.updateKill(dt);
     lastDt = dt;
     const sdt = dt * rig.timeScale;   // game time: slowed for the kill cam
-    applyHeldKeys(dt);
-    applySteering();
+    input.aim(dt);
+    input.steer();
     game.update(sdt);
     handleEvents();
     terrainMesh.flushPaths?.(renderer);   // upload just the scuffed part of the path mask
@@ -1713,7 +1576,7 @@ function tick(dt, draw = true) {
     bossMark.update(game, elapsed);
     fortView?.update(elapsed);
     modsUi.update(sdt, elapsed);
-    syncFind();
+    input.syncFind();
     marks.update(game, { mode: rig.labelMode(game.phase), sight: rig.mode === 'sight', overview: rig.modes.overview, handoff: handoffOpen });
     rangeCard.update(game, rangeOwner(game, { handoff: handoffOpen, heroId }));
     // The sun moves a little every turn and a lot over the match.
@@ -1781,7 +1644,7 @@ $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
+window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held: input.held,
   get tanks() { return tanks; }, get camGoal() { return rig.goal; }, rig, get cameraMode() { return rig.mode; },
   lookAt(x, y, z, from) { rig.lookAt(x, y, z, from); },
   release() { rig.release(); },
