@@ -148,6 +148,27 @@ export function buildFort(t, x, z) {
   return top;
 }
 
+// The match-over result of a boss match, a pure function of the players and
+// the last round's result ({ team }, game.lastRoundResult). Wins and funds
+// would let an ally top the table, so it is teams: `winner` is 'allies', 'boss'
+// or 'draw'; `rows` has the allies first, in order of damage dealt to the boss
+// (ties: alive first, then seat), then the boss. Each row is { id, name,
+// color, side, damage, alive, hp }.
+export function bossStandings(players, result = null) {
+  const b = players.find((p) => p.boss);
+  if (!b) return null;
+  const dealt = (p) => b.boss.hurt?.[p.id] || 0;
+  const allies = players.filter((p) => !p.boss && p.team !== BOSS.team)
+    .sort((x, y) => dealt(y) - dealt(x) || Number(y.alive) - Number(x.alive) || x.id - y.id);
+  const row = (p, side) => ({ id: p.id, name: p.name, color: p.color, side, damage: side === 'allies' ? Math.round(dealt(p)) : 0, alive: !!p.alive, hp: Math.max(0, Math.ceil(p.hp)) });
+  let winner;
+  if (result?.team === BOSS.team) winner = 'boss';
+  else if (result?.team === 0) winner = 'allies';
+  else winner = b.alive ? 'boss' : allies.some((p) => p.alive) ? 'allies' : 'draw';
+  const title = winner === 'allies' ? 'Allies win' : winner === 'boss' ? `The ${b.name} wins` : 'Nobody wins';
+  return { winner, title, boss: b, rows: [...allies.map((p) => row(p, 'allies')), row(b, 'boss')] };
+}
+
 // A boss match's config, from the Play screen or the Custom section: `name`
 // (the human), the ally ({ name, ai }), and the match `conditions` (wind and
 // ground: builder.matchConditions). The ground is always a meadow (the fort is

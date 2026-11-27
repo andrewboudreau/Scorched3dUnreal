@@ -9,12 +9,12 @@
 // The mark on the ground is drawn by render/bossMark.js. This reads the game
 // each frame and never changes it.
 
-import { BOSS } from './core/boss.js';
+import { BOSS, bossStandings } from './core/boss.js';
 import { WEAPON_BY_ID } from './core/weapons.js';
 
 const PHASE_TEXT = {
-  2: ['Phase 2', 'The Bulwark takes to its ledges: it hunts whoever hurt it most'],
-  3: ['Phase 3', 'Cornered: two shots a turn, and the Thunderhead'],
+  2: ['Phase 2', 'Orbiter up, hopping ledges'],
+  3: ['Phase 3', 'Cornered: two shots a turn'],
 };
 
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -74,15 +74,23 @@ export class BossUI {
     }
   }
 
-  // The match-over headline in a boss match ("The Bulwark is down!"), or null
-  // in any other match.
-  matchTitle() {
+  // The match-over result of a boss match (core/boss.js bossStandings), or null
+  // in any other match: { title ("Allies win", "The Bulwark wins"), order (the
+  // players, allies by damage dealt to the boss, then the boss), table (the
+  // standings as table rows) }.
+  matchResult() {
     const g = this.game();
-    const b = g?.cfg.boss ? g.bossTank : null;
-    if (!b) return null;
-    if (!b.alive) return `The ${b.name} is down!`;
-    if (g.lastRoundResult?.team === b.team) return `The ${b.name} holds its fort`;
-    return `The ${b.name} survives`;
+    const s = g?.cfg.boss ? bossStandings(g.players, g.lastRoundResult) : null;
+    if (!s) return null;
+    const status = (r) => (r.side === 'boss' ? (r.alive ? `${r.hp} hp left` : 'Destroyed') : r.alive ? 'Standing' : 'Destroyed');
+    const row = (r, tag = '') => `<tr><td><span class="swatch" style="background:${r.color}"></span></td><td>${escape(r.name)}${tag}</td>
+      <td>${r.side === 'boss' ? '–' : r.damage}</td><td>${status(r)}</td></tr>`;
+    const allies = s.rows.filter((r) => r.side === 'allies');
+    const win = (side) => (s.winner === side ? ' <span style="color:#f2c14e">&#9733; wins</span>' : '');
+    const table = `<tr><th></th><th>Allies${win('allies')}</th><th>Dealt to ${escape(s.boss.name)}</th><th></th></tr>`
+      + allies.map((r) => row(r)).join('')
+      + s.rows.filter((r) => r.side === 'boss').map((r) => row(r, win('boss'))).join('');
+    return { title: s.title, winner: s.winner, order: s.rows.map((r) => g.players[r.id]), table };
   }
 
   // Once a frame.
