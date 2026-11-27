@@ -398,15 +398,23 @@ second column beside the first. On a phone the players box sits top right.
   others. Buildings are real: a shell stops at a wall or roof and goes off
   there. Each building is split into chunks: quadrants (two by two, or two by
   one for a thin one) in bands of one to three floors, each with its own hit
-  points. A blast hurts the chunks near it most, so a hit on a corner takes
-  that corner, a roof shell the top, a big hit punches a hole through the
-  facade, and shells (and the CPUs' shots) go through the gap. What's left
-  over a gap hangs on for up to two bands if its neighbours hold it;
-  otherwise it falls off into the street and leaves a little heap of rubble
-  there. Once two ground quadrants (half the base) are gone, or under a third
-  of the building is left, the whole building comes down into a heap of
+  points. A blast hurts the chunks near it most, and the floors between
+  shield the chunks above and below, so a hit on a corner takes that corner,
+  a roof shell the top, and a Breacher into the middle of a tall facade
+  punches a hole through it with the floors above still standing; shells
+  (and the CPUs' shots) go through the gap. What's over a gap stays up while
+  a neighbour beside it holds it: up to six floors held on both sides (a
+  corner over a lost foot), up to four held on one side by a sound neighbour
+  over a hole that still has floors under it. A second hit that wears the
+  neighbours down, or a side whose feet are all gone, drops what hung: it
+  falls off into the street and leaves a little heap of rubble there. A small
+  shop loses a corner to a Shell and comes down at the second or third.
+  Once three of the four ground quadrants are gone, or under two fifths of
+  the building is left, the whole building comes down into a heap of
   rubble, a mound in the ground that shells then pass over. Tanks can't drive
-  or jump through buildings. The CPUs, the aim arc and the Survey
+  or jump through a standing building, but a damaged one is only its standing
+  chunks to them: a tank can drive into a blown-out corner or under the
+  floors hanging over a ground-floor gap, where it fits. The CPUs, the aim arc and the Survey
   Satellite all see them (`core/city.js`, through `groundContact` in
   `ballistics.js`). Cars, buses and trucks keep to their lanes and wait at
   junctions; a blast near one wrecks and burns it and the rest flee or turn
