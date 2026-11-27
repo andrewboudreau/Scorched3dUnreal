@@ -126,7 +126,7 @@ export class Effects {
     this.clumpCount = 0;                // flame clumps alive (each is three sprites)
     this.camera = null;                 // set by warm(); flames lean across the screen with the wind
     this.atlasReady = false;
-    this.atlas = loadAtlas(undefined, () => { this.atlasReady = true; });
+    this.atlas = loadAtlas(undefined, () => { this.atlasReady = true; this.upload(); });
     TRAIL_FX = this;
     this.smokeTex = radialTexture('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
     this.glowTex = radialTexture('rgba(255,240,200,1)', 'rgba(255,120,30,0)');
@@ -212,6 +212,8 @@ export class Effects {
   // `compileAsync` lets the driver build them in parallel where it can.
   async warm(renderer, camera) {
     this.camera = camera;
+    this.renderer = renderer;
+    this.upload();
     const g = new THREE.Group();
     g.visible = false;
     g.add(...sceneryStandIns());
@@ -224,6 +226,17 @@ export class Effects {
     } finally {
       this.scene.remove(g);
     }
+  }
+
+  // Send the sprite sheets to the GPU now: the fire-and-smoke sheet is a large
+  // image with mipmaps, and uploading it on first use stalled the frame the
+  // first explosion of a session appeared in (about 11 ms on a desktop).
+  upload() {
+    const r = this.renderer;
+    if (!r) return;
+    const texs = [this.smokeTex, this.glowTex, this.warpTex, ...this.flameTex];
+    if (this.atlasReady) texs.push(this.atlas.fire[0]);   // the cells share one image
+    for (const t of texs) r.initTexture(t);
   }
 
   sprite(map, color, additive = false) {

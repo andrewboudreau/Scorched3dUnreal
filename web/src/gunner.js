@@ -102,7 +102,7 @@ export class AimArc {
       if (!this.jammed) { this.jammed = true; this.label.textContent = 'Jammed: no arc'; this.label.classList.add('jammed'); this.label.classList.remove('quiet'); }
       const s = !quiet && screen(camera, p.x, p.y + 7, p.z);
       this.label.classList.toggle('hidden', !s);
-      if (s) this.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+      if (s) this.place(s);
       return;
     }
     if (this.jammed) { this.jammed = false; this.label.classList.remove('jammed'); }
@@ -125,7 +125,15 @@ export class AimArc {
     const s = at || (this.top && screen(camera, this.top[0], this.top[1] + 3, this.top[2]));
     this.label.classList.toggle('hidden', !s);
     this.label.classList.toggle('quiet', quiet || !(performance.now() - this.changed < LABEL_HOLD));
-    if (s) this.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+    if (s) this.place(s);
+  }
+
+  // Move the label to a screen point, writing the style only when it moved:
+  // in the plan view it sits still, and a same-value write still costs a
+  // style recalculation each frame.
+  place(s) {
+    const t = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+    if (t !== this.placed) { this.placed = t; this.label.style.transform = t; }
   }
 
   trace(game, p) {
@@ -228,7 +236,7 @@ export class Gunner {
     this.active = true;
   }
 
-  hide() { this.el.classList.add('hidden'); }
+  hide() { if (!this.el.classList.contains('hidden')) this.el.classList.add('hidden'); }   // (a same-value add still writes the attribute)
 
   // The tape and readouts. `enemies` are the tanks this screen may show:
   // [{ name, color, x, y, z }]. `last` is a line about the last shot, or ''.
