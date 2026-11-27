@@ -1057,8 +1057,10 @@ second column beside the first. On a phone the players box sits top right.
   retries a send only on a network error or a 5xx (not 507), with backoff;
   any other refusal, or a message over 128 KB, ends the match for everyone
   with a `stop` message.
-- `src/main.js` holds the scene, input, HUD and menus, and drives the camera rig.
-  It turns `Game` events into visuals and sound.
+- `src/main.js` builds the scene and the modules and runs the frame loop. The
+  match's start, cards and menu are `src/match.js`; `src/events.js` turns
+  `Game` events into visuals and sound; online play is `src/online.js` (see
+  `docs/architecture.md`).
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
