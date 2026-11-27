@@ -307,7 +307,11 @@ second column beside the first. On a phone the players box sits top right.
   away does not hold the room up. Reloading the page puts you back in your
   seat. If a player stops answering for about 45 seconds, a CPU takes over
   their tank. If the host goes, the match ends. Press Enter to chat, in the
-  lobby or in the match.
+  lobby or in the match. If the server refuses a message (one too large, or
+  the room's log full), the match ends on every screen with "Connection
+  problem: ..." rather than hanging; a dropped connection or a busy server is
+  retried. A room made by another version of the game can't be joined: the
+  page says to reload and start a new room.
 - **Last shot.** Under Turret, Elevation and Power the card shows your last
   shot's value and how far you are from it ("last 52.1°" with "+2.3" beneath).
   It is cleared at the start of a round and when the tank ends up more than
@@ -999,11 +1003,20 @@ second column beside the first. On a phone the players box sits top right.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
   `Game` and reads the same ordered message log (plans, shop choices). At
-  each volley, and again before each round, the host sends its full state
-  (`Game.snapshot`) and the others take it, so small floating-point drift
-  never adds up. A reloaded tab reads the log back, jumps to the host's
-  latest state and counts its own earlier plans as made. `src/net.js` is
-  the browser's link to the room (long polling, sends kept in order).
+  each volley, and again before each round, the host sends its state
+  (`Game.snapshot`, as `snap` and `close`) and the others take it, so small
+  floating-point drift never adds up. After each volley the host alone says
+  whether the round goes on (`end`, with its state): the other screens wait in
+  the `verdict` phase for it, so screens that disagree about who survived
+  still go the same way. States travel packed against the host's previous
+  one (new ground ops, changed tank fields, damaged buildings), so they stay
+  a few KB however many craters a round has. A reloaded tab reads the log
+  back, jumps to the host's latest state and counts its own earlier plans as
+  made. `start` carries the protocol version (`PROTOCOL`). `src/net.js` is
+  the browser's link to the room (long polling, sends kept in order). It
+  retries a send only on a network error or a 5xx (not 507), with backoff;
+  any other refusal, or a message over 128 KB, ends the match for everyone
+  with a `stop` message.
 - `src/main.js` holds the scene, camera rig, input, HUD and menus. It turns `Game`
   events into visuals and sound.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
@@ -1020,11 +1033,14 @@ second column beside the first. On a phone the players box sits top right.
 - `test/lockstep.js` is the online determinism harness (`netplay-lockstep.test.js`
   uses it). It plays one online match on several simulated screens from one
   room log, every screen on the same fixed clock, and compares each screen's
-  own state with the host's every time a `snap` or `close` comes in: any
+  own state with the host's every time a `snap`, `end` or `close` comes in: any
   field that differs is a determinism bug, reported by its path
   (`.players.0.shots.0`). Its bots drive, hop, deploy mods, take weapon
   variants and buy; the tests cover the boss match, three-screen rain and
-  mod matches, the City, CPU Flak, a reload mid-match and uneven frame rates.
+  mod matches, the City, CPU Flak, a reload mid-match and uneven frame rates,
+  plus the host's verdict overruling a guest that disagrees about the round's
+  end, refused and retried sends through a fake server, and the size of a
+  1,000-blast City round's packed states.
   To hunt a new feature's drift, run `playMatch` with that feature on over many
   seeds and print `mismatches[0]`.
 - `tools/balance.mjs` runs headless balance sims on the seeded dice, so the
@@ -1060,7 +1076,12 @@ they stay in memory and the host logs a warning. A visit alone stores nothing:
 a record is made when a player sets a name or finishes an online match.
 Rooms have limits so a flood cannot take the host's memory: 128 KB a message,
 8 MB and 20000 entries a room, 64 MB across all rooms, 300 rooms. A room
-plays one match, and goes after half an hour with nobody polling it.
+plays one match, and goes after half an hour with nobody polling it. When a
+room's log is full the server adds a `stop` entry and answers 507, which ends
+the match on every screen; when all rooms together are full it answers 503,
+which clients retry. A ten-round City match of five tanks logs about 1 MB.
+Rooms keep the protocol version they were made with, and a join from another
+version gets 409.
 `tools/devserver.mjs` is a copy of the same API for local testing; keep the two in step.
 
 ```powershell

@@ -17,14 +17,21 @@ namespace Craterfall;
 /// after a few idle hours.
 ///
 /// Limits, so one room or a flood of them cannot take the host's memory: a
-/// message is at most 128 KB, a room's log at most 20000 entries and 8 MB,
-/// all rooms together at most 64 MB (a send past these gets 507), and 300
-/// rooms (when full, rooms not started whose seats all stopped polling make
-/// way; else 503). A room plays one match: a second `start` gets 409.
+/// message is at most 128 KB (a larger send gets 400), a room's log at most
+/// 20000 entries and 8 MB (a send past these gets 507, and the server adds one
+/// { t: "stop", why } so every screen ends the match at once instead of
+/// waiting on a message that will never come), all rooms together at most
+/// 64 MB (503: busy, worth sending again later), and 300 rooms (when full,
+/// rooms not started whose seats all stopped polling make way; else 503). A
+/// room plays one match: a second `start` gets 409. Refusals carry { error }.
+///
+/// Each room keeps to one version of the messages (`v` on create and join,
+/// 1 when missing, as old clients send none; see PROTOCOL in netplay.js):
+/// joining a room of another version gets 409 and a message to reload.
 ///
 ///   GET  /Craterfall/api/rooms?id=&name=                          -> { rooms: [...], menu: { count, names } }
-///   POST /Craterfall/api/rooms                 { name, private, tab } -> { code, seat, token }
-///   POST /Craterfall/api/rooms/{code}/join     { name, tab }     -> { seat, token, rejoin? }
+///   POST /Craterfall/api/rooms                 { name, private, tab, v } -> { code, seat, token }
+///   POST /Craterfall/api/rooms/{code}/join     { name, tab, v }  -> { seat, token, rejoin? }
 ///   POST /Craterfall/api/rooms/{code}/send     { token, msg }    -> { n }
 ///   GET  /Craterfall/api/rooms/{code}/events?token=&after=N      -> { entries: [{ n, seat, msg }] }
 ///   POST /Craterfall/api/rooms/{code}/leave    { token }         -> {}
@@ -49,8 +56,9 @@ namespace Craterfall;
 /// there: who is in it, and whether it can still be joined. Whoever asks with
 /// an `id` counts as on the menu for a little while, under `name`.
 ///
-/// The server adds { t: "join", seat, name } when someone joins and
-/// { t: "gone", seat } when a seat stops polling (entries with seat -1).
+/// The server adds { t: "join", seat, name } when someone joins,
+/// { t: "gone", seat } when a seat stops polling and { t: "stop", why } when
+/// the log is full (entries with seat -1).
 /// Keep tools/devserver.mjs in step with this file.
 /// </summary>
 public static class Rooms
@@ -96,6 +104,8 @@ public static class Rooms
         public Dictionary<int, string>? MatchIds;   // seat -> player id, as the match started
         public bool Reported;
         public bool Closed;      // removed from All; refuses sends
+        public bool Full;        // the log is full; the stop entry is in it
+        public int Version = 1;  // of the messages (see VersionOf)
         public long Bytes;       // message bytes in Log
         public readonly DateTime Created = DateTime.UtcNow;
         public DateTime Active = DateTime.UtcNow;
@@ -143,7 +153,7 @@ public static class Rooms
             for (var tries = 0; tries < 50; tries++)
             {
                 var code = string.Concat(Enumerable.Range(0, 4).Select(_ => Letters[RandomNumberGenerator.GetInt32(Letters.Length)]));
-                var room = new Room { Code = code, Private = body.Value.TryGetProperty("private", out var pv) && pv.ValueKind == JsonValueKind.True };
+                var room = new Room { Code = code, Private = body.Value.TryGetProperty("private", out var pv) && pv.ValueKind == JsonValueKind.True, Version = VersionOf(body.Value) };
                 if (!All.TryAdd(code, room)) continue;
                 lock (room) return Results.Json(Join(room, NameOf(body.Value, pid), pid, TabOf(body.Value)));
             }
@@ -205,6 +215,7 @@ public static class Rooms
             object result;
             lock (room)
             {
+                if (VersionOf(body.Value) != room.Version) return Results.Conflict(new { error = OtherVersion });
                 // This id and tab's seat is still here: hand it back, with a fresh token.
                 var mine = pid is null || tab is null ? -1 : room.Seats.FindIndex(s => s.Pid == pid && s.Tab == tab && !s.Gone);
                 if (mine >= 0)
@@ -230,7 +241,8 @@ public static class Rooms
         api.MapPost("{code}/send", async (string code, HttpRequest req) =>
         {
             var read = await Body.ReadObject(req, MaxBody);
-            if (read is not { } got || !got.Value.TryGetProperty("msg", out var msg) || msg.ValueKind != JsonValueKind.Object) return Results.BadRequest();
+            if (read is not { } got || !got.Value.TryGetProperty("msg", out var msg) || msg.ValueKind != JsonValueKind.Object)
+                return Results.BadRequest(new { error = "The message was too large (over 128 KB) or not a JSON object." });
             var body = got.Value;
             if (!All.TryGetValue(code.ToUpperInvariant(), out var room)) return Results.NotFound();
             var token = body.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
@@ -240,17 +252,25 @@ public static class Rooms
                 var seat = room.SeatOf(token);
                 if (seat < 0) return Results.StatusCode(403);
                 var kind = msg.TryGetProperty("t", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null;
-                if (kind is "join" or "gone") return Results.BadRequest();
+                if (kind is "join" or "gone") return Results.BadRequest(new { error = "Only the server sends that." });
                 if (kind == "start" && seat != 0) return Results.StatusCode(403);
-                if (kind == "start" && room.Started) return Results.Conflict();
+                if (kind == "start" && room.Started) return Results.Conflict(new { error = "The match has already started." });
 
                 // Room for it: in this room's log, then in all rooms' together.
                 var size = got.Length;
-                if (room.Log.Count >= MaxEntries || room.Bytes + size > MaxRoomBytes) return Results.StatusCode(507);
+                if (room.Log.Count >= MaxEntries || room.Bytes + size > MaxRoomBytes)
+                {
+                    if (!room.Full)
+                    {
+                        room.Full = true;
+                        room.AppendServer(new { t = "stop", why = "the room's log is full." });
+                    }
+                    return Results.Json(new { error = "The room's log is full." }, statusCode: 507);
+                }
                 if (Interlocked.Add(ref AllBytes, size) > MaxAllBytes)
                 {
                     Interlocked.Add(ref AllBytes, -size);
-                    return Results.StatusCode(507);
+                    return Results.Json(new { error = "The server is busy." }, statusCode: 503);
                 }
                 room.Bytes += size;
 
@@ -313,6 +333,12 @@ public static class Rooms
             }
         });
     }
+
+    private const string OtherVersion = "That room is on another version of Craterfall. Reload the page (everyone in the room) and try again.";
+
+    // The version of the messages a client speaks: `v`, else 1 (old clients).
+    private static int VersionOf(JsonElement body) =>
+        body.TryGetProperty("v", out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : 1;
 
     private static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
 

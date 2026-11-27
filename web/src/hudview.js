@@ -25,14 +25,15 @@ const CODES = { S: SHOWN, F: FAINT, H: HIDDEN, M: MOVED };
 //   kill      the deciding shot's slow-motion replay
 //   overview  the View button's map
 //   sight     the gunner's sight, while you plan
-//   flight    shells are in the air (or being fired, or waiting on the others)
+//   flight    shells are in the air (or being fired, or waiting on the others
+//             or on the host's verdict)
 //   plan      setting up a shot (also the CPUs' turns, and a hand-off screen)
 export function hudView({ phase = '', sight = false, overview = false, killCam = false } = {}) {
   if (phase === 'roundOver' || phase === 'matchOver' || phase === 'shop') return 'between';
   if (killCam) return 'kill';
   if (overview) return 'overview';
   if (sight && phase === 'aim') return 'sight';
-  if (phase === 'volley' || phase === 'flight' || phase === 'settle' || phase === 'wait') return 'flight';
+  if (phase === 'volley' || phase === 'flight' || phase === 'settle' || phase === 'wait' || phase === 'verdict') return 'flight';
   return 'plan';
 }
 

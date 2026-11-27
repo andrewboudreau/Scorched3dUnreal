@@ -149,10 +149,14 @@ function cleanup(full = false) {
   }
 }
 
-function makeRoom(priv) {
+// The version of the messages a client speaks (`v`), else 1 (old clients send none).
+const versionOf = (b) => (Number.isInteger(b?.v) ? b.v : 1);
+const OTHER_VERSION = 'That room is on another version of Craterfall. Reload the page (everyone in the room) and try again.';
+
+function makeRoom(priv, version = 1) {
   let code;
   do code = Array.from({ length: 4 }, () => LETTERS[randomInt(LETTERS.length)]).join(''); while (rooms.has(code));
-  const room = { code, seats: [], log: [], started: false, waiters: [], private: priv, created: Date.now(), active: Date.now(), bytes: 0 };
+  const room = { code, seats: [], log: [], started: false, waiters: [], private: priv, version, full: false, created: Date.now(), active: Date.now(), bytes: 0 };
   rooms.set(code, room);
   return room;
 }
@@ -247,7 +251,7 @@ async function api(req, res, url) {
     if (rooms.size >= MAX_ROOMS) cleanup(true);
     if (rooms.size >= MAX_ROOMS) return json(res, 503, {});
     if (pid) known(pid);
-    return json(res, 200, join(makeRoom(b.private === true), nameOf(b, pid), pid, tabOf(b)));
+    return json(res, 200, join(makeRoom(b.private === true, versionOf(b)), nameOf(b, pid), pid, tabOf(b)));
   }
   const room = rooms.get(code);
   if (!room) return json(res, 404, { error: 'No room with that code.' });
@@ -255,6 +259,7 @@ async function api(req, res, url) {
   if (req.method === 'POST' && action === 'join') {
     const b = await readBody(req);
     if (!b) return json(res, 400, {});
+    if (versionOf(b) !== room.version) return json(res, 409, { error: OTHER_VERSION });
     if (pid) known(pid);
     // This id and tab's seat is still here: hand it back, with a fresh token.
     const tab = tabOf(b);
@@ -296,14 +301,19 @@ async function api(req, res, url) {
   if (req.method === 'POST' && action === 'send') {
     const raw = await readRaw(req);
     const b = raw?.value;
-    if (!b || !b.msg || typeof b.msg !== 'object' || Array.isArray(b.msg)) return json(res, 400, {});
+    if (!b || !b.msg || typeof b.msg !== 'object' || Array.isArray(b.msg)) return json(res, 400, { error: 'The message was too large (over 128 KB) or not a JSON object.' });
     if (!rooms.has(room.code)) return json(res, 404, {});
     const seat = seatOf(b.token);
     if (seat < 0) return json(res, 403, {});
-    if (b.msg.t === 'join' || b.msg.t === 'gone') return json(res, 400, {});
+    if (b.msg.t === 'join' || b.msg.t === 'gone') return json(res, 400, { error: 'Only the server sends that.' });
     if (b.msg.t === 'start' && seat !== 0) return json(res, 403, {});
-    if (b.msg.t === 'start' && room.started) return json(res, 409, {});   // one match per room
-    if (room.log.length >= MAX_ENTRIES || room.bytes + raw.size > MAX_ROOM_BYTES || allBytes + raw.size > MAX_ALL_BYTES) return json(res, 507, {});
+    if (b.msg.t === 'start' && room.started) return json(res, 409, { error: 'The match has already started.' });   // one match per room
+    if (room.log.length >= MAX_ENTRIES || room.bytes + raw.size > MAX_ROOM_BYTES) {
+      // Full for good: every screen is told at once (a stop), instead of waiting on a message that will never come.
+      if (!room.full) { room.full = true; append(room, -1, { t: 'stop', why: "the room's log is full." }); }
+      return json(res, 507, { error: "The room's log is full." });
+    }
+    if (allBytes + raw.size > MAX_ALL_BYTES) return json(res, 503, { error: 'The server is busy.' });   // worth sending again later
     room.bytes += raw.size;
     allBytes += raw.size;
     if (b.msg.t === 'start') {
