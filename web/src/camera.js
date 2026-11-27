@@ -23,7 +23,8 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 //   hold      where it is
 //
 // Everywhere but the sight the orbit controls stay live: a drag or wheel zoom
-// takes the camera over (userCam) until the next turn. The camera never sinks
+// takes the camera over (userCam, takeOver()) until the next turn. The view's
+// pointer and wheel handling (the sight's drag and pinch included) is input.js. The camera never sinks
 // into the ground (camlimit.js), and blasts shake it.
 //
 // main.js gives it what it needs from the match through `deps` (functions, read
@@ -51,11 +52,12 @@ import { CameraModes, decidingShot, easeTimeScale, killSide, labelMode } from '.
 //    inset.js. Their words and rules are hudlogic.js (pure, tested); DOM writes
 //    go through domwrite.js. main.js hands them rig.labelMode / rig.mode /
 //    rig.modes each frame and calls them from the Game events.
-// 2. Input router (input.js): keys, the touch controls' synthetic keys, pointer
-//    steering and the held-key aim ramp, routed by mode: in 'sight' a drag aims,
-//    in 'kill' nothing but the camera keys, on a hand-off card only Space/Enter.
-//    A pure keymap (key + mode + phase -> action) is testable without the DOM.
-//    The camera's own canvas listeners (here) would move there too.
+// 2. Done: input router. input.js (Input: keys, the touch controls' synthetic
+//    keys, the steering fingers, the held-key aim ramp, the sight's drag, pinch
+//    and wheel, the drag that takes the camera over, X and B) routes each input
+//    through inputmap.js (pure, tested: key + state -> action, and which pointer
+//    route is live in which mode). It is a pure move: every binding does what it
+//    did before, in the same states (no key is shut off by mode yet).
 // 3. Match glue (match.js): startMatch / disposeMatch / toMenuScene and the
 //    Game event switch (handleEvents), which today call into the camera, the
 //    HUD, sound and effects. Split the switch into per-concern handlers
@@ -99,48 +101,16 @@ export class CameraRig {
     this._box = new THREE.Box3();
     this._killGoal = new THREE.Vector3();
     this._menuGoal = new THREE.Vector3();
-    this.listen(renderer.domElement);
   }
 
   // ---------------------------------------------------------------- input on the view
 
-  listen(el) {
-    const { camera, deps } = this;
-    const gunner = deps.gunner;
-    // In the sight, a drag aims: across turns the turret by as much as the view
-    // moves under the finger, up and down raises the barrel. Wheel or pinch zooms.
-    const aimDrag = new Map();     // pointer id -> last [x, y]
-    el.addEventListener('pointerdown', (e) => { if (gunner.active) aimDrag.set(e.pointerId, [e.clientX, e.clientY]); });
-    el.addEventListener('pointermove', (e) => {
-      const was = aimDrag.get(e.pointerId);
-      if (!was || !gunner.active) return;
-      const now = [e.clientX, e.clientY];
-      if (aimDrag.size >= 2) {
-        // Pinch: the change in spread between the first two fingers.
-        const [[ia, qa], [ib, qb]] = [...aimDrag.entries()];
-        const a = ia === e.pointerId ? now : qa;
-        const b = ib === e.pointerId ? now : qb;
-        const before = Math.hypot(qa[0] - qb[0], qa[1] - qb[1]);
-        const after = Math.hypot(a[0] - b[0], a[1] - b[1]);
-        if (before > 0 && after > 0) gunner.zoom(Math.log(before / after) / 0.12);
-      } else {
-        const perPx = camera.fov / window.innerHeight;     // degrees of view per pixel
-        deps.game().adjustAim((now[0] - was[0]) * perPx, -(now[1] - was[1]) * perPx * 0.5, 0);
-      }
-      aimDrag.set(e.pointerId, now);
-    });
-    for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => aimDrag.delete(e.pointerId));
-    el.addEventListener('wheel', (e) => { if (gunner.active) gunner.zoom(Math.sign(e.deltaY)); }, { passive: true });
-
-    // Only a real drag or a wheel zoom takes the camera over; a plain click (e.g. to
-    // focus the page) must not strand it halfway through a fly-in.
-    let dragFrom = null;
-    el.addEventListener('pointerdown', (e) => { dragFrom = [e.clientX, e.clientY]; });
-    el.addEventListener('pointermove', (e) => {
-      if (dragFrom && Math.hypot(e.clientX - dragFrom[0], e.clientY - dragFrom[1]) > 4) { this.goal = null; dragFrom = null; this.userCam = true; }
-    });
-    for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, () => { dragFrom = null; });
-    el.addEventListener('wheel', () => { this.goal = null; this.userCam = true; }, { passive: true });
+  // A real drag or a wheel zoom on the view (input.js) takes the camera over
+  // until the next turn (in the sight too, where the drag also aims and the
+  // wheel zooms the sight; the orbit controls are off there).
+  takeOver() {
+    this.goal = null;
+    this.userCam = true;
   }
 
   // ---------------------------------------------------------------- transitions

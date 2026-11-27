@@ -22,7 +22,6 @@ import { Vector3 } from 'three';
 import { MODS, MOD_BY_ID, DECOY, JAM, modUp } from './core/mods.js';
 import { ModsView } from './render/mods.js';
 
-const KEY = 'b';
 const ARM_MS = 3000;
 
 export class ModsUI {
@@ -71,13 +70,14 @@ export class ModsUI {
       card.insertBefore(this.bar, weapon.nextSibling);
     }
     card.appendChild(this.chips);
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat || e.key.toLowerCase() !== KEY || e.ctrlKey || e.metaKey) return;
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || this.blocked()) return;
-      const g = this.game();
-      const ready = g?.canDeploy() ? MODS.filter((d) => g.current.mods?.[d.id]?.state === 'ready') : [];
-      if (ready.length) this.press(g.blink ? 'decoy' : this.armed?.id || ready[0].id);
-    });
+  }
+
+  // B on a keyboard (routed here by input.js / inputmap.js): the armed mod, or
+  // the first one ready (the decoy while it is armed).
+  deployKey() {
+    const g = this.game();
+    const ready = g?.canDeploy() ? MODS.filter((d) => g.current.mods?.[d.id]?.state === 'ready') : [];
+    if (ready.length) this.press(g.blink ? 'decoy' : this.armed?.id || ready[0].id);
   }
 
   // First press arms, the second deploys.
