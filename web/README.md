@@ -775,19 +775,34 @@ second column beside the first. On a phone the players box sits top right.
   edges, time of day, modifier, foes and reward, then **Go**. Stops:
   - **Fight:** one or two CPUs, one round (two from the third tier on).
     Easy CPUs in the first tier, then Normal, then Hard; from the third tier
-    they hold a rank or two. Reward: $80 rising by $40 a tier, and half the
+    they hold a rank or two. Reward: $60 rising by $30 a tier, and half the
     time a weapon or two.
   - **Elite:** one Hard CPU with Point Defense or a Gravity Orbiter already up
-    (level 2 in the last two tiers). Reward: $200 + $60 a tier, ammo and a
+    (level 2 in the last two tiers). Reward: $150 + $50 a tier, ammo and a
     skill point.
-  - **Cache:** take one of three: a skill point, a crate of ammo, or money.
+  - **Cache:** take one of three: a skill point, a crate of ammo, or money
+    ($150 + $40 a tier).
   - **Depot:** the armory (the round-2 prices), and you may turn one weapon's
     variant the other way (its upgrade stays), once a depot.
   - **Boss:** the boss match, you and an ally against the Bulwark. The ally is
     one of the tanks you beat: pick from two (the strongest, and the latest
-    other) if you beat two or more; it keeps its ranks.
+    other) if you beat two or more; it keeps its ranks. Its card shows the
+    Bulwark's health, its phases and its weak spot, and each ally's ranks.
+    Beating it ends the run (no reward or point: nothing is left to spend
+    them on).
 
-  Every fight won gives a skill point; spend points from the map (**Skills**,
+  **Money is a choice.** A run's fight pays a fifth of a usual match's money
+  (the stipend, survival, the round win, damage and kills, all ×0.2: Game's
+  `pay`), on top of the stop's reward, and the result card shows both. A
+  two-round fight's CPUs start with $250 for the shop between its rounds,
+  the round-one pay the cut takes from them. A run reaches a Depot with
+  about $550 to $800, against about $1,870 for one of everything in the
+  armory. `node tools/runsim.mjs` plays whole runs headlessly with a CPU in
+  your seat and prints the money at each stop (`--old` for the rules before
+  this, `--hoard` to skip shopping between rounds).
+
+  The map's header shows how far along you are ("Stop 3 of 7 · Badlands",
+  "3/7" in portrait). Every fight won gives a skill point; spend points from the map (**Skills**,
   the same tree as between rounds; the ranks last the whole run). Your money,
   ammo, jets, ranks (variants and mod levels too) and unspent points carry
   from fight to fight; health is whole again for each one. The run starts with
@@ -797,7 +812,9 @@ second column beside the first. On a phone the players box sits top right.
   brought to it. The run is saved in the browser after every step
   (`localStorage`, `craterfall.run.v1`): **Continue run** picks it up, and
   **Abandon** (tap twice) throws it away. A match left by closing the page is
-  played again from the start. At the end, a summary: the route, the fights
+  played again from the start, and says so: the save marks a fight as
+  started (`fighting`), so **Continue run** reads "its fight starts over" and
+  the stop's card offers **Start the fight over**. At the end, a summary: the route, the fights
   won and lost, and the build.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice

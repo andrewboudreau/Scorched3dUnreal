@@ -314,7 +314,7 @@ export class RunUI {
         this.save();
         this.view = 'map'; this.sel = null; this.render();
         break;
-      case 'next': this.view = this.state.over ? 'summary' : 'map'; this.sel = null; this.render(); break;
+      case 'next': this.view = this.state.over ? 'summary' : 'map'; this.sel = this.state.done ? null : this.state.at; this.render(); break;   // a lost boss fight: its card, ready to try again
       case 'end':
         clearRun(localStorage);
         this.state = null;

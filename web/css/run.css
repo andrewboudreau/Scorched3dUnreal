@@ -197,6 +197,9 @@
   .run-prog .long { display: none; }
   .run-prog .short { display: inline; }
   .run-head { gap: 5px; flex-wrap: nowrap; }
+  .run-hbtn { white-space: nowrap; }
+  /* On the map the Skills button's badge counts the points: room for "3/7". */
+  #run[data-view="map"] .run-pts { display: none; }
   .run-stat { font-size: 13px; padding: 2px 6px; }
   .run-hull { width: 20px; height: 12px; }
   .run-hbtn { padding: 5px 9px; }
