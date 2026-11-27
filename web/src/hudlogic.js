@@ -194,3 +194,21 @@ export function rangeEstimate(est, { moved = false, elevOff = false, windOff = f
   if (est.power > maxPower || est.power < minPower) return `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
   return `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
 }
+
+// ---------------------------------------------------------------- the inset
+
+// Whose tank the corner view shows while shells fly: this screen's one human
+// (a shared screen has no single "your tank"), while the camera may leave it
+// (`allowed`: cameramode.js insetAllowed) and is away from it (`inView(p)`
+// false). `was`, the id shown last frame, keeps it on a tank knocked out
+// mid-volley.
+export function insetTank(game, { allowed = true, was = null, inView = () => false } = {}) {
+  if (!game || !allowed) return null;
+  if (game.phase !== 'flight' && game.phase !== 'settle') return null;
+  const hs = game.localHumans;
+  if (hs.length !== 1) return null;
+  const p = hs[0];
+  if (!p.alive && was !== p.id) return null;
+  if (inView(p)) return null;
+  return p;
+}

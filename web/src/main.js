@@ -8,7 +8,6 @@ import { TANK, JET, muzzleOrigin } from './core/tank.js';
 import { ROLL, SIM_DT, makeProjectile, stepProjectile, launchVelocity } from './core/ballistics.js';
 import { perkSum } from './core/perks.js';
 import { rollPart } from './core/weapons.js';
-import { rangeAxes, toRange, solveAim } from './core/rangefinder.js';
 import { TerrainMesh, groundShade } from './render/terrainMesh.js';
 import { SceneryMesh } from './render/sceneryMesh.js';
 import { CityView } from './render/cityMesh.js';
@@ -53,11 +52,11 @@ import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
 import { Hud } from './hud.js';
 import { Labels } from './labels.js';
-import { setText } from './domwrite.js';
-import { escapeHtml, whose, ownedWeapons, probeColor } from './hudlogic.js';
+import { RangeCard } from './rangecard.js';
+import { Inset } from './inset.js';
+import { escapeHtml, whose, ownedWeapons, rangeOwner } from './hudlogic.js';
 
 const $ = (id) => document.getElementById(id);
-const DEG = Math.PI / 180;
 
 // ---------------------------------------------------------------- renderer
 
@@ -472,7 +471,7 @@ function handleEvents() {
       case 'damage': {
         if (seen(game.players[e.player])) marks.popDamage(game.players[e.player], e.amount);
         { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); if (seen(v)) effects.ignite(`tank${e.player}`, 4 + Math.min(5, e.amount * 0.06)); }
-        if (insetFor === e.player) flashInset(e.amount);
+        if (inset.for === e.player) inset.flash(e.amount);
         // Name the victim on the shooter's pip.
         marks.pipHit(game, e.by, e.player, heroId);
         break;
@@ -618,158 +617,6 @@ function closeHandoff() {
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 $('gunner-btn').onclick = (e) => { e.currentTarget.blur(); sound.click(); toggleGunner(); };   // blur: Space must fire, not press it again
 
-// ---------------------------------------------------------------- rangefinder card
-
-// A top-down plot of your last rangefinder shot, turned so downrange is up:
-// the five landings, the enemy nearest them with the blast circle of your
-// weapon around it, how far off the aimed probe was, and the turret and
-// power the probes say would land on it.
-
-// Whose card to show: the planner's while planning, your own while shells fly.
-function rangeOwner() {
-  if (!game || handoffOpen) return null;
-  if (game.phase === 'aim') return game.current && !game.current.ai ? game.current : null;
-  if (heroId != null) return game.players[heroId];
-  return game.localHumans.length === 1 ? game.localHumans[0] : null;
-}
-
-let rcSpot = null;              // where a click on the card looks
-$('range-card').addEventListener('click', () => rcSpot && rig.peekSpot(rcSpot));
-
-const signed = (v, digits = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(digits)}`;
-
-// The card only changes when something it shows does, so it remembers what it last
-// drew (rcKey) and skips the canvas and the text until that differs.
-let rcKey = '';
-let rcDims = null;              // the plot canvas's CSS size; null until read, and after a resize
-window.addEventListener('resize', () => { rcDims = null; });
-
-function updateRangeCard() {
-  const me = rangeOwner();
-  const r = me && ranges.get(me.id);
-  const a = r?.probes.aim;
-  const card = $('range-card');
-  card.classList.toggle('hidden', !a);
-  if (!a) { rcSpot = null; rcKey = ''; rcDims = null; return; }
-  rcSpot = a.pos;
-
-  const cv = $('rc-plot');
-  const dpr = window.devicePixelRatio || 1;
-  if (!rcDims || !rcDims[0]) rcDims = [cv.clientWidth, cv.clientHeight];   // a layout read, so only when needed
-  const [W, H] = rcDims;
-  const foe = game.players.filter((p) => p.alive && p !== me).map(believed).filter(Boolean)
-    .sort((p, q) => Math.hypot(p.x - a.pos[0], p.z - a.pos[2]) - Math.hypot(q.x - a.pos[0], q.z - a.pos[2]))[0];
-  // The three reasons the estimate is "rough" are thresholds, so the key holds the verdicts, not the raw numbers.
-  const moved = Math.hypot(me.x - r.at[0], me.z - r.at[1]) > 4;
-  const elevOff = Math.abs(me.elev - r.elev) > 0.05;
-  const windOff = Math.hypot(game.wind[0] - r.wind[0], game.wind[1] - r.wind[1]) > 0.6;
-  let key = `${me.id}|${me.weapon}|${W}x${H}@${dpr}|${r.at[0]},${r.at[1]}|${r.elev}|${moved}${elevOff}${windOff}|${foe ? `${foe.x},${foe.y},${foe.z}` : '-'}`;
-  for (const k in r.probes) { const pb = r.probes[k]; key += `|${k}:${pb.pos[0]},${pb.pos[1]},${pb.pos[2]},${pb.yaw},${pb.power}`; }
-  if (key === rcKey) return;
-  rcKey = key;
-
-  const ax = rangeAxes(a.yaw);
-  const pts = Object.entries(r.probes).map(([key, pb]) => ({ key, pb, ...toRange(ax, a.pos, pb.pos) }));
-  const t = foe ? toRange(ax, a.pos, [foe.x, foe.y, foe.z]) : null;
-  const w = game.weaponOf(me, me.weapon);
-  const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
-
-  // ---- plot
-  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-  const g2 = cv.getContext('2d');
-  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g2.clearRect(0, 0, W, H);
-  // Fit the probes; take in the enemy too unless it is far off, then pin it to the edge.
-  const spread = Math.max(...pts.map((q) => Math.hypot(q.side, q.along)), 0);
-  const base = Math.max(20, spread * 1.35);
-  const tDist = t ? Math.hypot(t.side, t.along) : 0;
-  const ext = Math.min(base * 3, Math.max(base, tDist * 1.2 + blast * 0.5));
-  const k = (Math.min(W, H) / 2 - 12) / ext;
-  const cx = W / 2, cy = H / 2;
-  const X = (side) => cx + side * k, Y = (along) => cy - along * k;
-
-  // Range rings round the aimed landing, a sensible step apart.
-  const step = [5, 10, 25, 50, 100, 200, 500].find((s) => ext / s <= 3.2) || 1000;
-  g2.strokeStyle = 'rgba(255,255,255,0.10)';
-  g2.lineWidth = 1;
-  g2.beginPath(); g2.moveTo(0, cy); g2.lineTo(W, cy); g2.moveTo(cx, 0); g2.lineTo(cx, H); g2.stroke();
-  for (let d = step; d <= ext * 1.5; d += step) { g2.beginPath(); g2.arc(cx, cy, d * k, 0, Math.PI * 2); g2.stroke(); }
-  g2.font = '10px system-ui, sans-serif';
-  g2.fillStyle = 'rgba(255,255,255,0.4)';
-  g2.textAlign = 'left';
-  g2.fillText(`${step} m`, cx + step * k * 0.71 + 2, cy - step * k * 0.71 - 2);
-  g2.fillText('▲ downrange', 2, 11);
-  g2.textAlign = 'center';
-  g2.fillText('you', cx, H - 3);
-
-  // The enemy, its blast circle, and a line from the aimed landing to it.
-  if (t) {
-    const edge = tDist * k > Math.min(W, H) / 2 - 12;
-    const s = edge ? (Math.min(W, H) / 2 - 12) / (tDist * k) : 1;
-    const ex = X(t.side * s), ey = Y(t.along * s);
-    g2.setLineDash([3, 3]);
-    g2.strokeStyle = 'rgba(255,255,255,0.35)';
-    g2.beginPath(); g2.moveTo(cx, cy); g2.lineTo(ex, ey); g2.stroke();
-    g2.setLineDash([]);
-    if (!edge) {
-      g2.fillStyle = 'rgba(255,90,70,0.12)';
-      g2.strokeStyle = 'rgba(255,110,90,0.55)';
-      g2.beginPath(); g2.arc(ex, ey, blast * k, 0, Math.PI * 2); g2.fill(); g2.stroke();
-    }
-    g2.fillStyle = foe.color;
-    g2.strokeStyle = '#000';
-    if (edge) {
-      // A triangle on the rim, pointing out toward it.
-      const ang = Math.atan2(ey - cy, ex - cx);
-      g2.beginPath();
-      g2.moveTo(ex + Math.cos(ang) * 7, ey + Math.sin(ang) * 7);
-      g2.lineTo(ex + Math.cos(ang + 2.4) * 6, ey + Math.sin(ang + 2.4) * 6);
-      g2.lineTo(ex + Math.cos(ang - 2.4) * 6, ey + Math.sin(ang - 2.4) * 6);
-      g2.closePath(); g2.fill(); g2.stroke();
-    } else { g2.fillRect(ex - 5, ey - 4, 10, 8); g2.strokeRect(ex - 5, ey - 4, 10, 8); }
-    g2.font = 'bold 11px system-ui, sans-serif';
-    g2.textAlign = ex > W - 50 ? 'right' : ex < 50 ? 'left' : 'center';
-    g2.fillText(edge ? `${foe.name} ${Math.round(tDist)} m` : foe.name, ex, ey > 24 ? ey - 9 : ey + 18);
-  }
-
-  // The probes, labelled with how each differs from the aim.
-  g2.font = '10px system-ui, sans-serif';
-  for (const q of pts) {
-    const x = X(q.side), y = Y(q.along);
-    g2.fillStyle = probeColor(q.key);
-    g2.beginPath(); g2.arc(x, y, q.key === 'aim' ? 4.5 : 3.5, 0, Math.PI * 2); g2.fill();
-    // Aim above its dot, the turret pair outward to either side, power to the right.
-    if (q.key === 'aim') { g2.textAlign = 'center'; g2.fillText('aim', x, y - 8); }
-    else if (q.key.startsWith('turn')) {
-      g2.textAlign = q.side < 0 ? 'right' : 'left';
-      g2.fillText(`${signed(((q.pb.yaw - a.yaw + 540) % 360) - 180, 0)}°`, x + (q.side < 0 ? -7 : 7), y + 4);
-    } else { g2.textAlign = 'left'; g2.fillText(signed(q.pb.power - a.power, 0), x + 7, y + 4); }
-  }
-
-  // ---- words
-  if (!t) { setText($('rc-read'), 'No enemy left to range on.'); $('rc-est').textContent = ''; $('rc-est')._html = null; return; }
-  const off = Math.hypot(t.side, t.along);
-  setText($('rc-read'), off <= blast * 0.8 ? `As aimed: on ${foe.name}`
-    : `As aimed: ${Math.round(Math.abs(t.along))} m ${t.along > 0 ? 'short' : 'long'}, ${Math.round(Math.abs(t.side))} m ${t.side > 0 ? 'left' : 'right'} of ${foe.name}`);
-  const est = solveAim(r.probes, [foe.x, foe.y, foe.z]);
-  const notes = [];
-  if (moved) notes.push('you have moved');
-  if (elevOff) notes.push(`probed at ${r.elev.toFixed(1)}° elevation`);
-  if (windOff) notes.push('the wind has shifted');
-  const note = notes.length ? `<small>Rough: ${notes.join(', ')}.</small>` : '';
-  let html;
-  if (!est || Math.abs(est.dYaw) > 25 || Math.abs(est.dPower) > 35) {
-    html = `Too far off to estimate: aim again and probe.${note}`;
-  } else if (est.power > TANK.maxPower || est.power < TANK.minPower) {
-    html = `Needs power ${est.power.toFixed(0)}: change the elevation.${note}`;
-  } else {
-    html = `Try turret ${est.yaw.toFixed(1)}° (${signed(est.dYaw)}), power ${est.power.toFixed(1)} (${signed(est.dPower)})${note}`;
-  }
-  const estEl = $('rc-est');
-  if (estEl._html !== html) { estEl._html = html; estEl.innerHTML = html; }
-}
-
-
 // ---------------------------------------------------------------- steering
 
 // A / D (or the side arrows) turn every human's guided missile while it flies;
@@ -800,64 +647,6 @@ window.addEventListener('pointerdown', (e) => {
 for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => steerTouch.delete(e.pointerId), { capture: true });
 
 let lastDt = 0;                 // the last frame's dt (the aim aids ease by it)
-
-// ---------------------------------------------------------------- inset
-
-// While shells fly and the camera is away from your tank, a small view in
-// the corner keeps it in sight, so you can see what is coming at you.
-// Only with one human: on a shared screen there is no single "your tank".
-const insetCam = new THREE.PerspectiveCamera(46, 1.6, 0.5, 4000);
-let insetFor = null;            // player id shown in the inset this frame
-const _back = new THREE.Vector3();
-
-function insetPlayer() {
-  if (!game || !rig.modes.insetAllowed()) return null;
-  if (game.phase !== 'flight' && game.phase !== 'settle') return null;
-  const hs = game.localHumans;
-  if (hs.length !== 1) return null;
-  const p = hs[0];
-  if (!p.alive && insetFor !== p.id) return null;       // keep it on a tank knocked out mid-volley
-  if (controls.target.distanceTo(_v.set(p.x, p.y, p.z)) < 110) return null;   // already in the main view
-  return p;
-}
-
-function renderInset() {
-  const p = insetPlayer();
-  insetFor = p ? p.id : null;
-  $('inset').classList.toggle('hidden', !p);
-  if (!p) return;
-  const W = window.innerWidth;
-  const w = Math.round(Math.min(360, Math.max(220, W * 0.24)));
-  const h = Math.round(w * 0.6);
-  const x = W - w - 16, y = 54;                          // from the bottom-left, as GL counts
-  const box = $('inset');
-  box.style.width = `${w}px`;
-  box.style.height = `${h}px`;
-  box.style.setProperty('--c', p.color);
-  $('inset-name').textContent = whose(p, 'tank');
-  _back.set(-Math.cos(p.yaw * DEG), 0, -Math.sin(p.yaw * DEG));
-  insetCam.position.set(p.x + _back.x * 40, p.y + 22, p.z + _back.z * 40);
-  const t = game.terrain;
-  if (t.inBounds(insetCam.position.x, insetCam.position.z)) insetCam.position.y = Math.max(insetCam.position.y, t.heightAt(insetCam.position.x, insetCam.position.z) + 6);
-  insetCam.lookAt(p.x, p.y + 2, p.z);
-  insetCam.aspect = w / h;
-  insetCam.updateProjectionMatrix();
-  renderer.setScissorTest(true);
-  renderer.setScissor(x, y, w, h);
-  renderer.setViewport(x, y, w, h);
-  renderer.render(scene, insetCam);
-  renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, W, window.innerHeight);
-}
-
-function flashInset(amount) {
-  const box = $('inset');
-  $('inset-dmg').textContent = `-${Math.round(amount)}`;
-  box.classList.remove('hit');
-  void box.offsetWidth;                                  // restart the animation
-  box.classList.add('hit');
-  touch?.buzz([40, 30, 70]);
-}
 
 // ---------------------------------------------------------------- the sight
 
@@ -978,6 +767,9 @@ if (touch) {
 }
 // The player card, the players box, the banner and the steering hint (src/hud.js).
 const hud = new Hud({ game: () => game, touch, peekAt: (p) => rig.peekAt(p) });
+// The rangefinder card (src/rangecard.js) and the corner view of your tank while shells fly (src/inset.js).
+const rangeCard = new RangeCard({ ranges, believed: (p) => believed(p), peekSpot: (pos) => rig.peekSpot(pos) });
+const inset = new Inset({ renderer, scene, touch });
 // Double Strike: the ×2 button (X), what Fire will do, and the reload notice (src/strike.js).
 const strikeUi = new StrikeUI({ game: () => game, touch, banner, click: () => sound.click(), blocked: () => handoffOpen });
 // Mods: the deploy buttons (B), the status chips, and the orbiters and satellites in the sky (src/modsui.js).
@@ -1923,7 +1715,7 @@ function tick(dt, draw = true) {
     modsUi.update(sdt, elapsed);
     syncFind();
     marks.update(game, { mode: rig.labelMode(game.phase), sight: rig.mode === 'sight', overview: rig.modes.overview, handoff: handoffOpen });
-    updateRangeCard();
+    rangeCard.update(game, rangeOwner(game, { handoff: handoffOpen, heroId }));
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
     dayGoal = (game.round - 1 + within) / game.cfg.rounds;
@@ -1955,7 +1747,7 @@ function tick(dt, draw = true) {
   renderer.shadowMap.needsUpdate = true;   // once a frame, shared by the inset
   if (!draw) return;
   renderer.render(scene, camera);
-  renderInset();
+  inset.render(game, { allowed: rig.modes.insetAllowed(), target: controls.target });
 }
 
 // A hidden tab gets no animation frames. Online that would hold up the whole

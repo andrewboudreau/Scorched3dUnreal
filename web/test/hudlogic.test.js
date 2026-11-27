@@ -3,8 +3,24 @@ import assert from 'node:assert/strict';
 import {
   escapeHtml, whose, ammoText, signed, ownedWeapons, jetsText, fuelText, winsText, lastAimText, cardNote, windReadout, roundText,
   roundBanner, turnBanner, bannerDelay, markShows, ghostText, locatorOwner, rangeText, pipHidden, probeColor, probeLabel,
-  screenSpot, unstack, rangeOwner, rangeRead, rangeEstimate,
+  screenSpot, unstack, rangeOwner, rangeRead, rangeEstimate, insetTank,
 } from '../src/hudlogic.js';
+
+test('the inset shows your one tank while shells fly and the camera is away', () => {
+  const me = { id: 0, alive: true }, foe = { id: 1, alive: true };
+  const game = { phase: 'flight', localHumans: [me] };
+  assert.equal(insetTank(game), me);
+  assert.equal(insetTank({ ...game, phase: 'settle' }), me);
+  assert.equal(insetTank({ ...game, phase: 'aim' }), null);
+  assert.equal(insetTank(null), null);
+  assert.equal(insetTank(game, { allowed: false }), null);
+  assert.equal(insetTank({ ...game, localHumans: [me, foe] }), null);
+  assert.equal(insetTank(game, { inView: () => true }), null);
+  // Knocked out mid-volley: kept if it was already showing, not opened for.
+  const dead = { id: 0, alive: false };
+  assert.equal(insetTank({ ...game, localHumans: [dead] }), null);
+  assert.equal(insetTank({ ...game, localHumans: [dead] }, { was: 0 }), dead);
+});
 
 test('words: names, ammo, signs', () => {
   assert.equal(escapeHtml(`<b a="x">'&'</b>`), '&lt;b a=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/b&gt;');
