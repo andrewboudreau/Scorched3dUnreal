@@ -73,6 +73,7 @@ export class Online {
       this.goOnline('join');
     });
     setInterval(() => this.refreshRooms(), 4000);
+    $('tab-online').addEventListener('click', () => this.refreshRooms());   // fresh the moment the tab opens
     this.refreshRooms();
 
     $('net-ended-ok').onclick = () => {
@@ -165,6 +166,11 @@ export class Online {
     this.lobbySig = '';
     this.lobbySent = '';
     this.lobbyPend = null;
+    // The list from before the room is stale (it holds this room, with a Join
+    // button): clear it now, and let the next answer replace it.
+    this.roomsSig = '';
+    this.renderRooms(null);
+    this.refreshRooms();
     this.renderLobby();
   }
 
