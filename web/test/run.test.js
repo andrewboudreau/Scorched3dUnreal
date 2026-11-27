@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, kitOf } from '../src/core/game.js';
 import { BOSS } from '../src/core/boss.js';
+import { WEAPONS, ITEMS } from '../src/core/weapons.js';
 import {
   RUN, RUN_KEY, TIER_PLAN, KINDS, runMap, generateMap, crosses, stopSeed, startRun, reachable, chooseStop, currentStop,
   applyFightResult, applyCache, swapVariant, leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, fightWon,
-  loadRun, saveRun, clearRun, runSummary, stopDetails, rewardWords, kitMods,
+  loadRun, saveRun, clearRun, runSummary, stopDetails, rewardWords, kitMods, stopMoney, startFight, fightCutOff, runProgress,
+  TIER_NAMES, allyWords, bossWords,
 } from '../src/core/run.js';
 
 // The run (core/run.js): a map of stops from a seed, the kit carried from
@@ -381,4 +383,148 @@ test('the summary lists the route, the fights and the build', () => {
   assert.deepEqual(kitMods(s.kit).length, 1);
   assert.deepEqual(sum.build.ranks, ['Reinforced Hull']);
   assert.ok(Object.keys(KINDS).every((k) => KINDS[k].name));
+});
+
+// ---------------------------------------------------------------- money, and the polish
+
+test('a run fight pays a share of the usual match money; other matches pay in full', () => {
+  let s = startRun(SEEDS[9], 'Tester');
+  s = chooseStop(s, reachable(s)[0]);
+  const cfg = matchConfig(s);
+  assert.equal(cfg.pay, RUN.matchPay);
+  assert.ok(RUN.matchPay > 0 && RUN.matchPay < 1);
+  const play = (pay) => {
+    const g = new Game({ ...cfg, pay, resolution: 64 });
+    g.start();
+    const me = g.players[0];
+    const m0 = me.money;
+    g.damage(g.players[1], 40, me.id);
+    return { g, got: me.money - m0, earned: { ...me.earned } };
+  };
+  const full = play(1);
+  const run = play(RUN.matchPay);
+  assert.equal(full.got, 80, '$2 a point in full');
+  assert.equal(run.got, Math.round(80 * RUN.matchPay));
+  assert.equal(run.earned.damage, run.got, 'the results count what was really paid');
+  // Every source is scaled: the kill, the round's stipend, survival and win too.
+  const g = run.g;
+  for (const f of g.players.slice(1)) g.damage(f, 999, 0);
+  if (g.phase !== 'matchOver' && g.phase !== 'roundOver') g.nextTurn();
+  const e = g.players[0].earned;
+  assert.ok(e.win > 0 && e.win < 300 && e.stipend < 150 && e.kill < 150, JSON.stringify(e));
+  // A plain match is untouched, and a silly pay is put right.
+  assert.equal(new Game({ players: [{ name: 'A' }, { name: 'B' }], resolution: 16 }).cfg.pay, 1);
+  assert.equal(new Game({ players: [{ name: 'A' }, { name: 'B' }], resolution: 16, pay: -2 }).cfg.pay, 1);
+  assert.equal(new Game({ players: [{ name: 'A' }, { name: 'B' }], resolution: 16, pay: 50 }).cfg.pay, 4);
+});
+
+test('stop money follows RUN.money by tier; a two-round fight\'s foes bring money for the shop between rounds', () => {
+  let twoRounds = 0;
+  for (const seed of SEEDS.slice(0, 12)) {
+    const map = generateMap(seed);
+    for (const st of map.stops) {
+      if (st.kind === 'fight' || st.kind === 'elite') assert.equal(st.reward.money, stopMoney(st.kind, st.tier));
+      if (st.kind === 'cache') assert.equal(st.offers[2].money, stopMoney('cache', st.tier));
+      if (st.kind === 'fight') {
+        const cfg = matchConfig({ ...startRun(seed), at: st.id, done: false, path: [st.id] });
+        for (const f of cfg.players.slice(1)) assert.equal(f.kit.money, st.match.rounds > 1 ? RUN.foeMoney : undefined);
+        if (st.match.rounds > 1) twoRounds++;
+      }
+    }
+  }
+  assert.ok(twoRounds > 0);
+  assert.equal(stopMoney('fight', 0), 60);
+  assert.ok(stopMoney('elite', 3) > stopMoney('fight', 3), 'an Elite pays more');
+});
+
+test('money is a choice: no route\'s stop money buys one of everything in the armory', () => {
+  const g = kitGame(startRun(1));
+  const p = g.players[0];
+  const armory = [...WEAPONS.filter((w) => w.price > 0 && !w.hidden && !w.fog), ...ITEMS]
+    .reduce((sum, it) => sum + (Number.isFinite(g.priceOf(p, it.id)) ? g.priceOf(p, it.id) : 0), 0);
+  for (const seed of SEEDS) {
+    const map = runMap(seed);
+    const money = (st) => (st.reward?.money || 0) + (st.offers ? st.offers[2].money : 0);
+    const best = (st) => money(st) + Math.max(0, ...st.next.map((id) => best(map.byId[id])));
+    const richest = RUN.start.money + Math.max(...map.tiers[0].map(best));
+    assert.ok(richest < armory, `${seed}: $${richest} of stop money, the armory is $${armory}`);
+  }
+});
+
+test('the result of a fight says what the match itself paid', () => {
+  const s = chooseStop(startRun(SEEDS[10]), reachable(startRun(SEEDS[10]))[0]);
+  const r = applyFightResult(s, { won: false, kit: { ...s.kit, money: s.kit.money + 75 } });
+  assert.equal(r.outcome.pay, 75);
+  assert.equal(r.state.kit.money, s.kit.money + 75, 'a loss keeps the match money');
+  const w = applyFightResult(s, { won: true, kit: { ...s.kit, money: s.kit.money + 40 } });
+  assert.equal(w.outcome.pay, 40);
+  assert.equal(w.state.kit.money, s.kit.money + 40 + currentStop(s).reward.money);
+});
+
+test('beating the boss ends the run with no reward and no skill point', () => {
+  let s = startRun(SEEDS[11]);
+  while (currentStop(s)?.kind !== 'boss') { s = chooseStop(s, reachable(s)[0]); if (currentStop(s).kind !== 'boss') s = settle(s); }
+  const { state, outcome } = applyFightResult(s, { won: true, kit: { ...s.kit, money: 9999, points: 7 } });
+  assert.equal(state.over, 'won');
+  assert.equal(outcome.reward, null);
+  assert.equal(outcome.pay, 0);
+  assert.equal(state.kit.points, s.kit.points, 'no point to spend after the end');
+  assert.equal(state.kit.money, s.kit.money, 'the boss match\'s money is not kept');
+  assert.equal(state.log[state.log.length - 1].reward, undefined);
+});
+
+test('a fight left by closing the page is marked, kept in the save, and cleared when the fight is settled', () => {
+  const store = fakeStorage();
+  let s = startRun(SEEDS[12]);
+  assert.equal(fightCutOff(s), false);
+  assert.throws(() => startFight(s), /no fight/, 'not before a stop is chosen');
+  s = chooseStop(s, reachable(s)[0]);
+  assert.equal(fightCutOff(s), false, 'chosen, not started');
+  const started = startFight(s);
+  assert.equal(s.fighting, null, 'the old state is untouched');
+  assert.equal(started.fighting, s.at);
+  assert.equal(fightCutOff(started), true);
+  saveRun(store, started);
+  const back = loadRun(store);
+  assert.equal(fightCutOff(back), true, 'still marked after a reload');
+  assert.deepEqual(back, started);
+  // Settled: the mark goes.
+  const done = applyFightResult(back, { won: true, kit: back.kit }).state;
+  assert.equal(done.fighting, null);
+  assert.equal(fightCutOff(done), false);
+  // A mark that does not fit the save is dropped.
+  store.setItem(RUN_KEY, JSON.stringify({ ...started, fighting: 'boss' }));
+  assert.equal(loadRun(store).fighting, null);
+  store.setItem(RUN_KEY, JSON.stringify({ ...done, fighting: done.at }));
+  assert.equal(loadRun(store).fighting, null, 'not once the stop is settled');
+  // A Cache has no fight to start.
+  const cache = SEEDS.map((x) => walkTo(startRun(x), 'cache')).find((x) => x && currentStop(x).kind === 'cache');
+  assert.throws(() => startFight(cache), /no fight/);
+});
+
+test('the map header: how far along, and the tier\'s name', () => {
+  let s = startRun(SEEDS[13]);
+  assert.deepEqual(runProgress(s), { n: 1, of: 7, name: TIER_NAMES[0], text: `Stop 1 of 7 · ${TIER_NAMES[0]}` });
+  s = chooseStop(s, reachable(s)[0]);
+  assert.equal(runProgress(s).n, 1, 'at the first stop');
+  s = settle(s);
+  assert.equal(runProgress(s).n, 2, 'settled: the next one');
+  while (currentStop(s)?.kind !== 'boss') { s = chooseStop(s, reachable(s)[0]); if (currentStop(s).kind !== 'boss') s = settle(s); }
+  assert.equal(runProgress(s).text, `Stop 7 of 7 · ${TIER_NAMES[6]}`);
+  s = applyFightResult(s, { won: true, kit: s.kit }).state;
+  assert.equal(runProgress(s).n, 7, 'the end stays on the last');
+  assert.equal(TIER_NAMES.length, RUN.tiers + 1);
+});
+
+test('the boss\'s card shows its health and what it does, and the ally\'s ranks', () => {
+  const d = stopDetails(runMap(SEEDS[14]).byId.boss);
+  assert.equal(d.foes[0].level, `${BOSS.hp} hp`);
+  assert.match(d.foes[0].extra, /Point Defense L\d/);
+  const b = bossWords();
+  assert.equal(b.hp, BOSS.hp);
+  assert.ok(b.lines.some((l) => /Gravity Orbiter L\d/.test(l)));
+  assert.ok(b.lines.some((l) => /from above/.test(l)));
+  assert.deepEqual(allyWords({ name: 'Warden', ai: 'hard', elite: true, perks: ['pdturret', 'pdup', 'hull', 'hull', 'dugin'] }),
+    { level: 'Elite', ranks: ['Point Defense L2', 'Reinforced Hull ×2', 'Dug In'] });
+  assert.deepEqual(allyWords({ name: 'Rook', ai: 'normal', perks: [] }), { level: 'Normal', ranks: [] });
 });

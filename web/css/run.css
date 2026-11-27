@@ -22,6 +22,11 @@
   padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
 .run-head { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; padding-right: 52px; flex-wrap: wrap; }
 .run-brand { font-weight: 900; letter-spacing: .18em; font-size: 13px; color: #5fd0bd; margin-right: 2px; }
+/* How far along: "Stop 3 of 7 · Badlands", or "3/7" where room is short. */
+.run-prog { font-size: 13px; color: var(--muted); white-space: nowrap; margin-right: 4px; }
+.run-prog b { color: var(--text); font-weight: 800; }
+.run-prog i { font-style: normal; color: #8fd7c9; }
+.run-prog .short { display: none; }
 .run-stat { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--edge);
   background: rgba(255, 255, 255, .05); font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .run-money { color: var(--accent); border-color: rgba(255, 181, 71, .4); }
@@ -119,6 +124,10 @@
 .run-allies { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
 .run-ally { display: flex; flex-direction: column; align-items: flex-start; text-align: left; min-height: 48px; padding: 6px 10px; }
 .run-ally small { color: var(--muted); font-size: 11px; }
+.run-ally .run-lvl { font-weight: 600; margin-left: 3px; }
+.run-bossfacts { margin: 4px 0 2px; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.run-bossfacts li { margin: 1px 0; }
+.run-note.run-cut { color: #ffcf6b; }
 .run-ally.on { border-color: #5fd0bd; background: rgba(95, 208, 189, .14); }
 
 /* ---------------------------------------------------------------- the views */
@@ -144,6 +153,8 @@
 .run-result.won .run-ptitle { border-bottom: 3px solid #9be36b; padding-bottom: 10px; }
 .run-result.lost .run-ptitle { border-bottom: 3px solid #ff7a6a; padding-bottom: 10px; }
 .run-result .run-reward { margin-top: 14px; font-size: 15px; }
+.run-result .run-pay { background: rgba(255, 255, 255, .05); border-color: var(--edge); }
+.run-result .run-pay + .run-reward { margin-top: 6px; }
 .run-loss { display: flex; align-items: center; gap: 8px; color: #ff9a8a; font-weight: 700; margin: 14px 0 6px; }
 .run-loss svg { width: 30px; height: 18px; fill: none; stroke: #ff9a8a; stroke-width: 1.4; }
 
@@ -182,6 +193,9 @@
 /* Portrait: the map takes the top, the panel the bottom; the cards stack. */
 @media (orientation: portrait) {
   .run-brand { display: none; }
+  .run-prog { margin-right: 0; }
+  .run-prog .long { display: none; }
+  .run-prog .short { display: inline; }
   .run-head { gap: 5px; flex-wrap: nowrap; }
   .run-stat { font-size: 13px; padding: 2px 6px; }
   .run-hull { width: 20px; height: 12px; }

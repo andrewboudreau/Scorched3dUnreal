@@ -18,7 +18,7 @@
 import {
   RUN, KINDS, runMap, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, swapVariant,
   leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, kitOf, fightWon, loadRun, saveRun, clearRun,
-  runSummary, stopDetails, rewardWords,
+  runSummary, stopDetails, rewardWords, startFight, fightCutOff, runProgress, allyWords, bossWords,
 } from './core/run.js';
 import { BOSS } from './core/boss.js';
 import { PERK_BY_ID } from './core/perks.js';
@@ -121,7 +121,10 @@ export class RunUI {
       : 'Run<small>fights on a map, then the boss</small>';
     if (live) {
       const s = this.state;
-      $('#run-continue small').textContent = `stop ${s.path.length + (s.done ? 1 : 0)} of ${RUN.tiers + 1} · ${s.hulls} spare hull${s.hulls === 1 ? '' : 's'}`;
+      const pr = runProgress(s);
+      $('#run-continue small').textContent = fightCutOff(s)
+        ? `stop ${pr.n} of ${pr.of} · its fight starts over`
+        : `stop ${pr.n} of ${pr.of} · ${s.hulls} spare hull${s.hulls === 1 ? '' : 's'}`;
     }
     if (this.confirmNew) setTimeout(() => { this.confirmNew = false; this.refreshLaunch(); }, 3000);
   }
@@ -161,8 +164,10 @@ export class RunUI {
     const hulls = Array.from({ length: RUN.hulls }, (_, i) => `<i class="run-hull${i < s.hulls ? '' : ' lost'}">${HULL}</i>`).join('');
     const pts = k.points > 0;
     const back = this.view === 'skills' ? '<button class="run-hbtn" data-act="map">Map</button>' : '';
+    const pr = runProgress(s);
     this.head.innerHTML = `
       <span class="run-brand">RUN</span>
+      <span class="run-prog" title="${esc(pr.text)}"><span class="long">Stop <b>${pr.n}</b> of ${pr.of}<i> · ${esc(pr.name)}</i></span><span class="short"><b>${pr.n}</b>/${pr.of}</span></span>
       <span class="run-stat run-hulls" title="Spare hulls: a lost fight costs one">${hulls}</span>
       <span class="run-stat run-money" title="Money: spend it at a Depot">$${k.money}</span>
       <span class="run-stat run-pts${pts ? ' on' : ''}" title="Skill points">${k.points} pt${k.points === 1 ? '' : 's'}</span>
@@ -226,11 +231,13 @@ export class RunUI {
       const n = reachable(s).length;
       return `<h3>${s.at ? 'Where next?' : 'Your run'}</h3>
         <p class="run-note">${n ? `Tap a lit stop to see what waits there. ${s.at ? '' : 'Every stop shows its world, its foes and its reward before you go.'}` : ''}</p>
+        <p class="run-note">A run's fight pays ${Math.round(RUN.matchPay * 100)}% of a usual match's money, on top of the stop's reward: spend it well at a Depot.</p>
         ${s.kit.points > 0 ? `<p class="run-note hot">You have ${s.kit.points} skill point${s.kit.points > 1 ? 's' : ''}: spend ${s.kit.points > 1 ? 'them' : 'it'} under Skills.</p>` : ''}
         <div class="run-kit">${kitHtml(g, g.players[0])}</div>`;
     }
     const here = st.id === s.at && !s.done;
     const can = reachable(s).includes(st.id);
+    const cut = here && fightCutOff(s);
     const of = `Stop ${st.tier + 1} of ${map.tiers.length}`;
     let body = '';
     if (st.match) {
@@ -241,7 +248,7 @@ export class RunUI {
         <div class="run-mod"><b>${esc(d.modifier)}</b>${d.modifierDesc && st.match.modifier !== 'clear' ? ` · ${esc(d.modifierDesc)}` : ''}</div>
         <div class="run-sub">${st.kind === 'boss' ? 'The boss' : d.foes.length > 1 ? 'Foes' : 'Foe'} · ${d.rounds} round${d.rounds > 1 ? 's' : ''}</div>
         <ul class="run-foes">${foes}</ul>`;
-      if (st.kind === 'boss') body += this.allyHtml();
+      if (st.kind === 'boss') body += `<ul class="run-bossfacts">${bossWords().lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${this.allyHtml()}`;
       else body += `<div class="run-reward"><span>Reward</span> ${esc(rewardWords({ ...st.reward, points: (st.reward.points || 0) + RUN.winPoints }))}</div>`;
     } else if (st.kind === 'cache') {
       body = `<p class="run-note">No fight. Take one of three:</p><ul class="run-foes">${st.offers.map((o) => `<li><b>${esc(o.name)}</b> <small>${esc(offerWords(o))}</small></li>`).join('')}</ul>`;
@@ -249,7 +256,8 @@ export class RunUI {
       body = `<p class="run-note">No fight. The armory is open (you have $${s.kit.money}), and you may turn one weapon's variant the other way.</p>`;
     }
     let go = '';
-    if (here) go = `<button class="primary run-gobtn" data-act="enter">${st.match ? (s.log.some((l) => l.stop === st.id) ? 'Try again' : 'Fight') : st.kind === 'cache' ? 'Open the cache' : 'Enter the depot'}</button>`;
+    if (cut) body += '<p class="run-note run-cut">This fight was left unfinished when the page closed. It starts over from the first shot, with the kit you brought to it.</p>';
+    if (here) go = `<button class="primary run-gobtn" data-act="enter">${st.match ? (cut ? 'Start the fight over' : s.log.some((l) => l.stop === st.id) ? 'Try again' : 'Fight') : st.kind === 'cache' ? 'Open the cache' : 'Enter the depot'}</button>`;
     else if (can) go = `<button class="primary run-gobtn" data-act="go" data-stop="${st.id}">Go</button>`;
     else go = `<p class="run-note">${s.path.includes(st.id) ? 'Been here.' : 'Not on your path from here.'}</p>`;
     return `<div class="run-ptitle k-${st.kind}">${icon(st.kind)}<div><h3>${esc(KINDS[st.kind].name)}</h3><small>${of}</small></div><button class="run-x" data-act="unsel" aria-label="Close">✕</button></div>
@@ -259,7 +267,11 @@ export class RunUI {
   allyHtml() {
     const choices = allyChoices(this.state);
     this.ally = Math.min(this.ally, choices.length - 1);
-    const card = (f, i) => `<button class="run-ally${i === this.ally ? ' on' : ''}" data-act="ally" data-i="${i}"><b>${esc(f.name)}</b><small>${esc(aiName(f))}${f.perks?.length ? ` · ${f.perks.map((id) => PERK_BY_ID[id]?.name).filter(Boolean).slice(0, 2).join(', ')}` : ''}</small></button>`;
+    const card = (f, i) => {
+      const w = allyWords(f);
+      return `<button class="run-ally${i === this.ally ? ' on' : ''}" data-act="ally" data-i="${i}"><b>${esc(f.name)} <span class="run-lvl">${esc(w.level)}</span></b>`
+        + `<small>${w.ranks.length ? esc(w.ranks.join(' · ')) : 'No ranks'}</small></button>`;
+    };
     return `<div class="run-sub">Your ally${choices.length > 1 ? ': pick one' : ''}</div>
       <div class="run-allies">${choices.map(card).join('')}</div>
       <p class="run-note">${this.state.beaten.length ? 'A tank you beat on the way fights beside you.' : 'You beat nobody on the way, so a plain CPU comes along.'}</p>`;
@@ -319,6 +331,8 @@ export class RunUI {
     if (st.kind === 'cache' || st.kind === 'depot') { this.view = st.kind; this.render(); return; }
     const ally = st.kind === 'boss' ? allyChoices(this.state)[this.ally] : null;
     this.fighting = { stop: st.id, ally };
+    this.state = startFight(this.state);   // so a page closed mid-fight is told it starts over
+    this.save();
     this.el.classList.add('hidden');
     this.startMatchFn(matchConfig(this.state, { ally }));
   }
@@ -417,6 +431,7 @@ export class RunUI {
     const boss = st.kind === 'boss';
     const title = outcome.won ? (boss ? `The ${BOSS.name} is down!` : 'Fight won') : boss ? `The ${BOSS.name} holds` : 'Fight lost';
     const lines = [];
+    if (!boss && outcome.pay > 0) lines.push(`<div class="run-reward run-pay"><span>From the match</span> $${outcome.pay}</div>`);
     if (outcome.won && !boss) lines.push(`<div class="run-reward"><span>Reward</span> ${esc(rewardWords(outcome.reward))}</div>`);
     if (outcome.hullLost) lines.push(`<p class="run-loss">${HULL} A hull lost. ${this.state.hulls ? `${this.state.hulls} spare left.` : 'None left.'}</p>`);
     if (outcome.over === 'lost') lines.push('<p class="run-note">The run is over.</p>');
@@ -447,8 +462,6 @@ export class RunUI {
     </div>`;
   }
 }
-
-const aiName = (f) => (f.elite ? 'Elite' : { easy: 'Easy', normal: 'Normal', hard: 'Hard' }[f.ai] || f.ai);
 
 // A cache offer in words: "+1 skill point", "2 Breacher · 1 Roller", "$300".
 export function offerWords(o) {

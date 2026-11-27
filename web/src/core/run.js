@@ -6,7 +6,7 @@
 // only keeps the seed and what happened; each stop's match seed comes from the
 // run seed and the stop. The run's state is a small JSON record:
 //
-//   { v, seed, name, at, done, path, kit, hulls, beaten, log, over, swapped }
+//   { v, seed, name, at, done, path, kit, hulls, beaten, log, over, swapped, fighting }
 //
 //   at       the stop you are at (null before the first)
 //   done     whether that stop is settled (a fight played, a cache taken, the
@@ -20,9 +20,11 @@
 //   log      one line per stop settled, for the summary
 //   over     null, 'won' or 'lost'
 //   swapped  the depot where a variant was already swapped (once a visit)
+//   fighting the stop whose fight was started and not settled yet: a page
+//            closed mid-fight. That fight is played again from the start.
 //
-// The functions that move it on (chooseStop, applyFightResult, applyCache,
-// swapVariant, leaveDepot, setKit) return a new state and never change the one
+// The functions that move it on (chooseStop, startFight, applyFightResult,
+// applyCache, swapVariant, leaveDepot, setKit) return a new state and never change the one
 // they are given.
 
 import { makeRng } from './rng.js';
@@ -34,7 +36,7 @@ import { BRANCHES, forkTaken } from './skills.js';
 import { TIMES, timeName } from './timeofday.js';
 import { RIDGE } from './ridgeline.js';
 import { ISLAND } from './island.js';
-import { BOSS, bossMatch } from './boss.js';
+import { BOSS, ARENA, bossMatch } from './boss.js';
 
 export const RUN = {
   version: 1,
@@ -42,7 +44,17 @@ export const RUN = {
   perTier: [2, 3],                  // stops in a tier
   hulls: 2,                         // spare hulls at the start
   start: { money: 150, points: 1 }, // and the starting kit (weapons.js startKit)
-  winPoints: 1,                     // skill points for a fight won
+  winPoints: 1,                     // skill points for a fight won (not the boss's: the run ends there)
+  // Money. A run's fight pays this share of a match's usual money (Game's
+  // `pay`: stipend, survival, the win, damage, kills), so a quick win is
+  // worth about a stop's reward rather than half the armory, and the Depot
+  // is a choice (tools/runsim.mjs plays runs to check). The stops' money:
+  // [base, more each tier], rounded to $10. The foes of a two-round fight
+  // start with `foeMoney` for the shop between its rounds, the round-one pay
+  // the share takes from them.
+  matchPay: 0.2,
+  money: { fight: [60, 30], elite: [150, 50], cache: [150, 40] },
+  foeMoney: 250,
   // The Lab every run match uses: mods come from the skill tree.
   lab: { satellite: 'perk', level: 1, labels: 'some', orbiter: 'perk', orbiterLevel: 1 },
 };
@@ -92,6 +104,9 @@ export const TIER_PLAN = [
   { kinds: ['fight', 'elite', 'cache'], foes: [['hard'], ['normal', 'hard']], rounds: [1, 2] },
   { kinds: ['fight', 'depot', 'cache'], foes: [['hard'], ['hard', 'normal']], rounds: [1, 2] },
 ];
+
+// Each tier's name on the map's header (the last is the boss's).
+export const TIER_NAMES = ['Outskirts', 'Foothills', 'Badlands', 'Front line', 'Hard country', 'Last stretch', 'The fort'];
 
 // A Fight's CPUs take a rank of these per two tiers; an Elite one more, and its mod.
 const FOE_PERKS = ['hull', 'heavycharge', 'dugin', 'wideblast', 'heavyrounds', 'repairs'];
@@ -230,17 +245,20 @@ function makeStop(seed, tier, index, kind, name) {
     }
     stop.match = { world: world.id, maxWind: wind, edges, time, modifier, rounds, foes, seed: stopSeed(seed, id) };
     stop.reward = kind === 'elite'
-      ? { money: 200 + 60 * tier, ammo: { ...ELITE_AMMO[Math.floor(rng.next() * ELITE_AMMO.length)] }, points: 1 }
-      : { money: Math.round((80 + 40 * tier) / 10) * 10, ...(rng.next() < 0.5 ? { ammo: { [REWARD_AMMO[Math.floor(rng.next() * REWARD_AMMO.length)]]: tier >= 3 ? 2 : 1 } } : {}) };
+      ? { money: stopMoney('elite', tier), ammo: { ...ELITE_AMMO[Math.floor(rng.next() * ELITE_AMMO.length)] }, points: 1 }
+      : { money: stopMoney('fight', tier), ...(rng.next() < 0.5 ? { ammo: { [REWARD_AMMO[Math.floor(rng.next() * REWARD_AMMO.length)]]: tier >= 3 ? 2 : 1 } } : {}) };
   } else if (kind === 'cache') {
     stop.offers = [
       { kind: 'rank', name: 'Field training', points: 1 },
       { kind: 'ammo', name: 'Ammo crate', ammo: { ...CRATES[Math.floor(rng.next() * CRATES.length)] } },
-      { kind: 'money', name: 'Pay chest', money: 200 + 50 * tier },
+      { kind: 'money', name: 'Pay chest', money: stopMoney('cache', tier) },
     ];
   }
   return stop;
 }
+
+// A stop's money by its kind and tier (RUN.money).
+export const stopMoney = (kind, tier) => Math.round((RUN.money[kind][0] + RUN.money[kind][1] * tier) / 10) * 10;
 
 function makeBoss(seed) {
   const rng = makeRng(mixSeed(seed, stopKey('boss') ^ 0x51ed));
@@ -263,7 +281,7 @@ export const startKitCarried = () => {
 export function startRun(seed, name = 'You') {
   return {
     v: RUN.version, seed: seed >>> 0, name: String(name || 'You').slice(0, 14),
-    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null,
+    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null, fighting: null,
   };
 }
 
@@ -287,6 +305,17 @@ export function chooseStop(state, id) {
   return s;
 }
 
+// The fight at the current stop is starting: marked, so a run picked up
+// after the page was closed mid-fight can say it starts again.
+export function startFight(state) {
+  const stop = currentStop(state);
+  if (!stop?.match || state.done || state.over) throw new Error('no fight here');
+  return { ...clone(state), fighting: stop.id };
+}
+
+// Was a fight started here and never settled (the page closed mid-fight)?
+export const fightCutOff = (state) => !!state && !state.done && !state.over && state.fighting != null && state.fighting === state.at;
+
 // Add ammo ({ weapon: n }) and money to a kit, in place.
 function addTo(kit, { money = 0, ammo = null, points = 0 } = {}) {
   kit.money = (kit.money || 0) + money;
@@ -308,18 +337,24 @@ export function fightWon(game) {
 // A win: +RUN.winPoints skill point and the stop's reward, and its CPUs join
 // the beaten. A loss: one hull; with none left the run is over. A lost boss
 // fight may be tried again while a hull is left, with the kit you brought to
-// it (the boss match's own gifts to the team are not kept).
-// Returns { state, outcome: { won, reward, hullLost, over } }.
+// it (the boss match's own gifts to the team are not kept). The boss beaten
+// ends the run: no reward and no point, since there is nothing left to spend
+// them on.
+// Returns { state, outcome: { won, reward, pay, hullLost, over } }: `pay` is
+// the money the match itself left you up or down (net of shopping in it).
 export function applyFightResult(state, { won, kit }) {
   const stop = currentStop(state);
   if (!stop || state.done || !stop.match) throw new Error('no fight to settle here');
   const s = clone(state);
+  s.fighting = null;
   if (kit && stop.kind !== 'boss') s.kit = cleanKit(kit);
-  const outcome = { won: !!won, reward: null, hullLost: false, over: null };
+  const outcome = { won: !!won, reward: null, pay: stop.kind === 'boss' ? 0 : s.kit.money - state.kit.money, hullLost: false, over: null };
   if (won) {
-    const reward = { ...(stop.reward || {}), points: (stop.reward?.points || 0) + RUN.winPoints };
-    addTo(s.kit, reward);
-    outcome.reward = reward;
+    if (stop.kind !== 'boss') {
+      const reward = { ...(stop.reward || {}), points: (stop.reward?.points || 0) + RUN.winPoints };
+      addTo(s.kit, reward);
+      outcome.reward = reward;
+    }
     for (const f of stop.match.foes) if (!f.boss) s.beaten.push({ name: f.name, ai: f.ai, perks: [...(f.perks || [])], elite: !!f.elite, stop: stop.id });
     s.done = true;
     if (stop.kind === 'boss') s.over = 'won';
@@ -429,9 +464,10 @@ export function matchConfig(state, { ally = null } = {}) {
     return { ...cfg, seed: m.seed, time: m.time, modifier: null };
   }
   return {
-    players: [me, ...m.foes.map((f) => ({ name: f.name, ai: f.ai, kit: { perks: [...(f.perks || [])], ...(f.up ? { up: [...f.up] } : {}) } }))],
+    players: [me, ...m.foes.map((f) => ({ name: f.name, ai: f.ai,
+      kit: { perks: [...(f.perks || [])], ...(f.up ? { up: [...f.up] } : {}), ...(m.rounds > 1 ? { money: RUN.foeMoney } : {}) } }))],
     rounds: m.rounds, seed: m.seed, maxWind: m.maxWind, hills: world.hills, world: world.world,
-    edges: m.edges, time: m.time, modifier: m.modifier, firing: 'volley', fog: false,
+    edges: m.edges, time: m.time, modifier: m.modifier, firing: 'volley', fog: false, pay: RUN.matchPay,
     weapons: null, perks: null, modifiers: null, lab: { ...RUN.lab },
   };
 }
@@ -472,8 +508,43 @@ export function stopDetails(stop) {
     rounds: m.rounds,
     foes: m.foes.map((f) => ({
       name: f.name, level: f.boss ? `${BOSS.hp} hp` : AI_NAME[f.ai] || f.ai,
-      extra: f.mod ? `${MODS.find((d) => d.id === f.mod)?.name} L${f.level}, up from the start` : '',
+      extra: f.boss ? bossWords().extra : f.mod ? `${MODS.find((d) => d.id === f.mod)?.name} L${f.level}, up from the start` : '',
     })),
+  };
+}
+
+// How far along the run is: the stop you are at, or the next one once it
+// is settled (the last at the end), of the seven; with its tier's name.
+// { n, of, name, text: "Stop 3 of 7 · Badlands" }.
+export function runProgress(state) {
+  const of = RUN.tiers + 1;
+  const n = Math.max(1, Math.min(of, state.path.length + (state.done && !state.over ? 1 : 0)));
+  const name = TIER_NAMES[n - 1] || '';
+  return { n, of, name, text: `Stop ${n} of ${of}${name ? ` · ${name}` : ''}` };
+}
+
+// A tank you beat, as your ally on the boss's card: { level, ranks }, its
+// ranks in words: mods with their level, then the rest ("Reinforced Hull ×2").
+export function allyWords(f) {
+  const perks = f.perks || [];
+  const mods = kitMods({ perks }).map((m) => `${m.name} L${m.level}`);
+  const count = {};
+  for (const id of perks) if (PERK_BY_ID[id] && !PERK_BY_ID[id].mods && !PERK_BY_ID[id].weapon) count[id] = (count[id] || 0) + 1;
+  const rest = Object.entries(count).map(([id, n]) => `${PERK_BY_ID[id].name}${n > 1 ? ` ×${n}` : ''}`);
+  return { level: f.elite ? 'Elite' : AI_NAME[f.ai] || f.ai, ranks: [...mods, ...rest] };
+}
+
+// The boss on its card, from core/boss.js: its health, where it sits and
+// what it has up (`extra`), then what comes later and its weak spot (`lines`).
+export function bossWords() {
+  const mod = (id) => MODS.find((d) => d.id === id)?.name || id;
+  return {
+    hp: BOSS.hp,
+    extra: `On a fort ${ARENA.fort.top} m up, ${mod('pointdef')} L${BOSS.pointdef} up`,
+    lines: [
+      `Under ${Math.round(BOSS.phases[0] * 100)}% health: a ${mod('orbiter')} L${BOSS.orbiter}; under ${Math.round(BOSS.phases[1] * 100)}%: two shots a turn`,
+      `Weak from above: a shell coming down steeply does ${Math.round((BOSS.weak.mult - 1) * 100)}% more`,
+    ],
   };
 }
 
@@ -536,6 +607,7 @@ export function loadRun(storage) {
     log: Array.isArray(raw.log) ? raw.log.filter((l) => l && map.byId[l.stop]) : [],
     over: raw.over === 'won' || raw.over === 'lost' ? raw.over : null,
     swapped: map.byId[raw.swapped] ? raw.swapped : null,
+    fighting: raw.fighting != null && raw.fighting === at && raw.done === false ? at : null,
   };
 }
 
