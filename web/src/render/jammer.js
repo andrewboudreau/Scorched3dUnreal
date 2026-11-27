@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { jamPulse, JAM_STEADY_R, JAM_STEADY_OPACITY } from '../jamring.js';
 import { mergeGeometries } from '../../vendor/three/addons/utils/BufferGeometryUtils.js';
 
 // The Jammer Drone, drawn (the rules are in core/mods.js JAM; render/mods.js
@@ -8,8 +9,8 @@ import { mergeGeometries } from '../../vendor/three/addons/utils/BufferGeometryU
 //   - the rotors: four blurred discs at the arm tips (one mesh, see-through);
 //   - the emitters: a glowing ring under the body and a light on each arm tip,
 //     in the owner's colour (one mesh), pulsing.
-// And on the tank it jams, a faint ring on the ground that swells and fades
-// (makeJamRing), in the jammer's colour.
+// And on the tank it jams, a steady ring and a pulse on the ground (makeJamRing),
+// in the jammer's colour.
 
 const DARK = '#2b2f36';
 
@@ -66,20 +67,29 @@ export function makeJammer(color) {
   return { group, body, glow, rotors, kind: 'jammer' };
 }
 
-// The jammed tank's ring: flat on the ground, swelling out and fading.
-const RING = new THREE.RingGeometry(0.86, 1, 40).rotateX(-Math.PI / 2);
+// The jammed tank's ring, in its jammer's colour: flat on the ground round the
+// aim dial (jamring.js), a steady faint ring and a pulse that swells out and
+// fades. Drawn over the ground (no depth test), so a slope never hides it, and
+// with plain blending: added light turns any colour to white on bright grass.
+const RING = new THREE.RingGeometry(0.88, 1, 48).rotateX(-Math.PI / 2);
 export function makeJamRing(color) {
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).lerp(new THREE.Color('#ff8a7a'), 0.35), transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
-  const mesh = new THREE.Mesh(RING, mat);
-  mesh.renderOrder = 4;
+  const tint = new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.3);
+  const ring = (opacity) => {
+    const mesh = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity, depthWrite: false, depthTest: false, side: THREE.DoubleSide }));
+    mesh.renderOrder = 4;
+    return mesh;
+  };
+  const steady = ring(JAM_STEADY_OPACITY);
+  steady.scale.setScalar(JAM_STEADY_R);
+  const mesh = ring(0.5);
   const group = new THREE.Group();
-  group.add(mesh);
-  return { group, mesh, kind: 'jamring', shared: RING };
+  group.add(steady, mesh);
+  return { group, mesh, steady, kind: 'jamring', shared: RING };
 }
 
-// The ring `t` seconds on: it swells from 3 m to 9 m once a second and fades as it goes.
+// The ring `t` seconds on.
 export function pulseJamRing(it, t) {
-  const k = (t * 0.9) % 1;
-  it.mesh.scale.setScalar(3 + 6 * k);
-  it.mesh.material.opacity = 0.55 * (1 - k) * (1 - k);
+  const { radius, opacity } = jamPulse(t);
+  it.mesh.scale.setScalar(radius);
+  it.mesh.material.opacity = opacity;
 }

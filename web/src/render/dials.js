@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TANK } from '../core/tank.js';
-import { ringTicks, elevTicks, yawText, elevText, yawDir, fadeStep, arcSide, loadDials, saveDials } from '../dialmath.js';
+import { DIAL_R as R, ringTicks, elevTicks, yawText, elevText, yawDir, fadeStep, arcSide, loadDials, saveDials } from '../dialmath.js';
 
 // The angle dials: two thin gauges on your own tank while you aim, so the
 // turret's rotation and the barrel's elevation can be read right on the
@@ -29,7 +29,6 @@ const INK = '#ece4d0';       // ticks, numbers: warm paper, like the HUD's text
 const SKY = '#bfe2ee';       // the elevation arc's, so its numbers are not taken for the ring's
 const AMBER = '#ffb547';     // the current aim: the HUD's accent
 const LIFT = 0.45;           // above the ground, so the ring never clips it
-const R = 9;                 // ring radius, round a tank whose barrel reaches 5
 const BAND = 0.2;            // half the ring's width
 const SEGS = 96;             // ring segments
 const POINTER_FROM = 5.8;    // pointers start just past the muzzle

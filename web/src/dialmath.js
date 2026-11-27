@@ -13,6 +13,7 @@ export const ELEV_MAJOR = 45;     // long ticks at 0, 45 and 90
 // No fixed numbers on either dial: they crowded the tank, above all on a
 // phone. The two live readings at the pointer tips carry the numbers.
 export const ELEV_MAX = 90;
+export const DIAL_R = 9;          // the rotation ring's radius, m (render/dials.js); what lies round it keeps outside
 
 // Round the ring: 0, 15, ... 345. `major` ticks are long. `label` stays ''
 // (a number, if a dial ever wants one again).
