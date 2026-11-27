@@ -124,7 +124,7 @@ export class Hud {
 
   steer(s) {
     const hint = $('steer-hint');
-    if (!s) { hint.classList.add('hidden'); this.steerFuel = -1; return; }
+    if (!s) { if (!hint.classList.contains('hidden')) hint.classList.add('hidden'); this.steerFuel = -1; return; }   // no same-value write each frame
     const { fuel, jam, dir } = s;
     if (jam !== hint.classList.contains('jammed')) { hint.classList.toggle('jammed', jam); hint.querySelector('.sh-title').textContent = jam ? 'Jammed' : 'Guidance'; }
     if (fuel >= 0 && this.steerFuel < 0) this.steerTipUntil = performance.now() + 1800;   // a new missile: say how, briefly
