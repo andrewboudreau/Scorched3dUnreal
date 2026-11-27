@@ -16,7 +16,7 @@
 //   F             find          in a match: hold the camera on the next enemy (camera.js peekNext)
 //   G             sight         in a match: the sight on or off
 //   C             follow        in a match: the follow cam on or off
-//   V             view          in a match: the overview on or off
+//   V             view          in a match: the overview on or off (not during the kill cam)
 //   M             mute          in a match
 //   - / = / +     volume        in a match: Master down (up) a tenth
 //   N             music         in a match: the next track
@@ -25,8 +25,10 @@
 //
 // "In a match" means a game is on, the key is not a repeat and the hand-off card
 // is down. Tab and the arrows never scroll the page. The camera's mode does not
-// change what a key does: the kill cam, the overview and the sight all take
-// them, and each action keeps its own rules (cameramode.js for the camera ones).
+// change what a key does, bar one: the kill cam shows its own shot, so V (the
+// View button) does nothing then, instead of turning the overview on unseen to
+// pop up afterwards. The overview and the sight take every key, and each action
+// keeps its own rules (cameramode.js for the camera ones).
 //
 // Held keys, each frame while a human here aims (phase 'aim', no hand-off):
 //
@@ -55,7 +57,8 @@ export const ACTIONS = {
 };
 
 // What a key press does. `k` is the key, lower case (KeyboardEvent.key);
-// s = { inMatch, handoff, online, repeat, shift, ctrl }. Returns
+// s = { inMatch, handoff, online, repeat, shift, ctrl, mode } (mode: the camera's,
+// as camera.js `rig.mode`; only 'kill' matters). Returns
 //   { action, arg, prevent, hold, clear }
 // action: what to do (null for nothing), arg: its argument (the weapon step, the
 // slot, the volume step), prevent: keep the browser's default from it, hold: add
@@ -72,6 +75,7 @@ export function keyRoute(k, s) {
   if (k >= '1' && k <= '9') { r.action = 'slot'; r.arg = Number(k) - 1; return r; }
   const action = ACTIONS[k];
   if (!action || (action === 'deploy' && s.ctrl)) return r;
+  if (action === 'view' && s.mode === 'kill') return r;
   r.action = action;
   if (action === 'fire') r.prevent = true;
   else if (action === 'weapon') r.arg = s.shift ? -1 : 1;

@@ -55,7 +55,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       const k = e.key.toLowerCase();
-      const r = keyRoute(k, { inMatch: !!d.game(), handoff: d.handoff(), online: d.online(), repeat: e.repeat, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+      const r = keyRoute(k, { inMatch: !!d.game(), handoff: d.handoff(), online: d.online(), repeat: e.repeat, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, mode: d.rig.mode });
       if (r.prevent) e.preventDefault();
       if (r.hold) this.held.add(k);
       if (r.action) this.act(r.action, r.arg);

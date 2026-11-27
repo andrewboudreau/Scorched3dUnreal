@@ -142,11 +142,21 @@ test('the view by camera mode: the sight aims and zooms, every other mode orbits
   }
 });
 
-test('the keys do the same in every camera mode', () => {
+test('the keys do the same in every camera mode, except V in the kill cam', () => {
   // The kill cam, the overview and the sight all take them; each action keeps its own rules.
   const keys = [' ', 'tab', '1', 'j', 'f', 'g', 'c', 'v', 'm', '-', 'n', 'x', 'b'];
   const base = keys.map((k) => act(k));
-  for (const mode of MODES) assert.deepEqual(keys.map((k) => act(k, { mode })), base, mode);
+  for (const mode of MODES) {
+    const want = mode === 'kill' ? base.map((a, i) => (keys[i] === 'v' ? null : a)) : base;
+    assert.deepEqual(keys.map((k) => act(k, { mode })), want, mode);
+  }
+});
+
+test('V in the kill cam is ignored whole: no action, and it is still just a held key', () => {
+  const r = keyRoute('v', match({ mode: 'kill' }));
+  assert.equal(r.action, null);
+  assert.equal(keyRoute('v', match({ mode: 'overview' })).action, 'view');
+  assert.equal(keyRoute('v', match({ mode: 'follow' })).action, 'view');
 });
 
 test('the sight drag and pinch', () => {
