@@ -60,7 +60,9 @@ export class RangeCard {
     const w = game.weaponOf(me, me.weapon);
     const blast = (w?.impact.find((i) => i.type === 'blast') || WEAPON_BY_ID.shell.impact[0]).radius;
 
-    // ---- plot
+    // ---- plot (skipped while the card is hidden and measures 0x0: a negative
+    // scale would make arc() throw and cost the frame its render)
+    if (Math.min(W, H) < 30) { this.dims = null; this.key = null; return; }   // measure again next frame
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const g2 = cv.getContext('2d');
     g2.setTransform(dpr, 0, 0, dpr, 0, 0);
