@@ -45,6 +45,7 @@ import { bossMatch } from './core/boss.js';
 import { watchPortraitExit } from './portraitexit.js';
 import { MatchBuilder, matchConditions, matchTime, conditionsLabel, edgeLabel, parseTestParams } from './builder.js';
 import { clampCameraY } from './camlimit.js';
+import { RunUI } from './runui.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -2068,6 +2069,7 @@ function showRoundResult(kind) {
   if (!game) return;
   const w = game.lastRoundResult.winner != null ? game.players[game.lastRoundResult.winner] : null;
   if (kind === 'matchOver') {
+    if (run.matchOver(game)) return;   // a run's fight: the run's own result card
     const sorted = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
     $('mo-title').textContent = bossUi.matchTitle() || `Match winner: ${sorted[0].name}`;
     $('mo-table').innerHTML = standingsTable(sorted);
@@ -2187,20 +2189,33 @@ function openShopFor(pid) {
   $('shop-done').onclick = nextShopper;
 }
 
-$('mo-again').onclick = () => {
-  $('matchover').classList.add('hidden');
+// Out of the match and back to the menu's field (the launch screen is the caller's).
+function toMenuScene() {
   leaveRoom();
   closeHandoff();
   showHud(false);
   disposeMatch();
   game = null;
+  killCam = null;
+  timeScale = 1;
+  document.body.classList.remove('killcam');
   scene.add(menuMesh.group, menuScenery.group);
   tracer.visible = false;
   sky.fit(menuField.terrain.half);
   birds.reset(menuField.terrain, 5);
+}
+$('mo-again').onclick = () => {
+  $('matchover').classList.add('hidden');
+  toMenuScene();
   $('setup').classList.remove('hidden');
   renderSetup();
 };
+// The run (runui.js): its map and stops on its own screen, its fights here.
+const run = new RunUI({
+  startMatch, toMenu: toMenuScene, name: humanName, click: () => sound.click(),
+  begin: () => { sound.ensure(); phoneFullscreen(touch); if (humanName()) profile.setName(humanName()); },
+  showSetup: () => { $('setup').classList.remove('hidden'); renderSetup(); },
+});
 
 // ---------------------------------------------------------------- online
 
@@ -2661,7 +2676,7 @@ $('loading').classList.add('hidden');
 frame();
 
 // Exposed for debugging from the console.
-window.craterfall = { craft, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
+window.craterfall = { craft, run, get game() { return game; }, startMatch, muzzleOrigin, camera, controls, renderer, scene, sky, birds, sound, music, effects, tick, held,
   get tanks() { return tanks; }, get camGoal() { return camGoal; },
   lookAt(x, y, z, from) { pinned = true; camTarget.set(x, y, z); controls.target.set(x, y, z); camera.position.set(...from); camGoal = null; },
   release() { pinned = false; },
