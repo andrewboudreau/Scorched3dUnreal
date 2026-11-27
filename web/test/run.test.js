@@ -187,9 +187,10 @@ test('the boss: lost with a hull left you may try again; beaten, the run is won'
   let s = startRun(SEEDS[3]);
   while (currentStop(s)?.kind !== 'boss') { s = chooseStop(s, reachable(s)[0]); if (currentStop(s).kind !== 'boss') s = settle(s); }
   assert.equal(s.path.length, RUN.tiers + 1);
-  let r = applyFightResult(s, { won: false, kit: s.kit });
+  let r = applyFightResult(s, { won: false, kit: { ...s.kit, perks: ['thunderhead:airburst'], money: 9999 } });
   assert.equal(r.state.hulls, RUN.hulls - 1);
   assert.equal(r.state.done, false, 'still at the boss');
+  assert.deepEqual(r.state.kit, s.kit, 'a retry starts from the kit brought to the boss');
   assert.equal(r.state.over, null);
   r = applyFightResult(r.state, { won: true, kit: r.state.kit });
   assert.equal(r.state.over, 'won');

@@ -307,13 +307,14 @@ export function fightWon(game) {
 // (game.js kitOf), won or lost: ammo spent stays spent, money earned stays.
 // A win: +RUN.winPoints skill point and the stop's reward, and its CPUs join
 // the beaten. A loss: one hull; with none left the run is over. A lost boss
-// fight may be tried again while a hull is left.
+// fight may be tried again while a hull is left, with the kit you brought to
+// it (the boss match's own gifts to the team are not kept).
 // Returns { state, outcome: { won, reward, hullLost, over } }.
 export function applyFightResult(state, { won, kit }) {
   const stop = currentStop(state);
   if (!stop || state.done || !stop.match) throw new Error('no fight to settle here');
   const s = clone(state);
-  if (kit) s.kit = cleanKit(kit);
+  if (kit && stop.kind !== 'boss') s.kit = cleanKit(kit);
   const outcome = { won: !!won, reward: null, hullLost: false, over: null };
   if (won) {
     const reward = { ...(stop.reward || {}), points: (stop.reward?.points || 0) + RUN.winPoints };
