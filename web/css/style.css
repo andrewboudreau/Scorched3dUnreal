@@ -686,3 +686,11 @@ body.touch #setup #net-rooms { max-height: none; }
   #setup button { min-height: 44px; }
   #setup #net-rooms { max-height: none; }
 }
+
+/* The side view of the planned shot (src/render/sidepanel.js): a canvas, top centre, clear of the cards either side. */
+#sideview { position: fixed; z-index: 2; top: 10px; left: 50%; transform: translateX(-50%); pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: var(--r); }
+/* In the sight the compass tape and its readout take the top centre: the panel moves under the scoreboard (phone) or the zoom chip (desktop). */
+#sideview.in-sight { top: 124px; left: auto; right: 14px; transform: none; }
+body.touch #sideview { top: 6px; }
+body.touch #sideview.in-sight { top: 90px; right: calc(56px + env(safe-area-inset-right)); }

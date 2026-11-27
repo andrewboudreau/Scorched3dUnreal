@@ -32,6 +32,7 @@ import { Birds } from './render/birds.js';
 import { AlienCraft } from './render/craft.js';
 import { setRidgeWorld, overviewGoal } from './render/ridgeline.js';
 import { AngleDials } from './render/dials.js';
+import { SidePanel } from './render/sidepanel.js';
 import { Sound } from './audio.js';
 import { Music, TRACKS } from './music.js';
 import { TouchControls, wantTouch, coarsePointer, mobilePerf } from './touch.js';
@@ -95,6 +96,7 @@ const effects = new Effects(scene);
 const napalmView = new NapalmView(scene, effects);   // Napalm's burning fuel and the Dirt Bomb's "Buried" tags
 const aimArc = new AimArc(scene, $('labels'));   // the dashed climb of the shot being planned
 const dials = new AngleDials(scene);             // turret and elevation gauges on your tank while you aim
+const sideView = new SidePanel($('hud'), { touch: wantTouch() });   // the planned shot, side on (Settings > Graphics)
 const gunner = new Gunner($('hud'));             // the sight: G, or Sight on a phone
 const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
@@ -269,6 +271,7 @@ function disposeMatch() {
   rain.clear();
   lastLand.clear();
   aimArc.hide();
+  sideView.hide();
   dials.reset();
   satView.reset();
   modsUi.reset();
@@ -1316,6 +1319,7 @@ function updateAimAids() {
     const b = believed(q);
     if (b) enemies.push({ name: b.r > 0 ? `${q.name}?` : q.name, color: q.color, x: b.x, y: b.y, z: b.z });
   }
+  sideView.update(game, killCam || overview ? null : p, enemies, { sight: gunner.active });
   satView.update({ game, p: killCam ? null : p, level: p ? game.surveyLevel(p) : 0, at: p ? modsUi.satAt(p) : null, camera, foes: enemies, time: elapsed, dt: lastDt, compact: document.body.classList.contains('touch') });
   if (!gunner.active || !p) { gunner.hide(); return; }
   gunner.hud(camera, p, enemies, lastShotText(p));
@@ -1552,6 +1556,7 @@ if (touch && canFullscreen()) watchPortraitExit({ isFullscreen, leave: () => {
   banner('Left full screen', 'Settings > Full screen to go back', 2600);
 } });
 settings.toggle({ id: 'dials', group: 'look', label: 'Angle dials', hint: 'turret and elevation rings on your tank', get: () => dials.enabled, set: (on) => dials.setEnabled(on) });
+settings.toggle({ id: 'sideview', group: 'look', label: 'Side view', hint: 'the planned shot drawn side on, top centre', get: () => sideView.enabled, set: (on) => sideView.setEnabled(on) });
 settings.add({ id: 'guide', group: 'more', label: 'Guide', hint: 'how to play', run: () => import('./guide.js').then((m) => m.openGuide()) });   // lazy: src/guide.js
 settings.add({ id: 'catalog', group: 'more', label: 'Catalog', hint: 'all weapons, perks, mods (dev)', run: () => { window.open('catalog.html', '_blank'); } });   // catalog.html + src/catalog.js
 
