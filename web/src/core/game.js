@@ -140,6 +140,9 @@ export class Game {
     // A boss match (core/boss.js): the last player is the boss, team 1, and
     // everyone else is on team 0 against it. One walled meadow with its fort.
     boss = false,
+    // A factor on all the money earned in the match (stipend, survival, wins,
+    // damage, kills, mods shot down): a run's fights pay a share (core/run.js).
+    pay = 1,
   }) {
     const known = (list, all) => (Array.isArray(list) ? list.filter((id) => all.some((x) => x.id === id)) : null);
     const noTwists = twists === false;
@@ -153,6 +156,7 @@ export class Game {
       modifier: MODIFIER_BY_ID[modifier] ? modifier : null,
       time: resolveTime(time, seed),
       boss: !!boss,
+      pay: Number.isFinite(pay) && pay >= 0 ? Math.min(pay, 4) : 1,
     };
     if (boss) { this.cfg.edges = 'wall'; this.cfg.world = 'meadow'; }
     this.cfg.twists = this.draftOn || MODIFIERS.some((m) => this.modifierOn(m.id));   // kept for anything that still reads it
@@ -1529,6 +1533,7 @@ export class Game {
 
   // Money in, counted by where it came from (EARNINGS) for the results.
   earn(p, kind, amount) {
+    if (this.cfg.pay !== 1) amount = Math.round(amount * this.cfg.pay);
     p.money += amount;
     p.earned = p.earned || {};
     p.earned[kind] = (p.earned[kind] || 0) + amount;

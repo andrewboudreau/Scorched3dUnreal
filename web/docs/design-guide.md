@@ -319,11 +319,11 @@ accounts) so a run follows you to another device.
   random rank (two from tier 5). The world (Rolling, Hilly and Mountains
   twice as likely as City, Floating isles, Ridgeline or Island), wind, edges
   and time are rolled per stop; half the stops carry a round modifier for
-  every round. Reward: $80 + $40 a tier, half the time with a weapon or two.
+  every round. Reward: $60 + $30 a tier, half the time with a weapon or two.
 - **Elites:** one Hard CPU with Point Defense or a Gravity Orbiter up from the
-  first turn (level 2 in tiers 5 and 6), and ranks. Reward: $200 + $60 a
+  first turn (level 2 in tiers 5 and 6), and ranks. Reward: $150 + $50 a
   tier, ammo, and a skill point on top of the win's.
-- **Caches:** a skill point, a crate (two or three weapons), or $200 + $50 a
+- **Caches:** a skill point, a crate (two or three weapons), or $150 + $40 a
   tier. **Depots:** the armory at round-2 prices, and one variant swap a
   visit (the upgrade stays).
 - **The kit** is a player's `kit` in the game's config (money, ammo, jets,
@@ -340,7 +340,32 @@ accounts) so a run follows you to another device.
   keeps its ranks. Nobody beaten: a plain Normal CPU.
 - **Saving:** `localStorage` under `craterfall.run.v1`, after every step. A
   save from another version, or one that does not fit its map, is dropped.
-  A match left by closing the page is played again from the start.
+  A match left by closing the page is played again from the start; the save
+  marks the fight as started (`fighting`), so Continue and the stop's card
+  say it starts over.
+
+**Stage 4 as built (the first polish pass):**
+
+- **Money is a choice.** Before, a run's fight paid the full match money on
+  top of its reward: a quick win was about $1,200, and a run reached a Depot
+  with about $2,750 against $1,870 for one of everything in the armory. Now
+  `Game` takes a `pay` factor on everything earned in a match (stipend,
+  survival, the win, damage, kills, mods shot down) and a run's fights use
+  `RUN.matchPay` = 0.2; stop money is trimmed (above). A two-round fight's
+  CPUs start with $250 for the shop between its rounds, the round-one pay the
+  cut takes from them. `tools/runsim.mjs` plays runs headlessly (a Hard CPU in
+  your seat) and prints the money at each stop: a run now reaches a Depot
+  with about $550 (shopping between rounds) to $780 (saving it all), enough
+  for three to five purchases, and the boss with about $400 to $900.
+  A test checks no route's stop money alone buys the whole armory.
+- **Loose ends:** beating the boss gives no point or reward (the run is
+  over). The result card shows the match's own pay beside the reward. After
+  a lost boss fight the map opens on the boss's card.
+- **Feel:** the map's header shows the stop and its tier's name ("Stop 3 of
+  7 · Badlands"; "3/7" in portrait, where the points pill gives way to the
+  Skills badge). The boss's card shows the Bulwark's health, its phases and
+  weak spot (from `core/boss.js`), and each ally's ranks and mod levels.
+- **Left for later:** map art, richer reward cards, a fuller summary.
 
 ### The boss: two against one (built in the sandbox)
 
@@ -383,12 +408,11 @@ Each stage ships on its own:
 3. **The run** (built): map generation, the map screen (touch first), the
    stops, spare hulls, saving, a result card after each fight and a plain
    summary at the end.
-4. **Polish:** map art, reward cards, the run summary, a balance pass.
+4. **Polish** (started): the run's money (built), the header and boss
+   card (built); map art, reward cards and the run summary to come.
 
-Open: how long a run should be; co-op runs online. Money for the balance
-pass: a won fight pays its in-match money too (about $600 to $900 for a
-short one, more for big overkill hits, since damage pay is not capped at the
-health taken), which piles up between depots.
+Open: how long a run should be; co-op runs online. (The run's money, once
+open here, is tuned: see "Stage 4 as built" above.)
 
 ## Attributes: buffs and debuffs
 
