@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { makeProjectile, stepProjectile, groundContact, wellContact, launchVelocity, EDGE_KINDS } from './core/ballistics.js';
-import { muzzleOrigin } from './core/tank.js';
+import { EDGE_KINDS } from './core/ballistics.js';
+import { makeFlight, traceFlight } from './sideview.js';
 
 // Two aiming aids.
 //
@@ -46,6 +46,7 @@ export class AimArc {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     this.line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: '#ffffff', dashSize: 2.2, gapSize: 1.6, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.flight = makeFlight();
     this.line.frustumCulled = false;
     this.line.renderOrder = 5;
     this.line.visible = false;
@@ -118,41 +119,16 @@ export class AimArc {
 
   trace(game, p) {
     const t = game.terrain;
-    const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power), t);
-    pr.g = game.gravity;
-    pr.windK = game.windShare(p);
-    pr.drag = game.shellDrag(p);
-    if (t.wells.length) pr.wells = t.wells;
-    let n = 0;
-    let buf = this.pos;
-    let n1 = 0;            // the first line's length, once it wraps
-    let edge = '';         // 'bounces' or 'wraps': the climb meets the arena's edge
-    const put = (q) => { buf[n * 3] = q[0]; buf[n * 3 + 1] = q[1]; buf[n * 3 + 2] = q[2]; n++; };
-    put(pr.pos);
-    let hit = null;
-    for (let i = 0; i < 2400 && n < MAX_PTS - 1; i++) {
-      stepProjectile(pr, game.wind);
-      const c = pr.crossed;
-      if (c) {
-        put(c.point);
-        if (c.kind === 'wall') { hit = 'wall'; break; }
-        if (c.kind === 'bounce') edge = 'bounces';
-        else if (!n1) { n1 = n; buf = this.pos2; n = 0; put(c.to); edge = 'wraps'; }
-        else break;        // wrapped twice before the top: show the first time round only
-      }
-      if (pr.wells && wellContact(pr)) { hit = 'moon'; break; }
-      if (t.inBounds(pr.pos[0], pr.pos[2])) {
-        const g = groundContact(pr, t);
-        if (g) { put(g); hit = 'ground'; break; }
-      }
-      if (i % 4 === 3) put(pr.pos);
-      if (pr.vel[1] <= 0) break;           // the top of the climb
-    }
-    if (!hit) put(pr.pos);
-    const top = [buf[(n - 1) * 3], buf[(n - 1) * 3 + 1], buf[(n - 1) * 3 + 2]];
+    const f = traceFlight(this.flight, game, p);   // the climb, to the top (sideview.js)
+    const { n, n1, hit, edge } = f;
+    // The line before a wrap in one buffer, the part after it in the other.
+    const first = n1 || n;
+    for (let i = 0; i < first; i++) { this.pos[i * 3] = f.x[i]; this.pos[i * 3 + 1] = f.y[i]; this.pos[i * 3 + 2] = f.z[i]; }
+    for (let i = n1; i < n && n1; i++) { const o = (i - n1) * 3; this.pos2[o] = f.x[i]; this.pos2[o + 1] = f.y[i]; this.pos2[o + 2] = f.z[i]; }
+    const top = [f.x[n - 1], f.y[n - 1], f.z[n - 1]];
     this.top = top;
     this.wrapped = n1 > 0;
-    for (const [line, count] of this.wrapped ? [[this.line, n1], [this.line2, n]] : [[this.line, n]]) {
+    for (const [line, count] of this.wrapped ? [[this.line, n1], [this.line2, n - n1]] : [[this.line, n]]) {
       line.geometry.setDrawRange(0, count);
       line.geometry.attributes.position.needsUpdate = true;
       line.computeLineDistances();

@@ -359,6 +359,26 @@ second column beside the first. On a phone the players box sits top right.
   the ring; the sight never shows them. On level ground a shell comes
   down about twice as far out as its top. It stops short of the landing on
   purpose: that is still yours to judge (or the Rangefinder's).
+- **Side view** (Settings > Graphics > Side view; on by default on a phone, off on a
+  desktop). A small panel at the top centre draws the planned shot flat, side on, because
+  the 3D arc is edge on from behind the tank: the ground along the line of the shot,
+  your tank, and the climb to its top (a dot, with a dashed drop and a ring on the
+  ground, and the same words as the arc's label). It is the same flight the arc
+  draws, from the same simulator (this turn's wind, drag, gravity, the moons and the
+  edge rule), and it keeps the arc's honesty: the climb only, never the fall. The
+  Tracer perk shows more, exactly as its 3D line does: the flight runs on past the
+  top to 45 m of flight when the climb is shorter than that. The ground is drawn
+  past the end of the shot (the world shows it anyway) but nothing says where the
+  shell comes down. A shot that meets a hillside, a wall or a moon on its way up ends
+  in a cross. With Edges on Bounce, the ground and the path fold back at a thin line
+  where the shot meets the wall; with Wrap the ground is cut there and the path
+  starts again; with Open or Wall the ground stops at the arena's side. Enemies you
+  can see and that lie within 22 m of the line show as a coloured tick at their
+  range. It is a 2D canvas, redrawn only when the aim, the wind or the round changes,
+  and it takes no touches. In the sight it moves under the scoreboard. The numbers
+  (tracing, layout, ground sampling, the saved setting) are in `src/sideview.js`, tested in
+  `test/sideview.test.js`; the drawing is `src/render/sidepanel.js`. The aim arc itself
+  traces through the same `traceFlight`.
 - **Angle dials** (Settings > Graphics > Angle dials, on by default). While you aim, two
   thin gauges sit on your own tank so you can read the turret and the barrel
   on the tank itself. A ring lies on the ground round it, hugging the terrain,
