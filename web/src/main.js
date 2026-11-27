@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/addons/OrbitControls.js';
 import { Game, PLAYER_COLORS, FOG } from './core/game.js';
 import { WEAPONS, WEAPON_BY_ID, ITEMS, blastDamage } from './core/weapons.js';
-import { Session } from './core/netplay.js';
+import { Session, winnerSeat } from './core/netplay.js';
 import { RoomLink, listRooms } from './net.js';
 import { profile } from './profile.js';
 import { TANK, JET, muzzleOrigin, hitSphere } from './core/tank.js';
@@ -2098,7 +2098,7 @@ function showRoundResult(kind) {
     $('mo-table').innerHTML = boss ? boss.table : standingsTable(sorted);
     $('mo-stats').innerHTML = statsTable(sorted);
     $('mo-awards').innerHTML = awards(game.players);
-    if (session?.isHost) link?.result(boss && boss.winner !== 'allies' ? null : session.seatOf[sorted[0].id] ?? null);   // for the players' records
+    if (session?.isHost) link?.result(winnerSeat(game, session.seatOf));   // for the players' records
     $('matchover').classList.remove('hidden');
     return;
   }

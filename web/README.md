@@ -967,6 +967,16 @@ second column beside the first. On a phone the players box sits top right.
   (`jets.test.js`), whole CPU-only matches, and
   online matches between several simulated screens with deliberate drift,
   including screens reloading at every stage of a match (`netplay.test.js`).
+- `test/lockstep.js` is the online determinism harness (`netplay-lockstep.test.js`
+  uses it). It plays one online match on several simulated screens from one
+  room log, every screen on the same fixed clock, and compares each screen's
+  own state with the host's every time a `snap` or `close` comes in: any
+  field that differs is a determinism bug, reported by its path
+  (`.players.0.shots.0`). Its bots drive, hop, deploy mods, take weapon
+  variants and buy; the tests cover the boss match, three-screen rain and
+  mod matches, the City, CPU Flak, a reload mid-match and uneven frame rates.
+  To hunt a new feature's drift, run `playMatch` with that feature on over many
+  seeds and print `mismatches[0]`.
 - `tools/balance.mjs` runs headless balance sims on the seeded dice, so the
   same command prints the same numbers: `variants` (each weapon variant against
   its base, fired by a CPU; `--pit` puts the target in a crater), `flak` (Flak

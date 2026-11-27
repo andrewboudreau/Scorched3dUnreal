@@ -25,6 +25,12 @@ render layout, `docs/design-guide.md` for where the design is going, and
 ## Checking work
 
 - **Tests:** from `web/`, run `node --test`. Tests never import three.js.
+- **Online determinism:** a change to the core that online play uses (state,
+  a weapon, a mod, the City) should keep `test/netplay-lockstep.test.js` green.
+  Its harness (`test/lockstep.js`, see its header) plays several screens from
+  one room log and reports the first field where a screen's state differs from
+  the host's. New state a guest can't work out for itself goes in `snapshot()`
+  or in the `plan` message.
 - **Dev server:** `node tools/devserver.mjs <port>` serves the game and the same
   APIs as the live server. Port 8090 is usually the main session's; agents use
   another port.

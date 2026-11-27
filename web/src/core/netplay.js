@@ -5,7 +5,8 @@
 // Only decisions travel, never frames:
 //   start  the host's settings, seed and seating: everyone builds the same game
 //   plan   one human's volley: their aim (secret until it fires) and where
-//          they drove or hopped (position, hull, fuel and jump jets left)
+//          they drove or hopped (position, hull, fuel and jump jets left, and
+//          the aim history and hits taken on the spot that moving clears)
 //   snap   once every plan is in, the host's whole game state. Everyone takes
 //          it on before the turrets swing, so any drift between screens (frame
 //          rates, a browser's maths) is gone before each volley
@@ -22,6 +23,24 @@
 // A screen that reloads comes back to its seat (`resume`): it reads the whole
 // log, jumps to the host's latest state (the last snap or close) and carries on
 // from there. Its own plans and shopping from before the reload count as made.
+
+import { bossStandings } from './boss.js';
+
+// The seat the host reports as the match's winner, for the players' records
+// (one seat, or null: nobody). A boss match: when the allies win, the human
+// among them who dealt the boss the most (a CPU ally on top does not take
+// the win from them); when the boss wins, or nobody does, null. Any other
+// match: the most rounds won, then the most money, if a human sits there.
+export function winnerSeat(game, seatOf) {
+  const s = game.cfg.boss ? bossStandings(game.players, game.lastRoundResult) : null;
+  if (s) {
+    if (s.winner !== 'allies') return null;
+    const top = s.rows.find((r) => r.side === 'allies' && seatOf[r.id] != null);
+    return top ? seatOf[top.id] : null;
+  }
+  const [top] = [...game.players].sort((a, b) => b.wins - a.wins || b.money - a.money);
+  return seatOf[top?.id] ?? null;
+}
 
 const keyOrder = (k) => { const [r, t] = String(k).split('.').map(Number); return r * 10000 + t; };
 
@@ -132,8 +151,10 @@ export class Session {
         if (!g.isLocal(p) || this.sent.has(k)) continue;
         this.sent.add(k);
         if (this.echoed('plan', (m) => m.key === g.volleyKey && m.id === id)) continue;   // sent before a reload
+        // Driving and hopping also cleared the tank's aim history and its
+        // count of hits taken on the spot (game.driveTank): those go too.
         this.send({ t: 'plan', key: g.volleyKey, id, plan: g.volley.plans[id] || null,
-          tank: { x: p.x, y: p.y, z: p.z, hull: p.hull, fuel: p.fuel, jets: p.jets } });
+          tank: { x: p.x, y: p.y, z: p.z, hull: p.hull, fuel: p.fuel, jets: p.jets, hitsHere: p.hitsHere, shots: p.shots } });
       }
     }
     // The host settles each volley once every plan is in.

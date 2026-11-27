@@ -2406,7 +2406,7 @@ export class Game {
       for (const k of Object.keys(p.inventory)) if (WEAPON_BY_ID[k]?.infinite) p.inventory[k] = Infinity;
       if (wasAlive && !p.alive) this.emit({ type: 'destroyed', player: p.id, by: null, pos: [p.x, p.y, p.z] });
     });
-    if (s.volley) this.volley = { queue: [], plans: s.volley.plans, done: s.volley.done, shown: null };
+    if (s.volley) this.volley = { queue: [], plans: JSON.parse(JSON.stringify(s.volley.plans)), done: [...s.volley.done], shown: null };   // copies: the volley writes to them
     this.projectiles = [];
     this.followUps = [];
     this.strike = null;
