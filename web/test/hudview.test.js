@@ -66,7 +66,7 @@ test('the phone-first calls the issue asked for', () => {
 });
 
 test('every selector names something that is in the page or the touch controls', () => {
-  const source = ['index.html', 'src/touch.js', 'src/bossui.js', 'src/settings.js', 'src/strike.js', 'src/main.js', 'src/hud.js', 'src/sideview.js', 'src/render/sidepanel.js'].map(read).join('\n');
+  const source = ['index.html', 'src/touch.js', 'src/bossui.js', 'src/settings.js', 'src/strike.js', 'src/main.js', 'src/hud.js', 'src/labels.js', 'src/sideview.js', 'src/render/sidepanel.js'].map(read).join('\n');
   for (const row of HUD) {
     if (!row.sel) continue;
     const bare = row.sel.replace(/:(has|not)\([^)]*\)/g, '');

@@ -52,7 +52,9 @@ import { RunUI } from './runui.js';
 import { hudView, setHudView, installHudViews } from './hudview.js';
 import { useHint } from './hints.js';
 import { Hud } from './hud.js';
-import { escapeHtml, whose, ownedWeapons } from './hudlogic.js';
+import { Labels } from './labels.js';
+import { setText } from './domwrite.js';
+import { escapeHtml, whose, ownedWeapons, probeColor } from './hudlogic.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -99,6 +101,8 @@ const rig = new CameraRig(renderer, {
 });
 const { camera, controls } = rig;
 const satView = new SatelliteView(scene, $('labels'));   // the Survey Satellite's patch and labels
+// The marks over the tanks, the fog's ghosts, the edge arrows and the pips (labels.js).
+const marks = new Labels({ root: $('labels'), camera, scene, seen: (p) => seen(p), believed: (p) => believed(p), peekAt: (p) => rig.peekAt(p) });
 const lastLand = new Map();                      // tank id -> where its last shot came down: { shot, pos, at }
 const sound = new Sound();
 const music = new Music(sound);
@@ -118,8 +122,7 @@ let sceneryMesh = null;
 let cityView = null;            // the City world's buildings and traffic (render/cityMesh.js)
 let tanks = [];
 let smoke = [];                 // per tank: seconds until its next puff
-let labels = [];
-let ghosts = [];                // fog: per tank, a ring and a label where this screen last placed it
+let ghosts = [];                // fog: per tank, a ring where this screen last placed it (its label: labels.js)
 let pulses = [];                // fog: scout bursts spreading out
 let fogFor = null;              // fog: the tanks this screen sees for, this frame (null: sees everything)
 let wrecks = [];
@@ -127,13 +130,11 @@ const shells = new Map();       // projectile id -> ShellVisual
 const fadingTrails = [];        // finished shells' trails, fading out
 let handoffOpen = false;        // volley planning: waiting for the next human to sit down
 // A volley with one human in it: the camera rides that human's shell and every
-// other tank's landing gets a pip (see addPip). Null when several humans share
+// other tank's landing gets a pip (labels.js addPip). Null when several humans share
 // the screen; then the camera stands back to frame every shell instead.
 let heroId = null;
-const pips = [];
 const hops = new Map();         // tank id -> the jump jet hop being drawn: { from, to, t, dur, puff }
 const ranges = new Map();       // tank id -> its last rangefinder shot: { probes, elev, at, wind }
-let locators = [];              // per tank: edge arrow pointing at it when off screen
 let shopQueue = [];
 let shopPid = null;             // whose draft or armory is open
 let day = 0;                    // 0 late morning .. 1 late afternoon, eased toward the match's progress
@@ -144,32 +145,6 @@ const _v = new THREE.Vector3();
 const camDist = (pos) => camera.position.distanceTo(_v.set(pos[0], pos[1], pos[2]));
 const arenaView = new ArenaView(scene, { effects, sound, camDist });
 const bossMark = new BossMarkView(scene);   // the boss's telegraph on the ground   // the Edges curtains and the Island's sea
-// Scratch objects for per-frame work. Nothing may keep one past the call that filled it.
-const _lblV = new THREE.Vector3();       // projecting labels and popups
-
-// ---- DOM write helpers: touching the DOM with the value it already has still costs
-// style work, so every per-frame write goes through one of these.
-function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
-// An inline style property, remembered on the element so we never read it back.
-function setStyle(el, prop, v) {
-  const c = el._st || (el._st = {});
-  if (c[prop] !== v) { c[prop] = v; el.style[prop] = v; }
-}
-function setDisplay(el, v) { if (el._disp !== v) { el._disp = v; el.style.display = v; } }
-// Move an absolutely placed element (left/top 0 in CSS) by transform, which needs no layout.
-// `anchor` is the element's own centring translate from style.css.
-function moveTo(el, x, y, anchor) {
-  const tf = `translate(${Math.round(x * 2) / 2}px, ${Math.round(y * 2) / 2}px) ${anchor}`;
-  if (el._tf !== tf) { el._tf = tf; el.style.transform = tf; }
-}
-const CENTRE = 'translate(-50%, -50%)', ABOVE = 'translate(-50%, -100%)';
-// Where the HUD panels sit, read once at the start of each frame (before that frame's
-// DOM writes) so screenSpot never forces a layout per marker.
-const HUD_PANELS = ['player-card', 'range-card', 'scoreboard'];
-let hudBoxes = [];
-function readHudBoxes() {
-  hudBoxes = HUD_PANELS.map((id) => { const b = $(id).getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; });
-}
 
 // A short line showing where the shot starts out, for tanks with Tracer Rounds.
 const tracer = new THREE.Line(
@@ -225,7 +200,7 @@ function disposeMatch() {
   bossMark.clear();
   if (fortView) { scene.remove(fortView.group); fortView.dispose(); fortView = null; }
   tanks.forEach((t) => { scene.remove(t.root); t.dispose(); });
-  ghosts.forEach((g) => { scene.remove(g.ring); g.ring.material.dispose(); });
+  ghosts.forEach((ring) => { scene.remove(ring); ring.material.dispose(); });
   pulses.forEach((q) => { scene.remove(q.mesh); q.mesh.material.dispose(); });
   ghosts = []; pulses = []; fogFor = null;
   groundShade.fogOn.value = 0;
@@ -237,11 +212,9 @@ function disposeMatch() {
   effects.clear();
   napalmView.clear();
   hops.clear();
-  tanks = []; wrecks = []; labels = [];
-  pips.forEach(dropPip);      // takes a rangefinder pip's beam out of the scene too
-  pips.length = 0;
+  tanks = []; wrecks = [];
+  marks.clear();      // the marks, ghosts, edge arrows and pips (labels.js)
   heroId = null;
-  $('labels').innerHTML = '';
   moons.set([]);
   gravityLines.set([]);
   sky.setSpace(false);
@@ -277,35 +250,14 @@ function startMatch(config) {
   });
   smoke = game.players.map(() => 0);
   sky.fit(game.terrain.half);
-  labels = game.players.map((p) => {
-    const el = document.createElement('div');
-    el.className = 'tank-label';
-    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}<span class="tl-jam" title="Jammed">JAM</span></div><div class="bar"><div class="fill hp"></div></div>`;
-    $('labels').appendChild(el);
-    return el;
-  });
+  marks.start(game);   // each tank's mark, fog ghost and edge arrow (labels.js)
   ghosts = game.players.map((p) => {
     const ring = new THREE.Mesh(RING, new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.55, depthTest: false, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2;
     ring.renderOrder = 5;
     ring.visible = false;
     scene.add(ring);
-    const el = document.createElement('div');
-    el.className = 'tank-label ghost';
-    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}?</div><small></small>`;
-    el.style.display = 'none';
-    $('labels').appendChild(el);
-    return { ring, el };
-  });
-  locators = game.players.map((p) => {
-    const el = document.createElement('div');
-    el.className = 'locator';
-    el.style.setProperty('--c', p.color);
-    el.innerHTML = `<i></i><b>${escapeHtml(p.name)}</b><small></small>`;
-    el.style.display = 'none';
-    el.addEventListener('click', () => rig.peekAt(p));
-    $('labels').appendChild(el);
-    return el;
+    return ring;
   });
   rig.modes.endLook();
   hud.start(game);
@@ -357,8 +309,7 @@ function handleEvents() {
         wrecks.forEach(dropWreck);
         wrecks = [];
         clearTrails();
-        pips.forEach(dropPip);
-        pips.length = 0;
+        marks.clearPips();
         ranges.clear();
         hops.clear();
         rig.cutKill();
@@ -434,7 +385,7 @@ function handleEvents() {
       case 'fire': {
         hops.delete(e.player);   // it shoots from where it stands, so a hop in the air is over
         // Its next shot retires a tank's rangefinder marks.
-        pips.forEach((q) => { if (q.sticky && q.owner === e.player) { q.sticky = false; q.until = performance.now() + 600; } });
+        marks.retireProbes(e.player);
         if (e.weapon === 'ranger') {
           const p = game.players[e.player];
           ranges.set(e.player, { probes: {}, elev: p.elev, at: [p.x, p.z], wind: [...game.wind] });
@@ -477,12 +428,12 @@ function handleEvents() {
         const owner = v?.owner;
         if (v?.probe) {
           if (e.type === 'impact') {
-            addProbePip(owner, e.pos, v.probe);
+            marks.addProbePip(game, owner, e.pos, v.probe);
             sound.ping(camDist(e.pos));
             const r = ranges.get(owner);
             if (r) r.probes[v.probe.key] = { ...v.probe, pos: [...e.pos] };
           }
-        } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) addPip(owner, e.pos);
+        } else if (e.type === 'impact' && game.volleyMode && heroId != null && owner != null && owner !== heroId) marks.addPip(game, owner, e.pos);
         if (!v?.probe && owner != null) noteLanding(owner, v?.shot, e.type === 'impact' ? e.pos : null);
         retireShell(e.id, e.type === 'impact' ? e.pos : null);
         if ((e.type === 'lost' || e.splash) && !v?.probe && game.phase !== 'aim' && (heroId == null || owner === heroId)) banner(e.splash ? 'In the sea' : game.isles ? 'Lost in the void' : 'Out of the arena', '', 900);
@@ -519,12 +470,11 @@ function handleEvents() {
         else if (e.kind === 'bridge') { effects.dust([e.a[0], e.pos[1], e.a[1]], 5); effects.dust(e.pos, 7); effects.dust([e.b[0], e.pos[1], e.b[1]], 5); sound.thud(camDist(e.pos)); }
         break;
       case 'damage': {
-        if (seen(game.players[e.player])) popDamage(e.player, e.amount);
+        if (seen(game.players[e.player])) marks.popDamage(game.players[e.player], e.amount);
         { const v = game.players[e.player]; sound.hit(camDist([v.x, v.y, v.z])); if (seen(v)) effects.ignite(`tank${e.player}`, 4 + Math.min(5, e.amount * 0.06)); }
         if (insetFor === e.player) flashInset(e.amount);
         // Name the victim on the shooter's pip.
-        const pip = e.by != null && e.by !== e.player && [...pips].reverse().find((q) => q.owner === e.by && performance.now() - q.born < 3000);
-        if (pip) pip.el.querySelector('span').textContent = `${game.players[e.by].name} hit ${e.player === heroId ? 'you' : game.players[e.player].name}`;
+        marks.pipHit(game, e.by, e.player, heroId);
         break;
       }
       case 'void': {
@@ -667,141 +617,6 @@ function closeHandoff() {
 }
 $('handoff-go').onclick = () => { sound.click(); closeHandoff(); };
 $('gunner-btn').onclick = (e) => { e.currentTarget.blur(); sound.click(); toggleGunner(); };   // blur: Space must fire, not press it again
-
-// ---------------------------------------------------------------- pips and locators
-
-// A small dot where a shell came down, pinned to the screen edge (with an
-// arrow) when that spot is off camera. In a volley, other tanks' landings get
-// one in the shooter's colour, lasting a few seconds into the next planning
-// phase. A rangefinder's probes get `sticky` ones, kept until that tank fires
-// again and shown only to it while it plans.
-function addPip(owner, pos, { label, color, sticky = false } = {}) {
-  const now = performance.now();
-  // A cluster's bomblets land together: one pip covers them.
-  if (!sticky && pips.some((q) => q.owner === owner && !q.sticky && now - q.born < 2500 && Math.hypot(q.pos[0] - pos[0], q.pos[2] - pos[2]) < 40)) return;
-  const p = game.players[owner];
-  const el = document.createElement('div');
-  el.className = sticky ? 'pip probe' : 'pip';
-  el.style.setProperty('--c', color || p.color);
-  el.innerHTML = `<i></i><span>${escapeHtml(label || p.name)}</span>`;
-  $('labels').appendChild(el);
-  const q = { owner, pos: [...pos], el, born: now, until: 0, sticky };
-  pips.push(q);
-  return q;
-}
-
-function dropPip(q) {
-  q.el.remove();
-  if (q.beam) { scene.remove(q.beam); q.beam.material.dispose(); }
-}
-
-// Rangefinder colours: the aimed probe white, turret pair amber, power pair cyan.
-const PROBE_COLORS = { aim: '#ffffff', turn: '#ffc35a', power: '#6fe3ff' };
-const probeColor = (key) => PROBE_COLORS[key.replace(/[+-]$/, '')];
-const BEAM_GEO = new THREE.CylinderGeometry(0.8, 0.8, 50, 8, 1, true).translate(0, 25, 0);
-
-function addProbePip(owner, pos, pb) {
-  const label = pb.key === 'aim' ? 'as aimed'
-    : pb.key.startsWith('turn') ? `turret ${pb.yaw.toFixed(1)}°` : `power ${pb.power.toFixed(1)}`;
-  const color = probeColor(pb.key);
-  const q = addPip(owner, pos, { label, color, sticky: true });
-  // A tall thin beam, so the spread reads from across the map.
-  q.beam = new THREE.Mesh(BEAM_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }));
-  q.beam.position.set(pos[0], pos[1], pos[2]);
-  scene.add(q.beam);
-}
-
-// Where a world point sits on screen. One that is off screen (or behind the
-// camera) is pulled onto an edge, in far enough for a name to fit and clear of
-// the HUD panels; `angle` then points from there toward it.
-const _pipV = new THREE.Vector3();
-function screenSpot(x, y, z) {
-  const W = window.innerWidth, H = window.innerHeight;
-  const v = _pipV.set(x, y, z).project(camera);
-  let nx = v.x, ny = v.y;
-  const behind = v.z > 1;
-  if (behind) { nx = -nx; ny = -ny; }
-  const off = behind || Math.abs(nx) > 1 || Math.abs(ny) > 1;
-  if (off) { const m = Math.max(Math.abs(nx), Math.abs(ny)) || 1; nx /= m; ny /= m; }
-  const [l, r, t, b] = off ? [80, W - 80, 60, H - 125] : [10, W - 10, 10, H - 10];
-  const sx = Math.min(r, Math.max(l, (nx * 0.5 + 0.5) * W));
-  let sy = Math.min(b, Math.max(t, (-ny * 0.5 + 0.5) * H));
-  if (off) {
-    // Keep clear of the HUD panels: slide down below any that it lands on.
-    for (const box of hudBoxes) {
-      if (box.width && sx > box.left - 30 && sx < box.right + 30 && sy > box.top - 30 && sy < box.bottom + 25) sy = Math.min(b, box.bottom + 25);
-    }
-  }
-  return { sx, sy, off, angle: Math.atan2(-ny, nx), l, r, t, b };
-}
-
-// Slide an edge marker along its edge until it clears the ones already placed.
-function unstack(s, placed) {
-  const alongY = s.sx === s.l || s.sx === s.r;
-  for (let tries = 0; tries < 6 && placed.some(([px, py]) => Math.hypot(px - s.sx, py - s.sy) < 34); tries++) {
-    if (alongY) s.sy = Math.min(s.b, Math.max(s.t, s.sy + 36)); else s.sx = Math.min(s.r, Math.max(s.l, s.sx + 90));
-  }
-  placed.push([s.sx, s.sy]);
-}
-
-function place(el, s) {
-  if (el._edge !== s.off) { el._edge = s.off; el.classList.toggle('edge', s.off); }
-  moveTo(el, s.sx, s.sy, CENTRE);
-  if (s.off) {
-    const a = `${s.angle}rad`;
-    if (el._a !== a) { el._a = a; el.style.setProperty('--a', a); }
-  }
-}
-
-function updatePips() {
-  const now = performance.now();
-  const placed = [];
-  const labels = [];            // label boxes already placed, so close-together marks stay readable
-  for (let i = pips.length - 1; i >= 0; i--) {
-    const q = pips[i];
-    if (!q.until && !q.sticky && game.phase === 'aim') q.until = now + 4000;
-    const left = q.until ? (q.until - now) / 1000 : Infinity;
-    if (left <= 0) { dropPip(q); pips.splice(i, 1); continue; }
-    const hide = handoffOpen || (q.sticky && game.phase === 'aim' && game.current && game.current.id !== q.owner);
-    setDisplay(q.el, hide ? 'none' : '');
-    if (q.beam) {
-      // Fade a beam the camera is right beside: up close it is a wall, not a marker.
-      const near = Math.min(1, Math.max(0.12, (Math.hypot(camera.position.x - q.pos[0], camera.position.z - q.pos[2]) - 25) / 90));
-      q.beam.visible = !hide;
-      q.beam.material.opacity = 0.5 * near * Math.min(1, left / 1.2);
-    }
-    if (hide) continue;
-    setStyle(q.el, 'opacity', Math.min(1, left / 1.2));
-    const s = screenSpot(q.pos[0], q.pos[1] + 1, q.pos[2]);
-    if (s.off) unstack(s, placed);
-    place(q.el, s);
-    // Marks that land close together (a rangefinder's always do from afar):
-    // the dots stay put and their names stack downward.
-    const span = q.el.lastElementChild;
-    const w = (q.w ||= span.offsetWidth || 60) / 2 + 4;
-    let top = 14;
-    while (top < 100 && labels.some(([x, y, hw]) => Math.abs(x - s.sx) < hw + w && Math.abs(y - (s.sy + top)) < 13)) top += 13;
-    setStyle(span, 'top', `${top}px`);
-    labels.push([s.sx, s.sy + top, w]);
-  }
-}
-
-// While you plan, every opponent that is off screen gets an arrow on the
-// screen edge with its name and range. Click one, or press F, to look.
-function updateLocators() {
-  const me = game.phase === 'aim' && !handoffOpen && !rig.modes.overview && rig.mode !== 'sight' && game.current && !game.current.ai ? game.current : null;   // the sight draws its own markers
-  const placed = [];
-  game.players.forEach((p, i) => {
-    const el = locators[i];
-    const b = me && p !== me && p.alive ? believed(p) : null;
-    const s = b ? screenSpot(b.x, b.y + 4, b.z) : null;
-    if (!s || !s.off) { setDisplay(el, 'none'); return; }
-    setDisplay(el, '');
-    unstack(s, placed);
-    place(el, s);
-    setText(el._small || (el._small = el.querySelector('small')), `${b.r ? '~' : ''}${Math.round(Math.hypot(b.x - me.x, b.z - me.z))} m`);
-  });
-}
 
 // ---------------------------------------------------------------- rangefinder card
 
@@ -1042,19 +857,6 @@ function flashInset(amount) {
   void box.offsetWidth;                                  // restart the animation
   box.classList.add('hit');
   touch?.buzz([40, 30, 70]);
-}
-
-function popDamage(pid, amount) {
-  const p = game.players[pid];
-  const v = _lblV.set(p.x, p.y + 6, p.z).project(camera);
-  if (v.z > 1) return;
-  const el = document.createElement('div');
-  el.className = 'dmg-pop';
-  el.textContent = `-${Math.round(amount)}`;
-  el.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
-  el.style.top = `${(-v.y * 0.5 + 0.5) * window.innerHeight}px`;
-  $('labels').appendChild(el);
-  setTimeout(() => el.remove(), 1300);
 }
 
 // ---------------------------------------------------------------- the sight
@@ -1347,30 +1149,11 @@ function soundScape(dt) {
 
 // ---------------------------------------------------------------- HUD
 
-let labelModeWas = '';
 let findingWas = false;     // the touch Find button is lit while it holds the camera on a tank
 function syncFind() {
   const finding = rig.finding();
   if (finding !== findingWas) { document.querySelector('#touch [data-key="f"]')?.classList.toggle('on', finding); findingWas = finding; }
 }
-function updateLabels() {
-  const mode = rig.labelMode(game.phase);   // how much the marks say, by view (cameramode.js labelMode)
-  if (mode !== labelModeWas) { $('labels').className = `lb-${mode}`; labelModeWas = mode; }
-  syncFind();
-  game.players.forEach((p, i) => {
-    const el = labels[i];
-    const v = _lblV.set(p.x, p.y + 8, p.z).project(camera);
-    const visible = p.alive && seen(p) && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1
-      && !(rig.mode === 'sight' && p === game.current);   // in the sight your own label would sit on the turret line
-    setDisplay(el, visible ? 'block' : 'none');
-    if (!visible) return;
-    moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
-    setStyle(el._fill || (el._fill = el.querySelector('.fill')), 'width', `${(p.hp / p.maxHp) * 100}%`);
-    const jam = game.jammed(p) > 0;   // a Jammer Drone over it (core/mods.js JAM)
-    if (el._jam !== jam) { el._jam = jam; el.classList.toggle('jammed', jam); }
-  });
-}
-
 // ---------------------------------------------------------------- fog of war
 
 const RING = new THREE.RingGeometry(0.92, 1, 56);
@@ -1425,22 +1208,14 @@ function updateFog(dt) {
   game.players.forEach((p, i) => {
     const show = seen(p);
     if (!show) tanks[i].root.visible = false;
-    const g = ghosts[i];
+    const ring = ghosts[i];
     const b = !show ? believed(p) : null;
-    g.ring.visible = !!b;
-    if (!b) { setDisplay(g.el, 'none'); return; }
-    g.ring.position.set(b.x, b.y + 1.5, b.z);
-    g.ring.scale.setScalar(Math.max(8, b.r));
-    g.ring.material.opacity = b.r ? 0.4 : 0.6;
-    const v = _v.set(b.x, b.y + 7, b.z).project(camera);
-    const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
-    setDisplay(g.el, on ? 'block' : 'none');
-    if (!on) return;
-    moveTo(g.el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
-    const ago = game.turnsThisRound - b.at;
-    const unit = game.volleyMode ? 'volley' : 'turn';
-    const text = (b.r ? 'roughly here' : 'last seen here') + (ago > 0 ? `, ${ago} ${unit}${ago > 1 ? 's' : ''} ago` : '');
-    setText(g.small || (g.small = g.el.querySelector('small')), text);
+    ring.visible = !!b;
+    marks.ghost(i, b, game);   // its name and how old the sighting is (labels.js)
+    if (!b) return;
+    ring.position.set(b.x, b.y + 1.5, b.z);
+    ring.scale.setScalar(Math.max(8, b.r));
+    ring.material.opacity = b.r ? 0.4 : 0.6;
   });
   for (let i = pulses.length - 1; i >= 0; i--) {
     const q = pulses[i];
@@ -2103,7 +1878,7 @@ function tick(dt, draw = true) {
   elapsed += dt;
   // The HUD panels' boxes, read before this frame writes anything so the layout is clean
   // (a hidden tab's draw-less ticks have no one looking, so they keep the last boxes).
-  if (game && draw) readHudBoxes();
+  if (game && draw) marks.readBoxes();
   let dayGoal = 0.12;
   if (session) {
     session.pump();
@@ -2146,9 +1921,8 @@ function tick(dt, draw = true) {
     bossMark.update(game, elapsed);
     fortView?.update(elapsed);
     modsUi.update(sdt, elapsed);
-    updateLabels();
-    updatePips();
-    updateLocators();
+    syncFind();
+    marks.update(game, { mode: rig.labelMode(game.phase), sight: rig.mode === 'sight', overview: rig.modes.overview, handoff: handoffOpen });
     updateRangeCard();
     // The sun moves a little every turn and a lot over the match.
     const within = Math.min(1, game.turnsThisRound / ((game.volleyMode ? 1 : game.players.length) * 6));
