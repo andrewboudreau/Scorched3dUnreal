@@ -6,7 +6,7 @@
 // only keeps the seed and what happened; each stop's match seed comes from the
 // run seed and the stop. The run's state is a small JSON record:
 //
-//   { v, seed, name, at, done, path, kit, hulls, beaten, log, over, swapped, fighting, stats }
+//   { v, seed, name, mapv, at, done, path, kit, hulls, beaten, log, over, swapped, fighting, stats, next }
 //
 //   at       the stop you are at (null before the first)
 //   done     whether that stop is settled (a fight played, a cache taken, the
@@ -22,12 +22,16 @@
 //   stats    { dealt, taken }: damage you did and took over the whole run, every
 //            try of every fight (saves from before it load as zeros)
 //   over     null, 'won' or 'lost'
+//   mapv     the map generator's version: 2 has Event stops, 1 (a save from
+//            before them, which has no `mapv`) keeps its map as it was
+//   next     what an Event left for the next fight (modifier, pay, wind, foe
+//            armor, bonus), or null; the next match settled uses it up
 //   swapped  the depot where a variant was already swapped (once a visit)
 //   fighting the stop whose fight was started and not settled yet: a page
 //            closed mid-fight. That fight is played again from the start.
 //
 // The functions that move it on (chooseStop, startFight, applyFightResult,
-// applyCache, swapVariant, leaveDepot, setKit) return a new state and never change the one
+// applyCache, applyEvent, swapVariant, leaveDepot, setKit) return a new state and never change the one
 // they are given.
 
 import { makeRng } from './rng.js';
@@ -43,6 +47,7 @@ import { BOSS, ARENA, bossMatch } from './boss.js';
 
 export const RUN = {
   version: 1,
+  mapVersion: 2,                    // the map generator: 2 adds Event stops (a save without `mapv` is 1)
   tiers: 6,                         // tiers of stops before the boss: six stops and the boss
   perTier: [2, 3],                  // stops in a tier
   hulls: 2,                         // spare hulls at the start
@@ -63,6 +68,7 @@ export const RUN = {
 };
 
 export const RUN_KEY = 'craterfall.run.v1';
+export const LAST_KEY = 'craterfall.lastrun.v1';   // the finished run, kept to read its summary again
 
 // What a stop can be (the design guide's table). `icon` names the map's drawing.
 export const KINDS = {
@@ -70,6 +76,7 @@ export const KINDS = {
   elite: { name: 'Elite', desc: 'A tougher CPU with a mod already up. A better reward.' },
   cache: { name: 'Cache', desc: 'No fight: take one of three.' },
   depot: { name: 'Depot', desc: 'No fight: the armory, and you may swap one variant.' },
+  event: { name: 'Event', desc: 'No fight: something turns up on the road. Pick a choice; each is a trade.' },
   boss: { name: 'Boss', desc: 'The Bulwark on its fort: you and an ally against it.' },
 };
 
@@ -101,10 +108,10 @@ export const RUN_EDGES = [
 // and how many rounds it may last. The foes get harder as the map goes on.
 export const TIER_PLAN = [
   { kinds: ['fight', 'fight', 'fight'], foes: [['easy'], ['easy', 'easy']], rounds: [1] },
-  { kinds: ['fight', 'fight', 'cache'], foes: [['normal'], ['easy', 'normal']], rounds: [1] },
-  { kinds: ['fight', 'elite', 'fight'], foes: [['normal'], ['easy', 'normal']], rounds: [1, 2] },
+  { kinds: ['fight', 'fight', 'cache', 'event'], foes: [['normal'], ['easy', 'normal']], rounds: [1] },
+  { kinds: ['fight', 'elite', 'fight', 'event'], foes: [['normal'], ['easy', 'normal']], rounds: [1, 2] },
   { kinds: ['fight', 'depot', 'elite'], foes: [['hard'], ['normal', 'normal']], rounds: [1, 2] },
-  { kinds: ['fight', 'elite', 'cache'], foes: [['hard'], ['normal', 'hard']], rounds: [1, 2] },
+  { kinds: ['fight', 'elite', 'cache', 'event'], foes: [['hard'], ['normal', 'hard']], rounds: [1, 2] },
   { kinds: ['fight', 'depot', 'cache'], foes: [['hard'], ['hard', 'normal']], rounds: [1, 2] },
 ];
 
@@ -173,8 +180,8 @@ function joinTiers(n, m, rng) {
   return edges;
 }
 
-function pickKinds(t, n, rng) {
-  const [first, ...rest] = TIER_PLAN[t].kinds;
+function pickKinds(t, n, rng, mapv) {
+  const [first, ...rest] = TIER_PLAN[t].kinds.filter((k) => k !== 'event' || mapv >= 2);
   return shuffle([first, ...shuffle(rest, rng).slice(0, n - 1)], rng);
 }
 
@@ -183,19 +190,26 @@ function pickKinds(t, n, rng) {
 // Tiers 0 to RUN.tiers - 1 hold 2 or 3 stops; the last tier is the boss.
 // `runMap` keeps the last few made; `generateMap` always makes it afresh.
 const MAPS = new Map();
-export function runMap(seed) {
+export function runMap(seed, mapv = RUN.mapVersion) {
   seed >>>= 0;
-  if (MAPS.has(seed)) return MAPS.get(seed);
-  const map = generateMap(seed);
+  const key = `${seed}:${mapv}`;
+  if (MAPS.has(key)) return MAPS.get(key);
+  const map = generateMap(seed, mapv);
   if (MAPS.size > 8) MAPS.clear();
-  MAPS.set(seed, map);
+  MAPS.set(key, map);
   return map;
 }
 
-export function generateMap(seed) {
+// The map of a run's state (a save from before Event stops keeps its old map).
+export const mapOf = (state) => runMap(state.seed, state.mapv === 2 ? 2 : 1);
+
+// `mapv` 1 is the generator from before Event stops, so a run saved then
+// finds the same stops it left; 2 is the current one.
+export function generateMap(seed, mapv = RUN.mapVersion) {
   seed >>>= 0;
   const rng = makeRng(mixSeed(seed, 1));
   const used = new Set();
+  const usedEvents = new Set();
   const name = (list) => {
     const free = list.filter((x) => !used.has(x));
     const pick = (free.length ? free : list)[Math.floor(rng.next() * (free.length || list.length))];
@@ -205,8 +219,8 @@ export function generateMap(seed) {
   const tiers = [];
   for (let t = 0; t < RUN.tiers; t++) {
     const n = rng.int(RUN.perTier[0], RUN.perTier[1]);
-    const kinds = pickKinds(t, n, rng);
-    tiers.push(kinds.map((kind, index) => makeStop(seed, t, index, kind, name)));
+    const kinds = pickKinds(t, n, rng, mapv);
+    tiers.push(kinds.map((kind, index) => makeStop(seed, t, index, kind, name, usedEvents)));
   }
   tiers.push([makeBoss(seed)]);
   for (let t = 0; t + 1 < tiers.length; t++) {
@@ -219,7 +233,7 @@ export function generateMap(seed) {
 }
 const byIndex = (id) => Number(String(id).split('s')[1]) || 0;
 
-function makeStop(seed, tier, index, kind, name) {
+function makeStop(seed, tier, index, kind, name, usedEvents) {
   const id = `t${tier}s${index}`;
   const stop = { id, tier, index, kind, next: [] };
   const rng = makeRng(mixSeed(seed, stopKey(id) ^ 0x51ed));
@@ -256,6 +270,14 @@ function makeStop(seed, tier, index, kind, name) {
       { kind: 'ammo', name: 'Ammo crate', ammo: { ...CRATES[Math.floor(rng.next() * CRATES.length)] } },
       { kind: 'money', name: 'Pay chest', money: stopMoney('cache', tier) },
     ];
+  } else if (kind === 'event') {
+    // Which event, and what its dice say: the crate it holds and the luck of
+    // its wager are rolled here, from the stop's own rng, so they are the same
+    // every time the run is opened.
+    const free = EVENTS.filter((e) => !usedEvents.has(e.id));
+    const ev = (free.length ? free : EVENTS)[Math.floor(rng.next() * (free.length || EVENTS.length))];
+    usedEvents.add(ev.id);
+    stop.event = { id: ev.id, crate: { ...CRATES[Math.floor(rng.next() * CRATES.length)] }, luck: Math.round(rng.next() * 1000) / 1000 };
   }
   return stop;
 }
@@ -283,19 +305,19 @@ export const startKitCarried = () => {
 
 export function startRun(seed, name = 'You') {
   return {
-    v: RUN.version, seed: seed >>> 0, name: String(name || 'You').slice(0, 14),
-    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null, fighting: null, stats: { dealt: 0, taken: 0 },
+    v: RUN.version, seed: seed >>> 0, name: String(name || 'You').slice(0, 14), mapv: RUN.mapVersion,
+    at: null, done: true, path: [], kit: startKitCarried(), hulls: RUN.hulls, beaten: [], log: [], over: null, swapped: null, fighting: null, stats: { dealt: 0, taken: 0 }, next: null,
   };
 }
 
 const clone = (s) => JSON.parse(JSON.stringify(s));
-export const currentStop = (state) => (state.at ? runMap(state.seed).byId[state.at] || null : null);
+export const currentStop = (state) => (state.at ? mapOf(state).byId[state.at] || null : null);
 
 // The stops you may go to next: the first tier before you start, then the
 // ones joined to where you are, once it is settled.
 export function reachable(state) {
   if (state.over || !state.done) return [];
-  const map = runMap(state.seed);
+  const map = mapOf(state);
   return state.at == null ? map.tiers[0].map((s) => s.id) : [...(map.byId[state.at]?.next || [])];
 }
 
@@ -359,13 +381,14 @@ export function applyFightResult(state, { won, kit, stats = null }) {
   if (!stop || state.done || !stop.match) throw new Error('no fight to settle here');
   const s = clone(state);
   s.fighting = null;
+  s.next = null;   // an Event's say on the next fight is used up, won or lost
   const dealt = whole(stats?.damage), taken = whole(stats?.taken);
   s.stats = { dealt: whole(s.stats?.dealt) + dealt, taken: whole(s.stats?.taken) + taken };
   if (kit && stop.kind !== 'boss') s.kit = cleanKit(kit);
   const outcome = { won: !!won, reward: null, pay: stop.kind === 'boss' ? 0 : s.kit.money - state.kit.money, hullLost: false, over: null };
   if (won) {
     if (stop.kind !== 'boss') {
-      const reward = { ...(stop.reward || {}), points: (stop.reward?.points || 0) + RUN.winPoints };
+      const reward = { ...(rewardNow(stop, state.next) || {}), points: (stop.reward?.points || 0) + RUN.winPoints };
       addTo(s.kit, reward);
       outcome.reward = reward;
     }
@@ -446,6 +469,208 @@ export function cleanKit(kit = {}) {
   };
 }
 
+// ---------------------------------------------------------------- events
+
+// An Event stop (no fight): a short scene with two or three choices, each a
+// trade. The table is data; `gives` is what a choice does (money, points,
+// jets, armor and fuel for the next fight, hulls, the stop's crate, a wager)
+// and `next` is what it leaves on the next fight (see `mergeNext`):
+//   modifier  the round's twist is forced to this one
+//   pay       the next fight's money (its reward and the match's pay) is multiplied
+//   wind      the wind is at least this strong
+//   foeArmor  the CPUs start with this much armor
+//   bonus     extra money for a win
+// `needs` says what a choice asks of you ({ money }, { points }, { hullsBelow }
+// for a hull below the full count, { hulls } for a spare to spend).
+// What a stop holds (its crate, its wager's luck) is rolled with the map from
+// the run's seed, so it is the same every time the run is opened.
+export const EVENTS = [
+  { id: 'crawler', name: 'Wrecked supply crawler',
+    text: 'A supply crawler lies on its side in a fresh crater, hatches sprung, its beacon still blinking. Whoever fires next will see it too.',
+    choices: [
+      { id: 'salvage', label: 'Salvage the cargo', gives: { crate: true, next: { foeArmor: 25 } } },
+      { id: 'strip', label: 'Strip its plating', gives: { armor: 20 } },
+      { id: 'leave', label: 'Leave it', gives: {} },
+    ] },
+  { id: 'trade', name: 'A crew offers a trade',
+    text: 'A crew in patched coats flags you down from a ridge. Their drill sergeant will teach you what she knows, or their quartermaster will sell you a crate off the books.',
+    choices: [
+      { id: 'train', label: 'Pay for training', gives: { money: -200, points: 1 }, needs: { money: 200 } },
+      { id: 'crate', label: 'Buy a crate', gives: { money: -80, crate: true }, needs: { money: 80 } },
+      { id: 'leave', label: 'Walk on', gives: {} },
+    ] },
+  { id: 'storm', name: 'Storm front',
+    text: 'A black wall of cloud is rolling over the field. Crews pay double for anyone willing to shoot in it, and every shell will fall short.',
+    choices: [
+      { id: 'ride', label: 'Fight in the storm', gives: { next: { modifier: 'rain', pay: 2 } } },
+      { id: 'shelter', label: 'Wait it out', gives: {} },
+    ] },
+  { id: 'yard', name: 'Hull yard',
+    text: 'Salvagers have set up a hull yard in a ruined hangar, with a cutting torch, a welding rig and no questions asked.',
+    choices: [
+      { id: 'patch', label: 'Patch up a spare hull', gives: { money: -300, hulls: 1 }, needs: { money: 300, hullsBelow: true } },
+      { id: 'sell', label: 'Sell a spare hull for scrap', gives: { money: 250, hulls: -1 }, needs: { hulls: 1 } },
+      { id: 'leave', label: 'Move on', gives: {} },
+    ] },
+  { id: 'wager', name: 'Shell game',
+    text: 'Three crates on a drum, one empty shell casing under one of them. A crew will play you for a stake, and has never once been seen to lose.',
+    choices: [
+      { id: 'play', label: 'Play for $100', gives: { wager: { stake: 100, prize: 250 } }, needs: { money: 100 } },
+      { id: 'leave', label: 'Watch and walk on', gives: {} },
+    ] },
+  { id: 'relay', name: 'Fallen relay',
+    text: 'A dead orbital relay hangs in the lee of a floating isle, still warm. There is time to cut out one part before its beacon wakes up.',
+    choices: [
+      { id: 'thrusters', label: 'Cut out its thrusters', gives: { jets: 2 } },
+      { id: 'cells', label: 'Drain its fuel cells', gives: { fuel: 40 } },
+      { id: 'core', label: 'Pull its data core', gives: { points: 1, next: { wind: 2.5 } } },
+    ] },
+  { id: 'bounty', name: 'Bounty board',
+    text: 'A bounty board is bolted to a bunker door. Two contracts are pinned to it, for a crew that sits across your road.',
+    choices: [
+      { id: 'hard', label: 'Take the hard contract', gives: { next: { bonus: 150, wind: 2.5 } } },
+      { id: 'quiet', label: 'Take the quiet job', gives: { next: { bonus: 60 } } },
+      { id: 'leave', label: 'Leave it pinned', gives: {} },
+    ] },
+];
+export const EVENT_BY_ID = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
+
+export const eventOf = (stop) => (stop?.kind === 'event' ? EVENT_BY_ID[stop.event.id] : null);
+
+// `a` plus a choice's `next`, as a new object (null when empty).
+function mergeNext(a, b) {
+  const n = { ...(a || {}) };
+  if (b) {
+    if (b.modifier) n.modifier = b.modifier;
+    if (b.pay) n.pay = Math.max(n.pay || 1, b.pay);
+    if (b.wind) n.wind = Math.max(n.wind || 0, b.wind);
+    if (b.foeArmor) n.foeArmor = (n.foeArmor || 0) + b.foeArmor;
+    if (b.bonus) n.bonus = (n.bonus || 0) + b.bonus;
+  }
+  return Object.keys(n).length ? n : null;
+}
+
+// A save's `next`, made safe (null when it holds nothing).
+function cleanNext(next) {
+  if (!next || typeof next !== 'object') return null;
+  const n = {};
+  if (MODIFIER_BY_ID[next.modifier]) n.modifier = next.modifier;
+  const num = (v, max) => (Number.isFinite(v) && v > 0 ? Math.min(max, v) : 0);
+  if (num(next.pay, 4)) n.pay = num(next.pay, 4);
+  if (num(next.wind, 4)) n.wind = num(next.wind, 4);
+  if (num(next.foeArmor, 200)) n.foeArmor = Math.floor(num(next.foeArmor, 200));
+  if (num(next.bonus, 2000)) n.bonus = Math.floor(num(next.bonus, 2000));
+  return Object.keys(n).length ? n : null;
+}
+
+// What an Event left for the next fight, in words: [{ text, bad }], `bad`
+// for what makes the fight harder.
+export function nextWords(next) {
+  const out = [];
+  if (!next) return out;
+  if (next.modifier) out.push({ text: `${MODIFIER_BY_ID[next.modifier].name}, forced`, bad: false });
+  if (next.pay) out.push({ text: next.pay === 2 ? 'Pays double' : `Pays ×${next.pay}`, bad: false });
+  if (next.bonus) out.push({ text: `+$${next.bonus} for a win`, bad: false });
+  if (next.wind) out.push({ text: `${WIND_NAME(next.wind)} wind at least`, bad: true });
+  if (next.foeArmor) out.push({ text: `CPUs start with +${next.foeArmor} armor`, bad: true });
+  return out;
+}
+
+const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+// What a choice's `gives` does, as things to show: [{ kind, text, bad }].
+// `kind` picks the icon (money, ammo, point, armor, jet, fuel, hull, next).
+// `ev` is the stop's event record (its crate and luck). With `settle` the
+// wager is settled by its luck; without, it is described.
+export function effectLines(g, ev, settle = false) {
+  const out = [];
+  const add = (kind, text, bad = false) => out.push({ kind, text, bad });
+  if (g.money) add('money', `${g.money > 0 ? '+' : '−'}$${Math.abs(g.money)}`, g.money < 0);
+  if (g.points) add('point', `${g.points > 0 ? '+' : '−'}${plural(Math.abs(g.points), 'skill point')}`, g.points < 0);
+  if (g.crate) add('ammo', Object.entries(ev.crate).map(([id, n]) => `${n} ${WEAPON_BY_ID[id]?.name || id}`).join(' · '));
+  if (g.jets) add('jet', `+${plural(g.jets, 'jump jet charge')}`);
+  if (g.armor) add('armor', `+${g.armor} armor at the start of the next fight`);
+  if (g.fuel) add('fuel', `+${g.fuel} m of driving in the next fight`);
+  if (g.hulls) add('hull', `${g.hulls > 0 ? '+' : '−'}${plural(Math.abs(g.hulls), 'spare hull')}`, g.hulls < 0);
+  if (g.wager) {
+    const w = g.wager;
+    if (!settle) add('money', `Stake $${w.stake}: win $${w.prize}, or lose the stake`);
+    else if (wagerWon(ev)) add('money', `You win: +$${w.prize - w.stake}`);
+    else add('money', `You lose: −$${w.stake}`, true);
+  }
+  for (const w of nextWords(g.next)) add('next', `Next fight: ${w.text}`, w.bad);
+  return out;
+}
+
+const wagerWon = (ev) => ev.luck < 0.5;
+
+// Can this choice be taken? { can, why }.
+function choiceCheck(state, ch) {
+  const n = ch.needs || {};
+  const k = state.kit;
+  if (n.money && k.money < n.money) return { can: false, why: `Needs $${n.money}` };
+  if (n.points && k.points < n.points) return { can: false, why: 'Needs a skill point' };
+  if (n.hullsBelow && state.hulls >= RUN.hulls) return { can: false, why: 'Your hulls are whole' };
+  if (n.hulls && state.hulls < n.hulls) return { can: false, why: 'No spare hull to give' };
+  return { can: true, why: '' };
+}
+
+// The event at the current stop for its card:
+// { id, name, text, choices: [{ id, label, lines, can, why }] }.
+export function eventCard(state) {
+  const stop = currentStop(state);
+  const ev = eventOf(stop);
+  if (!ev) return null;
+  return { id: ev.id, name: ev.name, text: ev.text, choices: ev.choices.map((c) => ({ id: c.id, label: c.label, lines: effectLines(c.gives, stop.event), ...choiceCheck(state, c) })) };
+}
+
+// Take a choice at the Event you are at: a new state, and what happened
+// (`lines`, as effectLines). The choice is recorded in the log and the stop is
+// settled. Anything for the next fight lands in `next`.
+export function applyEvent(state, choiceId) {
+  const stop = currentStop(state);
+  if (!stop || stop.kind !== 'event' || state.done) throw new Error('no event here');
+  const ev = EVENT_BY_ID[stop.event.id];
+  const ch = ev.choices.find((c) => c.id === choiceId);
+  if (!ch) throw new Error(`no ${choiceId} at this event`);
+  const check = choiceCheck(state, ch);
+  if (!check.can) throw new Error(check.why);
+  const s = clone(state);
+  const g = ch.gives;
+  const kit = s.kit;
+  if (g.money) kit.money = Math.max(0, kit.money + g.money);
+  if (g.points) kit.points = Math.max(0, kit.points + g.points);
+  if (g.crate) addTo(kit, { ammo: stop.event.crate });
+  if (g.jets) kit.jets += g.jets;
+  if (g.armor) kit.pendingArmor += g.armor;
+  if (g.fuel) kit.pendingFuel += g.fuel;
+  if (g.hulls) s.hulls = Math.max(0, Math.min(RUN.hulls, s.hulls + g.hulls));
+  if (g.wager) kit.money = Math.max(0, kit.money + (wagerWon(stop.event) ? g.wager.prize - g.wager.stake : -g.wager.stake));
+  if (g.next) s.next = mergeNext(s.next, g.next);
+  const lines = effectLines(g, stop.event, true);
+  s.done = true;
+  s.log.push({ stop: stop.id, kind: 'event', event: ev.id, choice: ch.id, label: ch.label, lines });
+  return { state: s, outcome: { event: ev.name, label: ch.label, lines } };
+}
+
+// A stop's match as the next fight will play it, an Event's say on top:
+// { modifier, maxWind }. The boss's match is its own.
+export function matchNow(stop, next) {
+  const m = stop.match;
+  if (!m) return {};
+  if (stop.kind === 'boss' || !next) return { modifier: m.modifier, maxWind: m.maxWind };
+  const maxWind = next.wind ? Math.max(m.maxWind, next.wind) : m.maxWind;
+  const modifier = next.modifier || (next.wind && MODIFIER_BY_ID[m.modifier]?.calm ? 'clear' : m.modifier);
+  return { modifier, maxWind };
+}
+
+// A fight's reward as it will pay: the stop's, with an Event's pay and bonus.
+export function rewardNow(stop, next) {
+  const r = stop.reward;
+  if (!r || !next || stop.kind === 'boss') return r;
+  return { ...r, money: Math.round((r.money || 0) * (next.pay || 1)) + (next.bonus || 0) };
+}
+
 // ---------------------------------------------------------------- matches
 
 // The partners on offer for the boss fight: one CPU you beat, or a choice of
@@ -477,11 +702,13 @@ export function matchConfig(state, { ally = null } = {}) {
     if (a.perks?.length) cfg.players[1].kit = { perks: [...a.perks] };
     return { ...cfg, seed: m.seed, time: m.time, modifier: null };
   }
+  const next = state.next;
+  const now = matchNow(stop, next);
   return {
     players: [me, ...m.foes.map((f) => ({ name: f.name, ai: f.ai,
-      kit: { perks: [...(f.perks || [])], ...(f.up ? { up: [...f.up] } : {}), ...(m.rounds > 1 ? { money: RUN.foeMoney } : {}) } }))],
-    rounds: m.rounds, seed: m.seed, maxWind: m.maxWind, hills: world.hills, world: world.world,
-    edges: m.edges, time: m.time, modifier: m.modifier, firing: 'volley', fog: false, pay: RUN.matchPay,
+      kit: { perks: [...(f.perks || [])], ...(f.up ? { up: [...f.up] } : {}), ...(m.rounds > 1 ? { money: RUN.foeMoney } : {}), ...(next?.foeArmor ? { pendingArmor: next.foeArmor } : {}) } }))],
+    rounds: m.rounds, seed: m.seed, maxWind: now.maxWind, hills: world.hills, world: world.world,
+    edges: m.edges, time: m.time, modifier: now.modifier, firing: 'volley', fog: false, pay: RUN.matchPay * (next?.pay || 1),
     weapons: null, perks: null, modifiers: null, lab: { ...RUN.lab },
   };
 }
@@ -508,17 +735,19 @@ const EDGE_NAME = { open: 'Open edges', wall: 'Walled', bounce: 'Bouncing edges'
 const AI_NAME = { easy: 'Easy', normal: 'Normal', hard: 'Hard' };
 
 // A stop's match in words, for its card: { world, wind, edges, time, modifier, foes, rounds }.
-export function stopDetails(stop) {
+export function stopDetails(stop, next = null) {
   const m = stop.match;
   if (!m) return null;
-  const mod = m.modifier ? MODIFIER_BY_ID[m.modifier] : null;
+  const now = matchNow(stop, next);
+  const mod = now.modifier ? MODIFIER_BY_ID[now.modifier] : null;
   return {
     world: WORLD_BY_ID[m.world]?.name || m.world,
-    wind: `${WIND_NAME(m.maxWind)} wind`,
+    wind: `${WIND_NAME(now.maxWind)} wind`,
     edges: EDGE_NAME[m.edges] || m.edges,
     time: timeName(m.time),
     modifier: mod ? mod.name : 'Clear skies',
     modifierDesc: mod ? mod.desc : '',
+    changed: now.modifier !== m.modifier || now.maxWind !== m.maxWind,   // an Event has altered the round
     rounds: m.rounds,
     foes: m.foes.map((f) => ({
       name: f.name, level: f.boss ? `${BOSS.hp} hp` : AI_NAME[f.ai] || f.ai,
@@ -606,13 +835,15 @@ export function kitMods(kit) {
 
 // The end of a run: { over, route: [{ id, kind, name, won? }], fights: { won, lost }, build }.
 export function runSummary(state) {
-  const map = runMap(state.seed);
+  const map = mapOf(state);
   const route = state.path.map((id) => {
     const stop = map.byId[id];
     const fights = state.log.filter((l) => l.stop === id && l.won != null);
     const d = stop.match ? stopDetails(stop) : null;
     const took = state.log.filter((l) => l.stop === id && l.kind === 'cache').pop()?.offer;
+    const ev = state.log.filter((l) => l.stop === id && l.kind === 'event').pop();
     return {
+      detail: ev ? `${EVENT_BY_ID[ev.event]?.name || 'Event'} · ${ev.label}` : '',
       id, kind: stop.kind, name: KINDS[stop.kind].name, where: d ? d.world : '', won: fights.length ? fights[fights.length - 1].won : null, tries: fights.length,
       foes: d ? d.foes.map((f) => f.name) : [], took: took ? rewardWords(took) : '',
       dealt: fights.reduce((n, l) => n + whole(l.dealt), 0), taken: fights.reduce((n, l) => n + whole(l.taken), 0),
@@ -634,18 +865,19 @@ export function runSummary(state) {
 
 // The run in progress, from the browser's storage, checked; null when there
 // is none, it is from another version, or it does not fit its map.
-export function loadRun(storage) {
+export function loadRun(storage, key = RUN_KEY) {
   let raw = null;
-  try { raw = JSON.parse(storage.getItem(RUN_KEY) || 'null'); } catch { return null; }
+  try { raw = JSON.parse(storage.getItem(key) || 'null'); } catch { return null; }
   if (!raw || typeof raw !== 'object' || raw.v !== RUN.version || !Number.isInteger(raw.seed)) return null;
-  const map = runMap(raw.seed);
+  const mapv = raw.mapv === 2 ? 2 : 1;   // a save from before Event stops has no `mapv`: its map is the old one
+  const map = runMap(raw.seed, mapv);
   const path = Array.isArray(raw.path) ? raw.path.filter((id) => map.byId[id]) : [];
   if (path.length !== (raw.path || []).length) return null;
   for (let i = 1; i < path.length; i++) if (path[i] !== path[i - 1] && !map.byId[path[i - 1]].next.includes(path[i])) return null;
   const at = raw.at == null ? null : map.byId[raw.at] ? raw.at : undefined;
   if (at === undefined || (at !== null && path[path.length - 1] !== at)) return null;
   return {
-    v: RUN.version, seed: raw.seed >>> 0, name: String(raw.name || 'You').slice(0, 14), at, done: raw.done !== false, path,
+    v: RUN.version, seed: raw.seed >>> 0, name: String(raw.name || 'You').slice(0, 14), mapv, at, done: raw.done !== false, path,
     kit: cleanKit(raw.kit), hulls: Math.max(0, Math.min(RUN.hulls, Math.floor(raw.hulls ?? RUN.hulls))),
     beaten: (Array.isArray(raw.beaten) ? raw.beaten : []).filter((f) => f && typeof f.name === 'string')
       .map((f) => ({ name: f.name.slice(0, 14), ai: AI_NAME[f.ai] ? f.ai : 'normal', perks: (f.perks || []).filter((id) => PERK_BY_ID[id]), elite: !!f.elite, stop: f.stop })),
@@ -654,6 +886,7 @@ export function loadRun(storage) {
     swapped: map.byId[raw.swapped] ? raw.swapped : null,
     fighting: raw.fighting != null && raw.fighting === at && raw.done === false ? at : null,
     stats: { dealt: whole(raw.stats?.dealt), taken: whole(raw.stats?.taken) },   // saves from before the totals load as zeros
+    next: cleanNext(raw.next),   // saves from before Events have none
   };
 }
 
@@ -663,4 +896,19 @@ export function saveRun(storage, state) {
 
 export function clearRun(storage) {
   try { storage.removeItem(RUN_KEY); } catch { /* private mode */ }
+}
+
+// The last finished run, kept so its summary can be read again from the
+// launch screen (the run in progress is thrown away at New run or Menu).
+// It is the finished state itself, which is small, and the summary is made
+// from it as ever.
+export function saveLastRun(storage, state) {
+  if (!state?.over) return;
+  try { storage.setItem(LAST_KEY, JSON.stringify(state)); } catch { /* private mode */ }
+}
+
+// The last finished run, checked like any save, or null.
+export function loadLastRun(storage) {
+  const s = loadRun(storage, LAST_KEY);
+  return s?.over ? s : null;
 }

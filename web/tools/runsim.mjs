@@ -7,6 +7,11 @@
 // boss match's money is left out: its kit is not kept.
 //
 //   node tools/runsim.mjs [runs=4] [--ai hard|normal|easy] [--seed N] [--res 96] [--hulls N] [--hoard] [--old]
+//                         [--legacy] [--events random|leave]
+//
+// --legacy plays the maps from before Event stops (no events at all);
+// --events says how the seat treats an Event: `random` takes a random choice it
+// can afford (the default), `leave` takes the choice that does least.
 //
 // --hulls gives the seat more spare hulls, so a weak seat still sees the
 // whole map; --hoard keeps the seat out of the shop between a match's rounds
@@ -15,8 +20,8 @@
 
 import { Game, kitOf } from '../src/core/game.js';
 import {
-  RUN, runMap, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, leaveDepot, setKit,
-  allyChoices, matchConfig, kitGame, fightWon, KINDS,
+  RUN, mapOf, startRun, reachable, chooseStop, currentStop, applyFightResult, applyCache, leaveDepot, setKit,
+  allyChoices, matchConfig, kitGame, fightWon, KINDS, eventCard, applyEvent,
 } from '../src/core/run.js';
 import { WEAPONS, ITEMS } from '../src/core/weapons.js';
 
@@ -27,6 +32,8 @@ const ai = opt('ai', 'hard');
 const seed0 = Number(opt('seed', 4242));
 const res = Number(opt('res', 96));
 const hulls = opt('hulls', null);
+const legacy = args.includes('--legacy');   // the maps from before Event stops
+const events = opt('events', 'random');
 const hoard = args.includes('--hoard');   // the seat never shops between a match's rounds
 // --old: the money rules before the run's economy pass (full match pay, the
 // first stop rewards), to compare against.
@@ -69,6 +76,7 @@ function playFight(s) {
 
 function oneRun(seed) {
   let s = startRun(seed, 'Sim');
+  if (legacy) s.mapv = 1;
   if (hulls != null) s.hulls = Number(hulls);
   const rows = [];
   let pick = seed;
@@ -76,12 +84,12 @@ function oneRun(seed) {
     s = spendPoints(s);
     const next = reachable(s);
     if (!next.length) break;
-    const map = runMap(s.seed);
+    const map = mapOf(s);
     pick = (pick * 1103515245 + 12345) >>> 0;
     const id = next[(pick >>> 16) % next.length];
     s = chooseStop(s, id);
     const stop = map.byId[id];
-    const row = { stop: `${stop.tier + 1}`, kind: KINDS[stop.kind].name, before: s.kit.money, match: 0, shop: 0, reward: 0, depot: 0, after: 0, won: '' };
+    const row = { stop: `${stop.tier + 1}`, kind: KINDS[stop.kind].name, before: s.kit.money, match: 0, shop: 0, reward: 0, depot: 0, event: 0, after: 0, won: '' };
     if (stop.match) {
       let tries = 0;
       do {
@@ -97,6 +105,13 @@ function oneRun(seed) {
     } else if (stop.kind === 'cache') {
       s = applyCache(s, 'money');
       row.reward = s.kit.money - row.before;
+    } else if (stop.kind === 'event') {
+      const can = eventCard(s).choices.filter((c) => c.can);
+      pick = (pick * 1103515245 + 12345) >>> 0;
+      const choice = events === 'leave' ? [...can].sort((a, b) => a.lines.length - b.lines.length)[0] : can[(pick >>> 16) % can.length];
+      s = applyEvent(s, choice.id).state;
+      row.event = s.kit.money - row.before;
+      row.what = choice.label;
     } else if (stop.kind === 'depot') {
       const g = kitGame(s);
       const p = g.players[0];
@@ -113,21 +128,21 @@ function oneRun(seed) {
 }
 
 const pad = (v, n) => String(v).padStart(n);
-const sum = { match: 0, shop: 0, reward: 0, depot: 0, depots: 0, armory: 0, n: 0, atDepot: 0, beforeBoss: 0 };
+const sum = { match: 0, shop: 0, reward: 0, depot: 0, event: 0, events: 0, depots: 0, armory: 0, n: 0, atDepot: 0, beforeBoss: 0 };
 for (let r = 0; r < runs; r++) {
   const seed = seed0 + r * 7919;
   const t0 = Date.now();
   const { rows, over, hulls: left } = oneRun(seed);
   console.log(`\nrun seed ${seed} (${ai} in the seat): ${over || 'unfinished'}, ${left} hull${left === 1 ? '' : 's'} left, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  console.log('stop kind     before  match   shop  reward  depot  after  fights');
+  console.log('stop kind     before  match   shop  reward  event  depot  after  fights');
   for (const x of rows) {
-    console.log(`${pad(x.stop, 4)} ${x.kind.padEnd(7)} ${pad(x.before, 7)} ${pad(x.match, 6)} ${pad(-x.shop, 6)} ${pad(x.reward, 7)} ${pad(-x.depot, 6)} ${pad(x.after, 6)}  ${x.won}${x.armory ? `  (one of everything: $${x.armory})` : ''}`);
-    sum.match += x.match; sum.shop += x.shop; sum.reward += x.reward; sum.depot += x.depot;
+    console.log(`${pad(x.stop, 4)} ${x.kind.padEnd(7)} ${pad(x.before, 7)} ${pad(x.match, 6)} ${pad(-x.shop, 6)} ${pad(x.reward, 7)} ${pad(x.event, 6)} ${pad(-x.depot, 6)} ${pad(x.after, 6)}  ${x.won}${x.what ? `${x.what}` : ''}${x.armory ? `  (one of everything: $${x.armory})` : ''}`);
+    sum.match += x.match; sum.shop += x.shop; sum.reward += x.reward; sum.depot += x.depot; sum.event += x.event; if (x.kind === 'Event') sum.events++;
     if (x.armory) { sum.depots++; sum.armory = x.armory; sum.atDepot += x.before; }
     if (x.kind === 'Boss') sum.beforeBoss += x.before;
   }
   sum.n++;
 }
 const avg = (v) => Math.round(v / sum.n);
-console.log(`\nper run, on average: start $${RUN.start.money}, match pay $${avg(sum.match)} (spent between rounds $${avg(sum.shop)}), stop rewards $${avg(sum.reward)},`
+console.log(`\nper run, on average: start $${RUN.start.money}, match pay $${avg(sum.match)} (spent between rounds $${avg(sum.shop)}), stop rewards $${avg(sum.reward)}, events ${(sum.events / sum.n).toFixed(1)} a run (net $${avg(sum.event)}),`
   + ` depots ${(sum.depots / sum.n).toFixed(1)} a run (money on arriving $${sum.depots ? Math.round(sum.atDepot / sum.depots) : 0}, spent $${avg(sum.depot)}), money at the boss $${avg(sum.beforeBoss)}; one of everything at a depot: $${sum.armory}`);

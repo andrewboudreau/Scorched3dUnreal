@@ -7,6 +7,7 @@ import {
   RUN, RUN_KEY, TIER_PLAN, KINDS, runMap, generateMap, crosses, stopSeed, startRun, reachable, chooseStop, currentStop,
   applyFightResult, applyCache, swapVariant, leaveDepot, setKit, forksTaken, allyChoices, matchConfig, kitGame, fightWon,
   loadRun, saveRun, clearRun, runSummary, stopDetails, rewardWords, kitMods, stopMoney, startFight, fightCutOff, runProgress,
+  EVENTS, EVENT_BY_ID, LAST_KEY, mapOf, eventCard, applyEvent, nextWords, effectLines, saveLastRun, loadLastRun, matchNow, rewardNow,
   TIER_NAMES, allyWords, bossWords, rewardItems, variantSwaps, fightStats,
 } from '../src/core/run.js';
 
@@ -39,6 +40,7 @@ function settle(s) {
   if (stop.match) return applyFightResult(s, { won: true, kit: s.kit }).state;
   if (stop.kind === 'cache') return applyCache(s, 'money');
   if (stop.kind === 'depot') return leaveDepot(s);
+  if (stop.kind === 'event') return applyEvent(s, [...eventCard(s).choices].filter((c) => c.can).sort((a, b) => a.lines.length - b.lines.length)[0].id).state;
   return s;
 }
 
@@ -645,3 +647,243 @@ test('a depot\'s swaps say what you have and what you would switch to', () => {
   assert.equal(after.then.id, 'napalm:sticky');
   assert.equal(after.upgrade, true);
 });
+
+// ---------------------------------------------------------------- events
+
+// A state standing at the first Event stop of event `id`, found over the seeds
+// (fights before it settled as wins), with a kit rich enough for any choice.
+function atEvent(id, kit = {}) {
+  for (let seed = 1; seed < 3000; seed += 7) {
+    const map = runMap(seed);
+    const stop = map.stops.find((x) => x.kind === 'event' && x.event.id === id);
+    if (!stop) continue;
+    let s = startRun(seed, 'Tester');
+    // The way in: walk back from the stop to the first tier.
+    const route = [stop.id];
+    while (map.byId[route[0]].tier > 0) route.unshift(map.stops.find((x) => x.next.includes(route[0]) && x.tier === map.byId[route[0]].tier - 1).id);
+    for (const sid of route.slice(0, -1)) { s = chooseStop(s, sid); s = settle(s); }
+    s = chooseStop(s, stop.id);
+    return { ...s, kit: { ...s.kit, money: 1000, points: 1, ...kit }, hulls: 1 };
+  }
+  throw new Error(`no map has ${id}`);
+}
+
+test('Event stops are placed in the middle tiers from the seed alone, and keep every route seven stops', () => {
+  assert.deepEqual(generateMap(SEEDS[3]), generateMap(SEEDS[3]));
+  let withEvent = 0;
+  const seen = new Set();
+  for (const seed of SEEDS) {
+    const map = generateMap(seed);
+    const events = map.stops.filter((s) => s.kind === 'event');
+    if (events.length) withEvent++;
+    const ids = events.map((s) => s.event.id);
+    assert.equal(new Set(ids).size, ids.length, 'no event twice on a map');
+    for (const s of events) {
+      assert.ok(s.tier >= 1 && s.tier <= 4, 'only in the middle tiers');
+      assert.ok(EVENT_BY_ID[s.event.id]);
+      assert.ok(Object.keys(s.event.crate).length >= 1 && s.event.luck >= 0 && s.event.luck <= 1);
+      assert.equal(s.match, undefined);
+      seen.add(s.event.id);
+    }
+    for (const tier of map.tiers.slice(0, RUN.tiers)) assert.ok(tier.some((x) => x.kind === 'fight'), 'a fight in every tier');
+  }
+  assert.ok(withEvent >= SEEDS.length * 0.5, `${withEvent} of ${SEEDS.length} maps have an event`);
+  assert.ok(seen.size >= 5, 'the variety shows up');
+  assert.ok(KINDS.event.name && KINDS.event.desc);
+});
+
+test('a map from before Event stops (mapv 1) is the old map, with none', () => {
+  for (const seed of SEEDS.slice(0, 15)) {
+    const old = generateMap(seed, 1);
+    assert.ok(old.stops.every((s) => s.kind !== 'event'));
+    assert.equal(runMap(seed, 1), mapOf({ seed, mapv: 1 }));
+    assert.equal(runMap(seed, 1), mapOf({ seed }), 'no mapv: the old one');
+    assert.equal(runMap(seed), mapOf({ seed, mapv: 2 }));
+  }
+});
+
+test('there are six to eight events, each with two or three choices, one of which can always be taken', () => {
+  assert.ok(EVENTS.length >= 6 && EVENTS.length <= 8);
+  for (const ev of EVENTS) {
+    assert.ok(ev.name && ev.text.length > 40);
+    assert.ok(ev.choices.length >= 2 && ev.choices.length <= 3, ev.id);
+    assert.equal(new Set(ev.choices.map((c) => c.id)).size, ev.choices.length);
+    assert.ok(ev.choices.some((c) => !c.needs), `${ev.id} has a choice that asks nothing`);
+  }
+});
+
+test('every event\'s choices apply as written', () => {
+  for (const ev of EVENTS) {
+    for (const ch of ev.choices) {
+      const s = atEvent(ev.id);
+      const stop = currentStop(s);
+      const card = eventCard(s);
+      assert.equal(card.name, ev.name);
+      assert.equal(card.choices.length, ev.choices.length);
+      const needsRoom = ch.needs?.hullsBelow;
+      const from = needsRoom ? { ...s, hulls: RUN.hulls - 1 } : s;
+      assert.ok(eventCard(from).choices.find((c) => c.id === ch.id).can, `${ev.id}/${ch.id} can be taken`);
+      const { state, outcome } = applyEvent(from, ch.id);
+      const g = ch.gives;
+      const win = stop.event.luck < 0.5;
+      const wager = g.wager ? (win ? g.wager.prize - g.wager.stake : -g.wager.stake) : 0;
+      assert.equal(state.kit.money, from.kit.money + (g.money || 0) + wager, `${ev.id}/${ch.id} money`);
+      assert.equal(state.kit.points, from.kit.points + (g.points || 0));
+      assert.equal(state.kit.jets, from.kit.jets + (g.jets || 0));
+      assert.equal(state.kit.pendingArmor, from.kit.pendingArmor + (g.armor || 0));
+      assert.equal(state.kit.pendingFuel, from.kit.pendingFuel + (g.fuel || 0));
+      assert.equal(state.hulls, Math.max(0, Math.min(RUN.hulls, from.hulls + (g.hulls || 0))));
+      const gained = (id) => (state.kit.inventory[id] || 0) - (from.kit.inventory[id] || 0);
+      for (const [id, n] of Object.entries(stop.event.crate)) assert.equal(gained(id), g.crate ? n : 0, 'the stop\'s own crate');
+      assert.equal(nextWords(state.next).length > 0, !!g.next);
+      for (const [k, v] of Object.entries(g.next || {})) assert.equal(state.next[k], v);
+      assert.equal(state.done, true);
+      assert.equal(state.log.at(-1).kind, 'event');
+      assert.equal(state.log.at(-1).choice, ch.id);
+      assert.equal(outcome.lines.length, effectLines(g, stop.event, true).length);
+      assert.deepEqual(reachable(state), currentStop(state).next, 'moves on after');
+      assert.equal(from.done, false, 'the state given is not changed');
+      assert.throws(() => applyEvent(state, ch.id), /no event/, 'once');
+    }
+  }
+});
+
+test('a choice you cannot pay for, or have no use for, is refused', () => {
+  const poor = atEvent('trade', { money: 150 });
+  assert.equal(eventCard(poor).choices.find((c) => c.id === 'train').can, false);
+  assert.match(eventCard(poor).choices.find((c) => c.id === 'train').why, /\$200/);
+  assert.throws(() => applyEvent(poor, 'train'), /\$200/);
+  assert.equal(applyEvent(poor, 'crate').state.kit.money, 70);
+  assert.throws(() => applyEvent(poor, 'nope'), /no nope/);
+  const whole = { ...atEvent('yard'), hulls: RUN.hulls };
+  assert.equal(eventCard(whole).choices.find((c) => c.id === 'patch').can, false);
+  const none = { ...atEvent('yard'), hulls: 0 };
+  assert.throws(() => applyEvent(none, 'sell'), /spare hull/);
+  const fight = chooseStop(startRun(SEEDS[0]), reachable(startRun(SEEDS[0]))[0]);
+  assert.throws(() => applyEvent(fight, 'leave'), /no event/);
+});
+
+test('the wager is decided by the stop\'s luck, so opening the run again plays the same', () => {
+  const s = atEvent('wager');
+  const stop = currentStop(s);
+  const out = applyEvent(s, 'play');
+  assert.equal(out.state.kit.money, s.kit.money + (stop.event.luck < 0.5 ? 150 : -100));
+  assert.deepEqual(applyEvent(JSON.parse(JSON.stringify(s)), 'play').outcome, out.outcome);
+});
+
+test('what an event leaves on the next fight reaches the match and the reward, and is used up', () => {
+  // The storm: Rain forced, the fight pays double (its reward and the match's pay).
+  let s = applyEvent(atEvent('storm'), 'ride').state;
+  assert.deepEqual(s.next, { modifier: 'rain', pay: 2 });
+  s = chooseStop(s, reachable(s).find((id) => runMap(s.seed).byId[id].match) || reachable(s)[0]);
+  const stop = currentStop(s);
+  assert.ok(stop.match, 'a fight follows an event (every tier has one)');
+  const cfg = matchConfig(s);
+  assert.equal(cfg.modifier, 'rain');
+  assert.equal(cfg.pay, RUN.matchPay * 2);
+  assert.equal(stopDetails(stop, s.next).modifier, 'Rain');
+  assert.equal(stopDetails(stop, s.next).changed, stop.match.modifier !== 'rain');
+  const won = applyFightResult(s, { won: true, kit: s.kit });
+  assert.equal(won.outcome.reward.money, stop.reward.money * 2);
+  assert.equal(won.state.next, null, 'used up');
+  assert.equal(applyFightResult(s, { won: false, kit: s.kit }).state.next, null, 'a lost fight uses it too');
+  assert.equal(matchConfig(startRunAt(s)).pay, RUN.matchPay);
+  // The crawler's beacon: the CPUs start with armor.
+  let c = applyEvent(atEvent('crawler'), 'salvage').state;
+  c = chooseStop(c, reachable(c).find((id) => runMap(c.seed).byId[id].match));
+  for (const p of matchConfig(c).players.slice(1)) assert.equal(p.kit.pendingArmor, 25);
+  // The bounty: a bonus on the reward, and a Gale at least.
+  let b = applyEvent(atEvent('bounty'), 'hard').state;
+  b = chooseStop(b, reachable(b).find((id) => runMap(b.seed).byId[id].match));
+  const bs = currentStop(b);
+  assert.ok(matchConfig(b).maxWind >= 2.5);
+  assert.equal(rewardNow(bs, b.next).money, bs.reward.money + 150);
+  assert.equal(matchNow(bs, null).maxWind, bs.match.maxWind);
+});
+// The same stop's match with the Event's say taken off.
+const startRunAt = (s) => ({ ...s, next: null });
+
+test('the armor an event gives is the kit\'s own: it goes into the next real match', () => {
+  const s = applyEvent(atEvent('crawler'), 'strip').state;
+  assert.equal(s.kit.pendingArmor, 20);
+  const t = chooseStop(s, reachable(s).find((id) => runMap(s.seed).byId[id].match));
+  const g = new Game({ ...matchConfig(t), resolution: 16 });
+  g.start();
+  assert.equal(g.players[0].armor, 20);
+});
+
+test('a save with an event waiting for its choice, and one after it, load back the same', () => {
+  const store = fakeStorage();
+  const s = atEvent('storm');
+  assert.equal(s.done, false);
+  saveRun(store, s);
+  assert.deepEqual(loadRun(store), s);
+  assert.equal(eventCard(loadRun(store)).name, EVENT_BY_ID.storm.name);
+  const after = applyEvent(loadRun(store), 'ride').state;
+  saveRun(store, after);
+  const back = loadRun(store);
+  assert.deepEqual(back, after);
+  assert.deepEqual(back.next, { modifier: 'rain', pay: 2 });
+  assert.ok(JSON.stringify(after).length < 6000, 'small');
+  // A damaged `next` is tidied, not trusted.
+  store.setItem(RUN_KEY, JSON.stringify({ ...after, next: { modifier: 'bogus', pay: 'lots', wind: -3, foeArmor: 1e9, bonus: 12.7 } }));
+  assert.deepEqual(loadRun(store).next, { foeArmor: 200, bonus: 12 });
+});
+
+test('a save from before events (no mapv, no next) still loads, on its old map', () => {
+  const store = fakeStorage();
+  let s = startRun(SEEDS[5], 'Old');
+  s.mapv = 1;
+  const old = runMap(SEEDS[5], 1);
+  s = chooseStop(s, old.tiers[0][0].id);
+  assert.equal(mapOf(s), old);
+  s = applyFightResult(s, { won: true, kit: s.kit }).state;
+  s = chooseStop(s, reachable(s)[0]);
+  const raw = JSON.parse(JSON.stringify(s));
+  delete raw.mapv;
+  delete raw.next;
+  store.setItem(RUN_KEY, JSON.stringify(raw));
+  const loaded = loadRun(store);
+  assert.ok(loaded, 'loads');
+  assert.equal(loaded.mapv, 1);
+  assert.equal(loaded.next, null);
+  assert.deepEqual(loaded.path, s.path);
+  assert.equal(currentStop(loaded), old.byId[s.at]);
+  assert.ok(loaded.path.every((id) => old.byId[id].kind !== 'event'));
+  assert.deepEqual(reachable(settle(loaded)), old.byId[s.at].next);
+  assert.equal(runSummary(loaded).route.length, 2);
+  // A new run records its generator.
+  assert.equal(startRun(5).mapv, RUN.mapVersion);
+});
+
+test('the summary names the event and what you chose', () => {
+  const s = applyEvent(atEvent('relay'), 'thrusters').state;
+  const row = runSummary(s).route.at(-1);
+  assert.equal(row.kind, 'event');
+  assert.equal(row.name, 'Event');
+  assert.match(row.detail, /Fallen relay/);
+  assert.match(row.detail, /thrusters/);
+});
+
+test('the last finished run is kept to read its summary again', () => {
+  const store = fakeStorage();
+  let s = startRun(SEEDS[9], 'Tester');
+  assert.equal(loadLastRun(store), null);
+  saveLastRun(store, s);
+  assert.equal(store.m.has(LAST_KEY), false, 'a run still going is not kept');
+  s = chooseStop(s, reachable(s)[0]);
+  s = applyFightResult(s, { won: false, kit: s.kit }).state;
+  s = { ...s, hulls: 0, over: 'lost' };
+  saveLastRun(store, s);
+  assert.ok(store.m.has(LAST_KEY));
+  assert.ok(store.m.get(LAST_KEY).length < 6000, 'small');
+  const last = loadLastRun(store);
+  assert.equal(last.over, 'lost');
+  assert.deepEqual(runSummary(last), runSummary(s));
+  assert.equal(loadRun(store), null, 'apart from the run in progress');
+  store.setItem(LAST_KEY, '{nope');
+  assert.equal(loadLastRun(store), null);
+  store.setItem(LAST_KEY, JSON.stringify({ ...s, over: null }));
+  assert.equal(loadLastRun(store), null, 'a run that has not ended is no last run');
+});
+
