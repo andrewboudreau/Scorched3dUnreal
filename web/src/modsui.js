@@ -7,7 +7,10 @@
 //     it up. Anything else (or three seconds) lets it go again. The decoy is
 //     aimed: its button arms it (game.toggleBlink) and Fire then sends its
 //     blink with the aim as it is (the Fire button reads BLINK); a second tap
-//     lets it go.
+//     lets it go. The Jammer Drone goes over the enemy the turret points
+//     nearest (game.jamTarget): armed, the banner names it.
+//   - A banner when a Jammer Drone jams you or lets you go, and a JAMMED chip
+//     in the player card while it lasts.
 //   - Small chips in the player card for the planner's mods: level, health
 //     and turns left once up (and Point Defense's charges for the round).
 //   - The armory's Mods section (modShopCards), apart from the weapons, when
@@ -16,7 +19,7 @@
 // game.toggleBlink.
 
 import { Vector3 } from 'three';
-import { MODS, MOD_BY_ID, DECOY, modUp } from './core/mods.js';
+import { MODS, MOD_BY_ID, DECOY, JAM, modUp } from './core/mods.js';
 import { ModsView } from './render/mods.js';
 
 const KEY = 'b';
@@ -100,11 +103,15 @@ export class ModsUI {
       }
       return;
     }
+    const over = def.targeted ? g.jamTarget(g.current) : null;
+    if (def.targeted && !over) { this.banner(`No enemy to send the ${def.name} to`, 'Find one first', 1400); return; }
     this.armed = { id, until: performance.now() + ARM_MS };
     this.refresh();
     this.click();
     this.touch?.buzz(8);
-    this.banner(`Deploy ${def.name}?`, `It takes your turn. ${this.touch ? 'Tap' : 'Press'} ${def.tag}${this.touch ? '' : ' (B)'} again`, ARM_MS - 200);
+    const again = `${this.touch ? 'Tap' : 'Press'} ${def.tag}${this.touch ? '' : ' (B)'} again`;
+    if (over) this.banner(`Jam ${over.name}?`, `The drone goes over the enemy your turret points nearest. It takes your turn. ${again}`, ARM_MS - 200);
+    else this.banner(`Deploy ${def.name}?`, `It takes your turn. ${again}`, ARM_MS - 200);
   }
 
   // The deployed satellite `p` has up, for the beam (render/satellite.js), or null.
@@ -118,6 +125,7 @@ export class ModsUI {
     if (!g) return;
     if (e.type === 'turn' || e.type === 'locked' || e.type === 'volley') this.armed = null;
     if (e.type === 'intercept') { this.view.event(e, g, this.seen); return; }
+    if (e.type === 'status') { this.statusEvent(g, e); return; }
     if (e.type !== 'mod') return;
     this.view.event(e, g, this.seen);
     const p = g.players[e.player];
@@ -131,9 +139,10 @@ export class ModsUI {
       return;
     }
     if (e.what === 'deploy') {
+      const over = e.target != null ? g.players[e.target] : null;
       if (g.volleyMode && mine) this.banner(`${def.name} locked in`, 'It goes up when the volley fires', 1300);
       else if (g.volleyMode) return;   // the volley shows it
-      else this.banner(mine ? `${def.name} up` : `${p.name} deploys a ${def.name}`, `Lasts ${p.mods[e.mod].turns} turns`, 1300);
+      else this.banner(mine ? `${def.name} up${over ? ` over ${over.name}` : ''}` : `${p.name} deploys a ${def.name}`, `Lasts ${p.mods[e.mod].turns} turns`, 1300);
     } else if (e.what === 'down' && !e.tank && this.seen(p)) {
       const by = g.players[e.by];
       this.banner(`${mine ? 'Your' : `${p.name}'s`} ${def.name} is down`, by ? `Shot down by ${by.name}` : '', 1500);
@@ -142,6 +151,17 @@ export class ModsUI {
     } else if (e.what === 'refit' && mine) {
       this.banner(`New ${def.name} ready`, 'Deploying it takes this turn', 1200);
     }
+  }
+
+  // A Jammer Drone jams (or lets go of) a tank this screen plays for.
+  statusEvent(g, e) {
+    const p = g.players[e.player];
+    if (!p || p.ai || !g.isLocal(p) || e.kind !== 'jammed') return;
+    const by = g.players[e.by];
+    if (e.strength > 0) {
+      const what = e.strength >= JAM.arc ? 'no satellite labels, no steering, no aim arc' : 'no satellite labels, no steering';
+      this.banner(`${g.localHumans.length > 1 ? `${p.name}: j` : 'J'}ammed${by ? ` by ${by.name}` : ''}`, `${what}. Flak brings the drone down`, 2200);
+    } else if (p.alive) this.banner('Jamming lifted', `${g.localHumans.length > 1 ? `${p.name}'s` : 'Your'} instruments are back`, 1300);
   }
 
   // Every frame.
@@ -200,7 +220,8 @@ export class ModsUI {
     const me = p && !p.ai && g.isLocal(p) ? p : null;
     const can = !!me && g.canDeploy(me);
     const blink = !!(me && g.blink && g.blink.player === me.id);
-    const key = !me ? '' : MODS.map((d) => { const m = me.mods?.[d.id]; return m ? `${m.state}${m.level}.${Math.round(m.hp)}.${m.turns}.${m.charges ?? ''}` : '-'; }).join('|') + `|${can}|${this.armed?.id || ''}|${blink}`;
+    const jam = me ? (me.status || []).find((s) => s.kind === 'jammed' && s.strength === g.jammed(me)) : null;
+    const key = !me ? '' : MODS.map((d) => { const m = me.mods?.[d.id]; return m ? `${m.state}${m.level}.${Math.round(m.hp)}.${m.turns}.${m.charges ?? ''}` : '-'; }).join('|') + `|${can}|${this.armed?.id || ''}|${blink}|${jam ? `${jam.strength}.${jam.turns}` : ''}`;
     if (key === this.shown) return;
     this.shown = key;
     for (const def of MODS) {
@@ -217,11 +238,12 @@ export class ModsUI {
     }
     // Chips: what the planner has up, or ready.
     const chips = !me ? [] : MODS.map((d) => [d, me.mods?.[d.id]]).filter(([, m]) => m && (m.state === 'up' || m.state === 'ready'));
-    this.chips.classList.toggle('hidden', !chips.length);
+    this.chips.classList.toggle('hidden', !chips.length && !jam);
     const charges = (d, m) => (d.id === 'pointdef' ? ` <b title="Shells it can still stop this round">${'&#9679;'.repeat(m.charges || 0) || '&#9675;'}</b>` : '');
     this.chips.innerHTML = chips.map(([d, m]) => (m.state === 'up'
       ? `<span class="mod-chip up" title="${d.name}: up">${d.tag}${m.level} <i style="--hp:${Math.round((m.hp / m.maxHp) * 100)}%"></i> ${m.turns}t${charges(d, m)}</span>`
-      : `<span class="mod-chip" title="${d.name}: ready to deploy">${d.tag}${m.level} ready</span>`)).join('');
+      : `<span class="mod-chip" title="${d.name}: ready to deploy">${d.tag}${m.level} ready</span>`)).join('')
+      + (jam ? `<span class="mod-chip jam" title="Jammed by ${g.players[jam.source]?.name || 'a drone'}: satellite labels and steering out${jam.strength >= JAM.arc ? ', no aim arc' : ''}">JAMMED ${jam.turns}t</span>` : '');
   }
 
   // A new match.

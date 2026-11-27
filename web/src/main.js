@@ -280,7 +280,7 @@ function startMatch(config) {
   labels = game.players.map((p) => {
     const el = document.createElement('div');
     el.className = 'tank-label';
-    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}</div><div class="bar"><div class="fill hp"></div></div>`;
+    el.innerHTML = `<div style="color:${p.color}">${escapeHtml(p.name)}<span class="tl-jam" title="Jammed">JAM</span></div><div class="bar"><div class="fill hp"></div></div>`;
     $('labels').appendChild(el);
     return el;
   });
@@ -983,11 +983,12 @@ function applySteering() {
   let finger = 0;
   for (const d of steerTouch.values()) finger += d;
   const dir = Math.sign((held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0) + finger);
-  let fuel = -1;
+  let fuel = -1, jam = false;
   for (const p of game.localHumans) {
     game.steer(p.id, dir);
-    for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) fuel = Math.max(fuel, pr.steer.fuel);
+    for (const pr of game.projectiles) if (pr.owner === p.id && pr.steer) { fuel = Math.max(fuel, pr.steer.fuel); jam ||= !!pr.steer.jammed; }
   }
+  if (jam !== hint.classList.contains('jammed')) { hint.classList.toggle('jammed', jam); hint.querySelector('.sh-title').textContent = jam ? 'Jammed' : 'Guidance'; }
   if (fuel >= 0 && steerFuel < 0) steerTipUntil = performance.now() + 1800;   // a new missile: say how, briefly
   steerFuel = fuel;
   hint.classList.toggle('hidden', fuel < 0);
@@ -1313,7 +1314,7 @@ const DRIVE_NOTES = {
 
 function updateTracer() {
   const p = game.current;
-  const reach = p && !p.ai && game.phase === 'aim' ? perkSum(p, 'tracer') : 0;
+  const reach = p && !p.ai && game.phase === 'aim' && !game.arcJammed(p) ? perkSum(p, 'tracer') : 0;   // a level 2 jammer blanks it
   tracer.visible = reach > 0;
   if (!reach) return;
   const pr = makeProjectile(muzzleOrigin(p), launchVelocity(p.yaw, p.elev, p.power), game.terrain);
@@ -1515,6 +1516,8 @@ function updateLabels() {
     if (!visible) return;
     moveTo(el, (v.x * 0.5 + 0.5) * window.innerWidth, (-v.y * 0.5 + 0.5) * window.innerHeight, ABOVE);
     setStyle(el._fill || (el._fill = el.querySelector('.fill')), 'width', `${(p.hp / p.maxHp) * 100}%`);
+    const jam = game.jammed(p) > 0;   // a Jammer Drone over it (core/mods.js JAM)
+    if (el._jam !== jam) { el._jam = jam; el.classList.toggle('jammed', jam); }
   });
 }
 

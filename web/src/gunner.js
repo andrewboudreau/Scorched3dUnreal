@@ -95,6 +95,17 @@ export class AimArc {
   update(game, p, camera, { quiet = false } = {}) {
     if (!p) { if (this.line.visible) this.hide(); return; }
     if (!this.label.isConnected) this.labels.appendChild(this.label);
+    // Jammed by a level 2 Jammer Drone (core/mods.js JAM): no arc, only the word over the tank.
+    if (game.arcJammed?.(p)) {
+      this.line.visible = this.line2.visible = this.peak.visible = this.drop.visible = this.ring.visible = false;
+      this.key = '';
+      if (!this.jammed) { this.jammed = true; this.label.textContent = 'Jammed: no arc'; this.label.classList.add('jammed'); this.label.classList.remove('quiet'); }
+      const s = !quiet && screen(camera, p.x, p.y + 7, p.z);
+      this.label.classList.toggle('hidden', !s);
+      if (s) this.label.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`;
+      return;
+    }
+    if (this.jammed) { this.jammed = false; this.label.classList.remove('jammed'); }
     const key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, game.terrain.wells.length, EDGE_KINDS.indexOf(game.terrain.edge)].map((n) => (+n).toFixed(3)).join();
     if (key !== this.key) {
       // The first trace for a new aim (a new turn) doesn't count as a change.

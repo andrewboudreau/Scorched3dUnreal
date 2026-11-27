@@ -101,6 +101,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; col
 #labels.lb-name .tank-label .bar { display: none; }
 #labels.lb-name .tank-label:not(.ghost) { opacity: .8; font-size: 11px; }
 #labels.lb-faint .tank-label { opacity: .4; }
+/* Jammed (a Jammer Drone over it): a small badge by the name, where the health bar shows. */
+.tank-label .tl-jam { display: none; margin-left: 4px; padding: 0 3px; border-radius: 3px; font-size: 9px; letter-spacing: .06em;
+  vertical-align: 1px; color: #1a0d0d; background: #ff8a7a; text-shadow: none; animation: jam-blink 1.6s steps(2, jump-none) infinite; }
+.tank-label.jammed .tl-jam { display: inline-block; }
+#labels.lb-name .tank-label .tl-jam { display: none; }
+@keyframes jam-blink { 50% { opacity: .55; } }
 .dmg-pop { position: absolute; transform: translate(-50%, -50%); font-weight: 800; color: #ff6b5b; font-size: 18px;
   text-shadow: 0 2px 6px #000; animation: pop 1.3s ease-out forwards; }
 @keyframes pop { from { opacity: 1; margin-top: 0; } to { opacity: 0; margin-top: -50px; } }
@@ -238,6 +244,8 @@ button.buy:disabled { background: #26303c; border-color: var(--edge); font-weigh
 #steer-hint.l .sh-l, #steer-hint.r .sh-r { opacity: 1; color: #6fe3ff; }
 #steer-fuel { background: linear-gradient(90deg, #6fe3ff, #b8f3ff); transition: none; }
 #steer-hint.empty { opacity: .5; }
+#steer-hint.jammed { opacity: 1; }
+#steer-hint.jammed .sh-title { color: #ff8a7a; }
 
 /* Kill cam: letterbox bars and a caption while the deciding shot lands. */
 body::before, body::after { content: ''; position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 5;
@@ -496,6 +504,7 @@ body.touch #gunner .gn-zoom button { width: 44px; height: 38px; }
   padding: 1px 6px; border-radius: var(--r); background: rgba(10, 14, 20, .6); color: #fff; text-shadow: 0 1px 2px #000;
   transition: opacity .4s; }
 .arc-peak.quiet { opacity: 0; transition: opacity .6s; }
+.arc-peak.jammed { color: #ff8a7a; letter-spacing: .04em; }
 
 #gunner-btn { position: fixed; right: calc(var(--inset) + 50px); bottom: var(--inset); z-index: 11; height: 40px; padding: 0 12px;
   background: var(--panel); backdrop-filter: blur(6px); }
@@ -559,6 +568,7 @@ body.touch #boss-bar .bb-mark { font-size: 12px; }
 .mod-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--r); font-size: 11px; font-weight: 700;
   background: rgba(14, 18, 24, .5); border: 1px dashed rgba(157, 184, 255, .5); color: #b8c8f0; font-variant-numeric: tabular-nums; }
 .mod-chip.up { border-style: solid; border-color: rgba(157, 184, 255, .8); color: #e6edff; }
+.mod-chip.jam { border-style: solid; border-color: rgba(255, 138, 122, .85); color: #ffb3a8; letter-spacing: .04em; }
 .mod-chip i { display: inline-block; width: 26px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .15);
   background-image: linear-gradient(90deg, #8fe39b var(--hp), transparent var(--hp)); }
 /* On a phone the buttons stack at the top of the Fire column, thumb-sized. */

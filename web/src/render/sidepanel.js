@@ -48,7 +48,8 @@ export class SidePanel {
     if (!this.enabled || !p) { this.hide(); return; }
     const reach = perkSum(p, 'tracer');
     const t = game.terrain;
-    let key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, t.wells.length, t.edge, reach, game.round].map((n) => (+n).toFixed(2)).join();
+    const jam = !!game.arcJammed?.(p);   // a level 2 Jammer Drone over it: no climb (core/mods.js JAM)
+    let key = [p.x, p.y, p.z, p.yaw, p.elev, p.power, game.wind[0], game.wind[1], game.gravity, game.shellDrag(p) * 1e4, t.wells.length, t.edge, reach, game.round, +jam].map((n) => (+n).toFixed(2)).join();
     for (const e of enemies) key += `|${e.x | 0},${e.z | 0},${e.y | 0}`;
     if (!this.shown) { this.canvas.classList.remove('hidden'); this.shown = true; }
     this.canvas.classList.toggle('in-sight', sight);
@@ -64,7 +65,8 @@ export class SidePanel {
     const f = this.flight, top = this.side;
     const out = Math.round(Math.hypot(f.x[top.top] - p.x, f.z[top.top] - p.z));
     const up = Math.round(top.topY - p.y);
-    this.text = f.hit === 'ground' && f.apexAt < 0 ? `hits ${out} m out` : f.hit === 'wall' && f.apexAt < 0 ? `wall ${up} m up` : f.hit === 'moon' && f.apexAt < 0 ? 'into a moon' : `top ${up} m up, ${out} m out`;
+    this.jam = jam;
+    this.text = jam ? 'Jammed' : f.hit === 'ground' && f.apexAt < 0 ? `hits ${out} m out` : f.hit === 'wall' && f.apexAt < 0 ? `wall ${up} m up` : f.hit === 'moon' && f.apexAt < 0 ? 'into a moon' : `top ${up} m up, ${out} m out`;
     this.draw(p.color);
   }
 
@@ -130,6 +132,18 @@ export class SidePanel {
       const ex = X(e.s), ey = Y(e.y);
       ctx.fillStyle = e.color;
       ctx.beginPath(); ctx.moveTo(ex, ey - 7); ctx.lineTo(ex + 3.5, ey - 1); ctx.lineTo(ex - 3.5, ey - 1); ctx.closePath(); ctx.fill();
+    }
+    if (this.jam) {
+      // Jammed: static where the climb would be, and the word.
+      ctx.restore();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      for (let i = 0; i < 9; i++) ctx.fillRect((i * 53) % 30, 14 + ((i * 37) % Math.max(1, h - 20)), w - ((i * 29) % 40), 1.5);
+      ctx.font = '700 13px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ff8a7a';
+      ctx.fillText('JAMMED', w / 2, h / 2);
+      return;
     }
     // The shot: the climb (or what the Tracer shows), a dot at the end, and
     // the ground under it. Nothing is drawn past it.
