@@ -5,22 +5,27 @@ import { VIEWS, HUD, hudView, hudState, hudCss, SHOWN, FAINT, HIDDEN, MOVED } fr
 
 const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
 
-test('the view follows the phase, then the camera you chose', () => {
+test('the view follows the phase, then the camera mode', () => {
   assert.equal(hudView({ phase: 'aim' }), 'plan');
   assert.equal(hudView({}), 'plan');
-  assert.equal(hudView({ phase: 'aim', sight: true }), 'sight');
-  assert.equal(hudView({ phase: 'aim', overview: true }), 'overview');
-  for (const phase of ['volley', 'flight', 'settle', 'wait']) assert.equal(hudView({ phase }), 'flight', phase);
-  for (const phase of ['roundOver', 'matchOver', 'shop']) assert.equal(hudView({ phase }), 'between', phase);
+  assert.equal(hudView({ phase: 'aim', mode: 'plan' }), 'plan');
+  assert.equal(hudView({ phase: 'aim', mode: 'peek' }), 'plan');
+  assert.equal(hudView({ phase: 'aim', mode: 'sight' }), 'sight');
+  assert.equal(hudView({ phase: 'aim', mode: 'overview' }), 'overview');
+  for (const phase of ['volley', 'flight', 'settle', 'wait']) {
+    for (const mode of ['hero', 'volley', 'follow', 'hold']) assert.equal(hudView({ phase, mode }), 'flight', `${phase} ${mode}`);
+  }
+  for (const phase of ['roundOver', 'matchOver', 'shop']) assert.equal(hudView({ phase, mode: 'hold' }), 'between', phase);
+  assert.equal(hudView({ mode: 'menu' }), 'menu');
 });
 
 test('priorities: between beats the kill cam beats the map beats the sight beats flight', () => {
-  assert.equal(hudView({ phase: 'roundOver', killCam: true, overview: true }), 'between');
-  assert.equal(hudView({ phase: 'flight', killCam: true, overview: true, sight: true }), 'kill');
-  assert.equal(hudView({ phase: 'flight', overview: true }), 'overview');
-  assert.equal(hudView({ phase: 'aim', overview: true, sight: true }), 'overview');
-  // The sight is only for planning: a stale flag does not put it over a shell in flight.
-  assert.equal(hudView({ phase: 'flight', sight: true }), 'flight');
+  assert.equal(hudView({ phase: 'roundOver', mode: 'kill' }), 'between');
+  assert.equal(hudView({ phase: 'roundOver', mode: 'overview' }), 'between');
+  assert.equal(hudView({ phase: 'flight', mode: 'kill' }), 'kill');
+  assert.equal(hudView({ phase: 'flight', mode: 'overview' }), 'overview');
+  // The sight is only for planning: a stale mode does not put it over a shell in flight.
+  assert.equal(hudView({ phase: 'flight', mode: 'sight' }), 'flight');
 });
 
 test('the table has a state for every element in every view', () => {

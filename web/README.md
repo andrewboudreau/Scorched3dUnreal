@@ -991,9 +991,15 @@ second column beside the first. On a phone the players box sits top right.
   health bar, telegraph line and phase banners (the rules: `src/core/boss.js`).
   `src/runui.js` (with `css/run.css`) is the run's screen: the map, the
   stops' views, the result card and the summary (the rules: `src/core/run.js`).
+- `src/camera.js` is the camera rig: the camera, its orbit controls and what
+  moves them in each mode (menu orbit, kill cam, overview, sight, volley
+  framing, following shells, a look, your turn). `src/cameramode.js` is its
+  pure part: the mode state (follow, sight, overview, a look, the kill cam),
+  which mode drives each frame, and the kill cam's trigger and slow motion
+  (`test/cameramode.test.js`).
 - `src/hudview.js` is what the HUD shows in each view (plan, sight, flight, kill
-  cam, overview, between rounds): one table, with the phone's CSS generated from it
-  (`test/hudview.test.js`). `src/hints.js` counts how often a teaching line has
+  cam, overview, between rounds), read from the phase and the camera's mode: one
+  table, with the phone's CSS generated from it (`test/hudview.test.js`). `src/hints.js` counts how often a teaching line has
   shown (`test/hints.test.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
@@ -1004,8 +1010,8 @@ second column beside the first. On a phone the players box sits top right.
   never adds up. A reloaded tab reads the log back, jumps to the host's
   latest state and counts its own earlier plans as made. `src/net.js` is
   the browser's link to the room (long polling, sends kept in order).
-- `src/main.js` holds the scene, camera rig, input, HUD and menus. It turns `Game`
-  events into visuals and sound.
+- `src/main.js` holds the scene, input, HUD and menus, and drives the camera rig.
+  It turns `Game` events into visuals and sound.
 - `test/` holds the headless tests (`npm test`, Node 18+). They cover crater shape,
   analytic range, wind drift, the roller, AI convergence and how fast each
   difficulty walks its shots in, scenery placement and bombardment, perks, the
@@ -1038,7 +1044,8 @@ The ballistics, crater falloff and AI solver follow the Unreal project's
 the same simulator the shells fly on.
 
 `window.craterfall` exposes the live game, camera, sky, birds and sound for
-debugging from the console, with `lookAt` / `release` to pin the camera,
+debugging from the console, with `lookAt` / `release` to pin the camera
+(`rig` and `cameraMode` for the camera's state),
 `tick(dt)` to run one frame by hand and `setDay(0..1)` to hold the sun at a
 time of day.
 

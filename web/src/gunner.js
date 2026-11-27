@@ -155,7 +155,7 @@ export class AimArc {
 
 export class Gunner {
   constructor(parent) {
-    this.on = false;          // the player's choice; shown only while they aim
+    // Whether the player wants the sight is the camera's (cameramode.js CameraModes.sight).
     this.active = false;      // driving the camera this frame
     this.fov = FOV;
     const el = this.el = document.createElement('div');

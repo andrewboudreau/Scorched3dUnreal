@@ -15,12 +15,32 @@ render layout, `docs/design-guide.md` for where the design is going, and
   - `ai.js` is the CPUs.
   - The data lives in `weapons.js`, `perks.js` and `mods.js`.
 - `src/render/`: three.js meshes and effects, one file per thing.
-- `src/main.js`: the glue (HUD, camera, input, online). It's large, and several
+- `src/main.js`: the glue (HUD, input, online). It's large, and several
   agents edit it, so keep changes there small and put new UI in its own module
   (as `modsui.js`, `guide.js` and `launch.js` do).
 - `src/guide.js`: the in-game guide (Settings > Guide). It builds its lists
   from the data modules, so new weapons, perks and mods show up there on their own.
 - `vendor/three/`: three.js r187, vendored. Don't upgrade it in passing.
+
+## Architecture
+
+`main.js` is being split one piece at a time (issue #1); each piece is its own
+module, with main.js as glue.
+
+- **Camera** (`src/camera.js`, `src/cameramode.js`). `CameraRig` owns the
+  camera, the orbit controls and everything that moves them. `CameraModes`
+  (pure, tested in `test/cameramode.test.js`) holds the state: the player's
+  choices (follow, sight, overview, a look), the kill cam and the debug pin.
+  Each frame `resolve()` picks the one mode that drives the camera, in priority
+  order: menu, kill, overview, sight, hero, volley, follow, peek, plan, hold.
+  The HUD (`hudview.js`) and the marks over the tanks read that mode, so add a
+  camera behaviour as a mode or a rule there rather than a new flag in main.js.
+  main.js hands the rig its reads of the match as `deps` (see the header of
+  `camera.js`) and calls it from events (`turn`, `volley`, `cutKill`, `shake`),
+  keys (`toggleOverview`, `toggleSight`, `toggleFollow`, `peekNext`) and the
+  frame (`updateKill` before the game steps, `update` after).
+- **Next**: HUD and labels, an input router keyed by mode, and the match glue
+  (start, events, back to the menu). The plan is in the header of `camera.js`.
 
 ## Checking work
 
@@ -36,7 +56,7 @@ render layout, `docs/design-guide.md` for where the design is going, and
   another port.
 - **Browser:** check in a real browser, and add `?mobile=1` to force the touch
   layout. `window.craterfall` exposes `game`, `camera`, `lookAt(x, y, z, from)`,
-  `release()` and more for driving it from the console.
+  `release()`, `rig` and `cameraMode` and more for driving it from the console.
 
 ## The server (`module/`)
 
