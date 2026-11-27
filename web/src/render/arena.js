@@ -18,7 +18,7 @@ import { seaMaterial } from './sceneryMesh.js';
 // edge rule and the world), `event` takes the game's events, `clear` drops
 // what is in flight at a match's end.
 
-const TINT = { wall: '#ffb347', bounce: '#5fe0ff', wrap: '#c48bff' };
+const TINT = { wall: '#ffb347', bounce: '#5fe0ff', wrap: '#b45cff' };
 const MODE = { wall: 0, bounce: 1, wrap: 2 };
 const LOW = -60;          // the curtains run from here...
 const HIGH = 340;         // ...up to here, fading out towards the top (the rule itself has no top)
@@ -54,7 +54,7 @@ const curtainFrag = /* glsl */ `
       glow = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(y * 0.09 - uTime * 3.2), 6.0);
     } else {
       // Wrap: slanted bands that run along it.
-      glow = 0.35 + 0.65 * pow(0.5 + 0.5 * sin((s + y * 0.6) * 0.06 - uTime * 2.4), 5.0);
+      glow = 0.7 + 0.7 * pow(0.5 + 0.5 * sin((s + y * 0.6) * 0.06 - uTime * 2.4), 5.0);   // a steadier floor than Bounce's: violet is the faintest of the three over water
     }
     float shimmer = 0.85 + 0.15 * sin(s * 0.37 + uTime * 5.0) * sin(y * 0.23 - uTime * 3.0);
     float fade = smoothstep(${HIGH.toFixed(1)}, ${(HIGH * 0.35).toFixed(1)}, y);
@@ -70,12 +70,13 @@ const curtainFrag = /* glsl */ `
     float rimA = rim * 0.5 * fade * (0.85 + 0.15 * sin(uTime * 2.0 + s * 0.04));
     // ...and a low swell of colour at the foot of the wall, thinning out upwards.
     float foot = 0.06 * smoothstep(110.0, 0.0, y - (sea ? uBase : 0.0)) * step(-0.5, y - (sea ? uBase : -1.0e4));
-    if (uMode < 0.5) {
-      // Wall is drawn with ordinary blending, not added light: amber added to a
-      // bright sky only whitens it. The lines carry more weight to make up for it.
+    if (uMode < 0.5 || uMode > 1.5) {
+      // Wall and Wrap are drawn with ordinary blending, not added light: amber
+      // added to a bright sky only whitens it, and violet added to the Island's blue sea
+      // only turns it pale blue. The lines carry more weight to make up for it.
       gl_FragColor = vec4(uColor * (0.82 + grid * 0.18 + rim * 0.25), min(0.7, a * 1.9 + rimA + foot * 1.5));
     } else {
-      gl_FragColor = vec4(mix(uColor, vec3(1.0), rim * 0.25) * (0.7 + grid * 0.6 + rim * 0.9), a + rimA * 1.15 + foot);   // the edge lines run toward white so violet still shows on a blue sea
+      gl_FragColor = vec4(mix(uColor, vec3(1.0), rim * 0.25) * (0.7 + grid * 0.6 + rim * 0.9), a + rimA * 1.15 + foot);   // Bounce: added light, the edge lines toward white
     }
   }
 `;
@@ -123,7 +124,7 @@ export class ArenaView {
     this.rule = rule;
     this.half = half;
     const on = rule in MODE;
-    for (const c of this.curtains) { c.visible = on; c.material.blending = rule === 'wall' ? THREE.NormalBlending : THREE.AdditiveBlending; }
+    for (const c of this.curtains) { c.visible = on; c.material.blending = rule === 'wall' || rule === 'wrap' ? THREE.NormalBlending : THREE.AdditiveBlending; }
     if (!on) return;
     this.uniforms.uColor.value.set(TINT[rule]);
     this.uniforms.uMode.value = MODE[rule];
