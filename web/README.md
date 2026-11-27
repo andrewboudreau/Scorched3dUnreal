@@ -747,7 +747,8 @@ second column beside the first. On a phone the players box sits top right.
   spot, so drive or hop out of the ring; CPU allies do. Its **weak spot** is
   on top: a hit from above does 25% more. From above means an Airburst, or a
   shell or fragment coming down at least 60 degrees below the horizontal
-  (a high lob, or Flak's fragments); the bar flashes when one lands. A banner
+  (a high lob; not Flak's fragments, which always fall steeply); the bar
+  flashes when one lands. A banner
   announces each phase. **Teams:** allies are never a CPU's target, an ally's
   mods let your shells by, and hitting your ally still hurts but earns
   nothing. The round ends when one side is wiped out, and every tank left on

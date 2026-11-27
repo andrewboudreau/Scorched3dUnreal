@@ -447,3 +447,8 @@ test('a boss match runs to the end with every tank a CPU, in turns as in volleys
     if (r.team === 1) assert.ok(!g.players[0].alive && !g.players[1].alive);
   }
 });
+
+test('Flak fragments never count as from above on the boss', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../src/core/game.js', import.meta.url), 'utf8');
+  assert.match(src, /pr\.weapon !== 'flaklet' && fromAbove\(/);
+});

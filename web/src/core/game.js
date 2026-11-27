@@ -1953,8 +1953,9 @@ export class Game {
     }
     pr.dead = true;
     this.emit({ type: 'impact', id: pr.id, pos: point, ...(aloft ? { aloft: true } : {}) });
-    // From above (core/boss.js fromAbove): the boss's weak spot. Not a roller's run.
-    const above = !pr.roller && fromAbove(pr.vel, aloft);
+    // From above (core/boss.js fromAbove): the boss's weak spot. Not a roller's
+    // run, and not Flak's fragments, which rain down steeply by nature.
+    const above = !pr.roller && pr.weapon !== 'flaklet' && fromAbove(pr.vel, aloft);
     for (const fx of impactEffects(w, point)) {
       const more = { ...(struck ? { struck } : {}), ...(pr.decoy ? { decoy: pr.decoy } : {}), ...(above ? { above } : {}) };
       this.applyEffect(struck || pr.decoy || above ? { ...fx, ...more } : fx, pr.owner, directHit, pr.shot);
