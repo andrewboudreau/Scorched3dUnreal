@@ -481,7 +481,7 @@ body.touch #settings-btn { left: auto; bottom: auto; top: calc(8px + env(safe-ar
 .gn-read { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap;
   font-size: 14px; text-shadow: 0 1px 3px #000, 0 0 8px rgba(0, 0, 0, .6); }
 .gn-last { margin-top: 3px; font-size: 12px; color: #dfe6ee; }
-body.touch .gn-tape { top: 6px; width: min(560px, max(220px, calc(100vw - 360px))); height: 34px; }
+body.touch .gn-tape { top: 6px; width: min(560px, max(220px, calc(100vw - 450px))); height: 34px; }
 body.touch .gn-read { top: 66px; font-size: 13px; }
 body.touch .gn-line { top: 30%; bottom: 40%; }
 
@@ -694,3 +694,22 @@ body.touch #setup #net-rooms { max-height: none; }
 #sideview.in-sight { top: 124px; left: auto; right: 14px; transform: none; }
 body.touch #sideview { top: 6px; }
 body.touch #sideview.in-sight { top: 90px; right: calc(56px + env(safe-area-inset-right)); }
+
+/* HUD views (src/hudview.js): the shown / faint / hidden rules per view are generated from its
+   table and injected as #hud-views. What cannot be a plain fade lives here. */
+/* The aim pad: its numbers, what the last shot used, and a "drag" line that shows only the first few matches. */
+.t-top { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.t-pad .t-last { font-size: 10px; color: #c9b36a; font-variant-numeric: tabular-nums; white-space: pre; text-shadow: 0 1px 2px #000; }
+.t-pad .t-last:empty { display: none; }
+#touch.no-help .t-help { display: none; }
+/* The weapon button names the weapon and, when it is not infinite, the rounds left. */
+.t-weapon { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+.t-weapon .t-wn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.t-weapon .t-wa { font-size: 10px; font-weight: 600; color: #ffd79a; }
+.t-weapon .t-wa:empty { display: none; }
+/* Steering a Guided Missile uses the drive cross's left and right: light it up while one flies. */
+body.touch[data-view="flight"]:has(#steer-hint:not(.hidden)) #touch .t-left { opacity: 1; visibility: visible; pointer-events: auto; }
+/* Boss matches: the bar sits top centre, so the side view drops below it (and its telegraph line); in the sight the
+   compass tape owns the top centre, so the bar moves under it at the left, where the card has shrunk to its wind. */
+body.touch:has(#boss-bar:not(.hidden)) #sideview:not(.in-sight) { top: 56px; }
+body.touch[data-view="sight"] #boss-bar { left: calc(8px + env(safe-area-inset-left)); top: 76px; transform: none; width: 190px; }

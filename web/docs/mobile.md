@@ -40,7 +40,7 @@ reaching 47.3° means nudging and waiting; a drag sets a *change*, so a 3 px mov
 0.4° correction you can feel. The weapon bar is not shown across the screen: it
 is the weapon button's pop-up, so the top of the screen stays clear. Keyboard hints
 (the help strip, weapon number keys, "press Space") are hidden or say what to tap.
-The pad shows the turret and elevation under your thumb, since the player card shrinks.
+The pad shows the turret and elevation (and what the last shot used) under your thumb, since the player card's own readout is hidden on a phone; see "What the HUD shows in each view".
 
 Things the prototype does not do yet, worth trying next:
 
@@ -80,6 +80,81 @@ flash). **iOS Safari has no vibration API**. The only trick there (an
   bottom bar, which otherwise eats about 50 px.
 - `viewport-fit=cover` with `env(safe-area-inset-*)` margins on the thumb clusters,
   the middle row and the top-left cards, so they clear the notch and home bar.
+
+## What the HUD shows in each view (the declutter audit)
+
+A landscape phone is 844 x 390, so the HUD has to give way to what you are doing.
+The principles: the 3D scene owns the screen while a shell flies; nothing needed to
+aim is ever hidden; each number is shown once; a hint teaches a few times, not every
+match. There are six views: **plan** (setting a shot, also a CPU's turn or a hand-off),
+**sight** (the gunner's view), **flight** (shells in the air, being fired, or waiting
+on the others), **kill** (the deciding shot's slow-motion replay), **overview** (the
+View map) and **between** (the round or match has ended, or the armory is open; the
+cards cover the screen).
+
+`src/hudview.js` holds the table below as data and picks the view from the game
+(`hudView()`); `main.js` writes it to `body[data-view]` once a frame, and the shown /
+faint / hidden CSS is **generated from the table** (injected as `#hud-views`), so
+this page, the code and `test/hudview.test.js` cannot drift apart. Phone rules only
+(under `body.touch`): a desktop screen has room and is unchanged, except that the
+off-screen locators also step aside in the sight there. Rows the drawing code owns
+(side view, dials, marks, locators, notes) are in the table but driven by that code.
+
+| Element | plan | sight | flight | kill | overview | between | Why |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Player card | shown | shown | hidden | hidden | faint | hidden | Your tank. The sight keeps only its wind (the one number the sight does not show), the shell is the show in flight, and the map wants the field clear. |
+| Card: name, health, fuel, jets, round | shown | hidden | hidden | hidden | shown | hidden | What you check while planning and driving. In the sight the compass tape and the marks say it all. |
+| Card: turret, elevation, power, weapon | hidden | hidden | hidden | hidden | hidden | hidden | The aim pad, the power strip and the weapon button already say it (the pad also says what the last shot used, the button how many rounds are left). |
+| Card: money | hidden | hidden | hidden | hidden | hidden | hidden | Only the armory spends it, and the armory shows it. |
+| Card: jump jets, none left | hidden | hidden | hidden | hidden | hidden | hidden | A row that says nothing. |
+| Players box | shown | faint | faint | hidden | shown | hidden | Everyone's health. The sight's marks carry health, a followed shell wants the field clear. |
+| Players box: perk chips | shown | hidden | hidden | hidden | shown | hidden | They stretch the box down over the side view in the sight; nothing to read mid-flight. |
+| Settings gear | shown | shown | faint | hidden | shown | shown | Always reachable; faint while a shell flies. |
+| Side view of the shot | shown | moved | hidden | hidden | hidden | hidden | Only means something while you set the shot; in the sight it moves under the players box. |
+| Angle dials on your tank | shown | hidden | hidden | hidden | hidden | hidden | The sight, the map and a shell in flight hide them. |
+| Marks over tanks | shown | shown | faint | shown | shown | shown | Names while planning; names and health in the sight, the map and a Find look; faint while following a shell; names only in the kill cam. |
+| Edge arrows to off-screen enemies | shown | hidden | hidden | hidden | hidden | hidden | The sight draws its own markers for what is off to the side; they are for aiming, so only while you plan. |
+| Aim pad and its readout | shown | shown | hidden | hidden | shown | hidden | The thumb's aim; nothing to aim once the shot has left. Its "drag" line shows only the first few matches. |
+| Power strip | shown | shown | hidden | hidden | shown | hidden | As the pad. |
+| Lock in, weapon, sight, x2 and mods | shown | shown | hidden | hidden | shown | hidden | Buttons for the shot you are setting. |
+| Drive cross and Jet | shown | faint | faint | hidden | faint | hidden | Faint but live: steering a Guided Missile in flight lights it back up. |
+| Fine, Find, View, Chat | shown | shown | faint | hidden | shown | hidden | View and Find still work in flight, and a faint button is still a button. |
+| Boss bar | shown | moved | shown | hidden | shown | hidden | The fight's health bar; in the sight it moves left, off the compass tape. In plan the side view drops below it. |
+| Guidance strip | hidden | hidden | shown | hidden | hidden | hidden | Only while a Guided Missile flies. |
+| Your tank in the corner | hidden | hidden | shown | hidden | hidden | hidden | Only in flight, with your tank off screen. |
+| Rangefinder card | hidden | hidden | hidden | hidden | hidden | hidden | Too big for a phone (already cut on a short screen); the probes' dots and beams in the world still show. |
+| Touch notes (the hint line) | shown | shown | shown | hidden | shown | hidden | Short, one line. The SIGHT, pad and Lock in teaching ones show the first few matches only. |
+| Kill cam caption | hidden | hidden | hidden | shown | hidden | hidden | The deciding shot, "A to B". |
+
+What changed in this pass (all phone only unless it says otherwise):
+
+- **The card is half the size.** Its turret / elevation / power / weapon block, the
+  money row and an empty jump-jet row went: the pad and strip show the same numbers.
+  What the readout alone carried moved: the pad has a small "last 359.0° 45.0° 60"
+  line (what your previous shot used), and the weapon button shows the rounds left
+  under its name (nothing for an infinite weapon).
+- **Flight.** A phone's thumbs have nothing to do while a shell flies, so the aim
+  pad, power strip, Lock in cluster and the card fade out; the drive cross, Find /
+  View, the gear and the players box go faint. The scene is clear but for the shells
+  and faint marks. Touches in the empty thumb areas orbit the camera. A Guided Missile
+  lights the drive cross back up (◀ ▶ steer it).
+- **Sight.** The card shrinks to its wind (nothing else on the screen says it), the
+  players box goes faint and drops its perk chips (it was growing over the side view),
+  the compass tape is narrower so it clears the players box, and the off-screen enemy
+  arrows go (on desktop too): the tape and the sight's edge markers say it.
+- **Overview.** The card fades, the drive cross fades; the map has the rest.
+- **Between rounds.** The HUD and touch controls hide the moment the round ends, so the
+  last explosion and damage numbers play out clean before the results card.
+- **Boss matches.** The boss bar used to sit on the side view; the side view now drops
+  below it, and in the sight the bar moves under the compass tape at the left.
+- **Hints show the first few times** (`src/hints.js`, counts in localStorage under
+  `craterfall.hints`): the "SIGHT looks down your barrel" note the first 3 matches,
+  the pad's "drag" line the first 5, and the "Plan it, then tap Lock in" banner line the
+  first 6 turns (after that the banner is the title alone and 1 s instead of 1.7 s).
+
+Left as it was: the angle dials' two numbers at the tank (the pad's own readout sits
+under the thumb), the locators while planning (they are how you find a tank that is
+off screen), the wind in plan (it changes every round).
 
 ## HUD, menus and the armory at small sizes
 
