@@ -212,8 +212,8 @@ mine layer.
 The next layer of the roguelike: weapons that grow in two directions, a short
 solo **run** across a small map of fights, and a **boss** at the end of it,
 fought two against one. Built in stages, each playable on its own (see Build
-order). Stages 1 and 2, the variants and the boss (in the sandbox), are built; the
-run is still a plan.
+order). Stages 1 to 3, the variants, the boss and the run, are built; the
+polish (stage 4) is next.
 
 ### Weapon variants (built)
 
@@ -272,7 +272,7 @@ Supply, Chassis).
 Upgrades stay in the tree; the armory still sells only ammo and gear. Paying
 money for upgrades would blur the one rule a player can say aloud.
 
-### The run
+### The run (built)
 
 A solo mode beside the quick match: you against CPUs across a **short map of
 fights**, kit carried from one to the next, ending in the boss. About 20 to 30
@@ -305,6 +305,42 @@ from it, and each stop's match seed comes from the run seed and the stop. A
 run's state is a small record (seed, stop, kit, ranks, money, hulls) saved in
 the browser, and later against the player id (stage 3 of Players and
 accounts) so a run follows you to another device.
+
+**As built** (`core/run.js`, on screen `runui.js`; Run on the launch screen):
+
+- **The map:** six tiers of two or three stops, then the boss: every route
+  is seven stops. Each stop of a tier joins one to three of the next (near
+  ones only, and no two paths cross); every stop can be reached, and every
+  stop leads on to the boss. The first tier is all fights. Kinds by tier:
+  Fight in every tier; a Cache can come in tiers 2, 5 and 6, an Elite in 3 to
+  5, a Depot in 4 and 6. A run usually has four or five fights before the boss.
+- **Fights:** one or two CPUs; Easy in tier 1, Normal by tier 2, Hard from
+  tier 4. One round, or one or two from tier 3. From tier 3 each CPU holds a
+  random rank (two from tier 5). The world (Rolling, Hilly and Mountains
+  twice as likely as City, Floating isles, Ridgeline or Island), wind, edges
+  and time are rolled per stop; half the stops carry a round modifier for
+  every round. Reward: $80 + $40 a tier, half the time with a weapon or two.
+- **Elites:** one Hard CPU with Point Defense or a Gravity Orbiter up from the
+  first turn (level 2 in tiers 5 and 6), and ranks. Reward: $200 + $60 a
+  tier, ammo, and a skill point on top of the win's.
+- **Caches:** a skill point, a crate (two or three weapons), or $200 + $50 a
+  tier. **Depots:** the armory at round-2 prices, and one variant swap a
+  visit (the upgrade stays).
+- **The kit** is a player's `kit` in the game's config (money, ammo, jets,
+  ranks, points, armor and fuel bought; mods from their ranks, an Elite's
+  put up at the start) and `kitOf(player)` reads it back after the match.
+  The run's matches use the Lab with mods from the skill tree. You start
+  with the usual kit, $150 and one point; points are spent from the map
+  (Skills), or between the rounds of a two-round fight.
+- **Win or lose:** a win needs a round won and no foe with more. A loss costs
+  a hull, no reward, and moves you on. A lost boss fight can be tried again
+  while a hull is left, from the kit you brought to it.
+- **The ally:** the strongest tank you beat (Elite, then Hard, Normal, Easy)
+  and the latest other one; you pick between them on the boss's card. It
+  keeps its ranks. Nobody beaten: a plain Normal CPU.
+- **Saving:** `localStorage` under `craterfall.run.v1`, after every step. A
+  save from another version, or one that does not fit its map, is dropped.
+  A match left by closing the page is played again from the start.
 
 ### The boss: two against one (built in the sandbox)
 
@@ -344,12 +380,15 @@ Each stage ships on its own:
    `?boss=1`), you and a CPU ally against it, so it can be played and tuned
    before the run exists. Teams came with it (a team per player; allies are
    never targeted and earn nothing for hitting each other).
-3. **The run:** map generation, the map screen (touch first), the stops,
-   spare hulls, saving.
+3. **The run** (built): map generation, the map screen (touch first), the
+   stops, spare hulls, saving, a result card after each fight and a plain
+   summary at the end.
 4. **Polish:** map art, reward cards, the run summary, a balance pass.
 
-Open: how long a run should be; whether the ally keeps its own skill ranks
-from the fight you beat it in; co-op runs online.
+Open: how long a run should be; co-op runs online. Money for the balance
+pass: a won fight pays its in-match money too (about $600 to $900 for a
+short one, more for big overkill hits, since damage pay is not capped at the
+health taken), which piles up between depots.
 
 ## Attributes: buffs and debuffs
 

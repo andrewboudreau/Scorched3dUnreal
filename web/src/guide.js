@@ -257,12 +257,23 @@ export function guideTabs({ weapons, items, mods, perks, modifiers, pay } = {}) 
     perkList.length ? { rows: perkList } : { p: 'No perks to list.' },
   ] });
 
+  // The run's stops (core/run.js), for the Match builder tab.
+  const RUN_ROWS = [
+    { name: 'Fight', text: 'One or two CPUs, one round or two. They get harder as the map goes on. Reward: money, sometimes ammo.' },
+    { name: 'Elite', text: 'One Hard CPU with Point Defense or a Gravity Orbiter already up. A better reward, with a skill point.' },
+    { name: 'Cache', text: 'No fight: take one of three, a skill point, a crate of ammo or money.' },
+    { name: 'Depot', text: 'No fight: the armory, and you may turn one weapon variant the other way (its upgrade stays).' },
+    { name: 'Boss', text: 'You and an ally, one of the tanks you beat on the way, against the Bulwark. Lost, you may try again while a spare hull is left.' },
+  ];
   const modifierList = modifierRows(modifiers);
   tabs.push({ id: 'match', title: 'Match builder', blocks: [
     { p: '**Play** starts you against two Normal CPUs with everything on. **Custom match**, a tab under it on the launch screen, builds your own; online the host builds it and it applies on every screen.' },
     { rows: BUILDER_ROWS },
     { h: 'Round modifiers' },
     modifierList.length ? { rows: modifierList } : { p: 'No round modifiers in this build.' },
+     { h: 'The run' },
+    { p: '**Run**, under Play, is a short campaign on your own: a map of stops from left to right (top to bottom on a phone held upright), ending at the **Bulwark**. Tap a lit stop to see its world, foes and reward, then **Go**. Your money, ammo, ranks and unspent skill points carry from fight to fight; health is whole again for each one. A fight won gives a skill point (spend it under **Skills**, on the map). A fight lost costs one of two spare hulls; with none left the run is over. The run is saved as you go: **Continue run** picks it up.' },
+    { rows: RUN_ROWS },
   ] });
 
   return tabs;

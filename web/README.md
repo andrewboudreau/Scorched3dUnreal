@@ -754,6 +754,38 @@ second column beside the first. On a phone the players box sits top right.
   nothing. The round ends when one side is wiped out, and every tank left on
   that side wins it. Online, the room's tanks are the Bulwark's foes and it
   joins as the last CPU; it runs on every screen like any CPU.
+- **The run** (**Run** on the launch screen, under Play; `src/core/run.js`,
+  on screen `src/runui.js`). A short solo campaign against CPUs across a map
+  of stops, ending at the Bulwark. The map comes from the run's seed: six
+  tiers of two or three stops, joined by paths that never cross, then the
+  boss, so every route is seven stops. Tap a lit stop to see its world, wind,
+  edges, time of day, modifier, foes and reward, then **Go**. Stops:
+  - **Fight:** one or two CPUs, one round (two from the third tier on).
+    Easy CPUs in the first tier, then Normal, then Hard; from the third tier
+    they hold a rank or two. Reward: $80 rising by $40 a tier, and half the
+    time a weapon or two.
+  - **Elite:** one Hard CPU with Point Defense or a Gravity Orbiter already up
+    (level 2 in the last two tiers). Reward: $200 + $60 a tier, ammo and a
+    skill point.
+  - **Cache:** take one of three: a skill point, a crate of ammo, or money.
+  - **Depot:** the armory (the round-2 prices), and you may turn one weapon's
+    variant the other way (its upgrade stays), once a depot.
+  - **Boss:** the boss match, you and an ally against the Bulwark. The ally is
+    one of the tanks you beat: pick from two (the strongest, and the latest
+    other) if you beat two or more; it keeps its ranks.
+
+  Every fight won gives a skill point; spend points from the map (**Skills**,
+  the same tree as between rounds; the ranks last the whole run). Your money,
+  ammo, jets, ranks (variants and mod levels too) and unspent points carry
+  from fight to fight; health is whole again for each one. The run starts with
+  the usual kit, $150 and a point. A fight lost costs one of your **two spare
+  hulls** and moves you on with no reward; with none left the run is over. A
+  lost boss fight may be tried again while a hull is left, from the kit you
+  brought to it. The run is saved in the browser after every step
+  (`localStorage`, `craterfall.run.v1`): **Continue run** picks it up, and
+  **Abandon** (tap twice) throws it away. A match left by closing the page is
+  played again from the start. At the end, a summary: the route, the fights
+  won and lost, and the build.
 - **Round modifiers.** Each round rolls one (from those ticked under Custom match) and announces it on
   the round banner; it applies to everyone alike. Clear skies (nothing, twice
   as likely as the others), Gale (the wind ×1.8, at most 3.5, so a Gale round on Gale wind stays playable), Dead calm, Low gravity,
@@ -816,6 +848,8 @@ second column beside the first. On a phone the players box sits top right.
   `src/modsui.js` is the mods' deploy buttons and status chips;
   `src/strike.js` is Double Strike's; `src/bossui.js` is the boss match's
   health bar, telegraph line and phase banners (the rules: `src/core/boss.js`).
+  `src/runui.js` (with `css/run.css`) is the run's screen: the map, the
+  stops' views, the result card and the summary (the rules: `src/core/run.js`).
 - `src/audio.js` is the synthesised sound, `src/music.js` the soundtrack.
 - `src/review.js` (with `src/packkit.js`) is the resource-pack review, loaded only by the dev server.
 - `src/core/netplay.js` runs an online match: every screen keeps its own
